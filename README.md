@@ -1,33 +1,41 @@
 # VC Portfolio Manager
 
-A minimal admin-style webapp for a US-based VC firm to manage portfolio companies with an **Entity-Canonical, Parking-Lot Ingestion** architecture.
+A premium admin-style webapp for VC firms to manage portfolio companies with an **Entity-Canonical, Parking-Lot Ingestion** architecture.
 
-**Live Demo:** http://localhost:3000 (after starting dev servers)
+**Design:** Refined Financial Tech aesthetic with dark mode, glassmorphism, and distinctive typography.
 
-![Architecture](docs/images/architecture.png)
+![Design Preview](docs/images/design-preview.png)
 
-## Core Value Proposition
+## ✨ Features
 
-- **Upload/store/browse materials reliably**
-- **Nothing gets lost** - every submission is persisted to Parking Lot immediately
-- **Future-proof** - smarter matching and ingestion can be added without refactoring
+### Core Functionality
+- **🏢 Entity Management** - Create, edit, archive portfolio companies
+- **📎 Resource Management** - Upload files, add text notes, and URLs per entity
+- **📊 Entity Status** - Active/Archived status with visual indicators
+- **🅿️ Parking Lot Ingestion** - Durable staging for all inbound content
+- **🔄 Entity Resolution** - Smart matching or manual assignment
+- **👁️ Resource Viewer** - Preview PDFs, images, and text files inline
 
-## Features
+### UI/UX Features
+- **🎨 Premium Dark Theme** - Deep navy with indigo and gold accents
+- **💫 Glassmorphism Effects** - Backdrop blur and transparency
+- **✨ Smooth Animations** - Hover effects, transitions, micro-interactions
+- **💾 Tab State Persistence** - View mode, selection preserved across navigation
+- **📱 Responsive Layout** - Adapts to different screen sizes
 
-✅ **Entity Management** - Create and manage portfolio companies  
-✅ **Resource Management** - Upload files, text, and URLs per entity  
-✅ **Artifact Tracking** - Store versioned markdown documents  
-✅ **Parking Lot Ingestion** - Durable staging for all inbound content  
-✅ **Tab State Persistence** - View state preserved when switching tabs  
-✅ **Entity Resolution** - Smart matching or manual assignment  
+## 🚀 Quick Start
 
-## Quick Start
+### Prerequisites
+- Python 3.11+
+- Node.js 18+
+
+### Setup
 
 ```powershell
 # 1. Setup Python environment
 python -m venv venv
 .\venv\Scripts\Activate.ps1
-pip install fastapi uvicorn sqlalchemy aiosqlite python-multipart pydantic pydantic-settings aiofiles
+pip install -r backend/requirements.txt
 
 # 2. Setup frontend
 cd frontend
@@ -45,7 +53,7 @@ npm run dev
 
 Open http://localhost:3000
 
-## Documentation
+## 📖 Documentation
 
 | Document | Description |
 |----------|-------------|
@@ -55,12 +63,13 @@ Open http://localhost:3000
 | [Gap Analysis](docs/GAP_ANALYSIS.md) | Comparison with PRD requirements |
 | [Design Doc](docs/plans/2025-02-27-vc-portfolio-mvp-design.md) | Original design specification |
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
 │   Frontend      │────▶│   Backend API    │────▶│   Storage       │
 │   (React)       │◄────│   (FastAPI)      │◄────│   (Local FS)    │
+│   Dark Theme    │     │                  │     │                 │
 └─────────────────┘     └──────────────────┘     └─────────────────┘
                                │
                                ▼
@@ -70,31 +79,46 @@ Open http://localhost:3000
 ```
 
 ### Key Components
-
 - **ParkingLotManager** - Durable staging for all uploads
-- **EntityResolver** - Matches uploads to existing entities or requests resolution
-- **ResourceMaterializer** - Safely moves files to entity folders (Copy→Verify→Write DB→Delete)
-- **StorageAdapter** - Abstract interface for storage (local FS now, cloud later)
+- **EntityResolver** - Matches uploads to existing entities
+- **ResourceMaterializer** - Safely moves files (Copy→Verify→Write→Delete)
+- **StorageAdapter** - Abstract interface (local FS now, cloud later)
 
-## Data Flow
+### Design System
+- **Display Font:** Playfair Display (elegant serif)
+- **Body Font:** Plus Jakarta Sans (modern geometric)
+- **Mono Font:** JetBrains Mono (code/previews)
+- **Primary Colors:** Deep navy `#0a0a0f`, Indigo `#6366f1`, Gold `#fbbf24`
+
+## 💾 Data Flow
 
 ### Creating an Entity
-
-1. User uploads files/text/URLs with entity name
+1. User fills form with name, website, optional content
 2. Content saved to Parking Lot immediately
-3. EntityResolver attempts to match by name
-4. If no match → auto-creates new entity
-5. ResourceMaterializer copies files to entity folder
-6. User sees new entity with all resources
+3. EntityResolver attempts name match
+4. Auto-creates entity and materializes resources
+5. User sees new entity with all content
 
 ### Uploading to Existing Entity
+1. Open entity detail
+2. Click "+ Add" → choose File, Text, or URL
+3. Content saved to Parking Lot
+4. Auto-attached to current entity
+5. Resources list updates immediately
 
-1. User clicks "Upload" in entity detail
-2. Content saved to Parking Lot
-3. EntityResolver matches by provided entity_id
-4. Files immediately attached to entity
+### Editing Entity Metadata
+1. Hover over entity card/row
+2. Click ✏️ (edit) button
+3. Edit name, website, or status
+4. Auto-formats website URL (prepends https:// if missing)
 
-## File Storage
+### Archiving Entities
+1. Hover over entity card/row
+2. Click 📥 (archive) or 📂 (unarchive) button
+3. Entity status toggles
+4. Visual indicators show archived state
+
+## 📁 File Storage
 
 ```
 data/entities/
@@ -108,7 +132,7 @@ data/entities/
     └── artifacts/{artifact_id}/    # Versioned markdown
 ```
 
-## Tech Stack
+## 🛠️ Tech Stack
 
 **Backend:**
 - Python 3.11+
@@ -117,38 +141,35 @@ data/entities/
 - Local filesystem storage
 
 **Frontend:**
-- React 18
-- TypeScript
+- React 18 + TypeScript
 - Vite
 - SWR (data fetching)
+- CSS Variables (design system)
 
-## API Highlights
+## 📋 API Highlights
 
 ```bash
-# Ingest content
+# Ingest content (files, text, URLs)
 POST /ingest/resources
-  - files, text, urls
-  - optional: entity_id, entity_hint_name
 
-# Returns:
-# - resolved: auto-attached to entity
-# - resolution_required: user must choose
-# - failed: error occurred
+# Manage entities
+GET    /entities
+POST   /entities
+PATCH  /entities/{id}    # Update name, website, status
+DELETE /entities/{id}
 
 # Manage parking lot
-GET /parkinglot
-POST /parkinglot/{id}/resolve
-  - { entity_id } or { create_entity: { name } }
+GET    /parkinglot
+POST   /parkinglot/{id}/resolve
 
-# Browse portfolio
-GET /entities
+# Browse resources/artifacts
 GET /entities/{id}/resources
 GET /entities/{id}/artifacts
 ```
 
 See [API Reference](docs/API_REFERENCE.md) for complete documentation.
 
-## MVP Acceptance Criteria
+## ✅ MVP Acceptance Criteria
 
 | Criteria | Status |
 |----------|--------|
@@ -159,29 +180,44 @@ See [API Reference](docs/API_REFERENCE.md) for complete documentation.
 | Filesystem correctness | ✅ |
 | Entity detail separation | ✅ |
 | Local-only MVP | ✅ |
+| Resource viewer | ✅ |
+| Entity edit/archive | ✅ |
+| Premium UI/UX | ✅ |
 
-**Result: 7/7 Pass** ✅
+**Result: 10/10 Pass** ✅
 
-## Known Limitations
+## 🎯 Recent Updates
 
-1. **No File Viewer** - Files can be uploaded but not viewed in-app (stored on disk)
-2. **No Artifact Viewer** - Markdown artifacts listed but not rendered
-3. **No Search** - Out of scope for MVP
-4. **No Authentication** - Single-user local deployment
+### UI/UX Redesign
+- Complete dark theme with glassmorphism
+- Distinctive typography (Playfair Display + Plus Jakarta Sans)
+- Smooth animations and micro-interactions
+- Gold accent colors for archived states
 
-See [Gap Analysis](docs/GAP_ANALYSIS.md) for details.
+### New Features
+- **Entity Edit Modal** - Edit name, website, status
+- **Archive/Unarchive** - Toggle entity status with visual indicators
+- **Resource Types** - Add files, text notes, or URLs from entity detail
+- **Resource Viewer** - Preview PDFs, images, and text inline
+- **URL Auto-formatting** - Website field auto-prepends https://
+- **Schema-driven Forms** - Centralized metadata configuration
 
-## Future Extensions
+### Improvements
+- Consistent modal design across all components
+- Better PDF viewer (no double scrollbars)
+- Archive buttons alongside edit buttons
+- Visual distinction for archived entities
 
-The architecture supports:
+## 🔮 Future Extensions
 
 - **Email/IM ingestion** - Add new `source` values
 - **Smarter matching** - Update `EntityResolver` only
 - **Cloud storage** - Swap `StorageAdapter` implementation
 - **Artifact generation** - Write markdown directly
+- **Search/Filtering** - Add search endpoints
 - **Multi-tenancy** - Add `tenant_id` to tables
 
-## Project Structure
+## 📂 Project Structure
 
 ```
 vc-agent/
@@ -189,24 +225,25 @@ vc-agent/
 │   ├── app/
 │   │   ├── routers/      # API endpoints
 │   │   └── services/     # Business logic
-│   └── run.py
+│   └── requirements.txt
 ├── frontend/             # React application
 │   └── src/
 │       ├── components/   # UI components
 │       ├── hooks/        # Data hooks
 │       ├── services/     # API client
-│       └── store/        # State management
+│       ├── store/        # State management
+│       └── styles/       # Design system
 ├── data/                 # Runtime data (gitignored)
 └── docs/                 # Documentation
 ```
 
-## Contributing
+## 🤝 Contributing
 
 1. Read the [Developer Guide](docs/DEVELOPER_GUIDE.md)
 2. Check [Architecture](docs/ARCHITECTURE.md) for design patterns
-3. Run tests and verify acceptance criteria
+3. Follow the existing code style
 4. Update documentation
 
-## License
+## 📄 License
 
 MIT

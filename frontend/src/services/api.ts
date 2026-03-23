@@ -1,4 +1,4 @@
-import { Entity, Resource, Artifact, IngestItem, IngestResponse } from '../types';
+import { Entity, EntityUpdateData, Resource, Artifact, IngestItem, IngestResponse } from '../types';
 
 const API_BASE = '/api';
 
@@ -30,7 +30,7 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       }),
-    update: (id: string, data: Partial<Entity>) =>
+    update: (id: string, data: Partial<EntityUpdateData>) =>
       fetchJson<Entity>(`/entities/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },

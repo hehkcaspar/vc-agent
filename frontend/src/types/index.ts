@@ -80,3 +80,52 @@ export interface TabState {
   selectedEntityId?: string;
   searchQuery: string;
 }
+
+// ============== Entity Metadata Form Configuration ==============
+// This defines all editable entity metadata fields.
+// BOTH CreateEntityModal and EditEntityModal use this configuration.
+// When backend EntityUpdate schema changes, update this config to automatically sync both modals.
+
+export interface EntityMetadataField {
+  name: keyof EntityUpdateData;
+  label: string;
+  type: 'text' | 'url' | 'select' | 'textarea';
+  required: boolean;
+  placeholder?: string;
+  options?: { value: string; label: string }[];  // For select type
+}
+
+export interface EntityUpdateData {
+  name: string;
+  website?: string;
+  status?: 'active' | 'archived';
+}
+
+// Single source of truth for entity metadata form fields
+// Modify this array when backend EntityUpdate schema changes
+export const ENTITY_METADATA_FIELDS: EntityMetadataField[] = [
+  {
+    name: 'name',
+    label: 'Entity Name',
+    type: 'text',
+    required: true,
+    placeholder: 'e.g., Acme Corporation',
+  },
+  {
+    name: 'website',
+    label: 'Website',
+    type: 'text',  // Changed from 'url' to allow flexible input
+    required: false,
+    placeholder: 'example.com or https://example.com',
+  },
+  {
+    name: 'status',
+    label: 'Status',
+    type: 'select',
+    required: false,
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'archived', label: 'Archived' },
+    ],
+  },
+];

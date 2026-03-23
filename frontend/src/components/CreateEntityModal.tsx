@@ -1,6 +1,7 @@
 import { useState, useRef, FormEvent } from 'react';
 import { api } from '../services/api';
-import { Entity } from '../types';
+import { Entity, EntityUpdateData } from '../types';
+import { EntityMetadataForm } from './EntityMetadataForm';
 import './CreateEntityModal.css';
 
 interface CreateEntityModalProps {
@@ -8,12 +9,29 @@ interface CreateEntityModalProps {
   onSuccess: (entity: Entity) => void;
 }
 
+/**
+ * Create Entity Modal
+ * 
+ * This modal uses EntityMetadataForm for the metadata section,
+ * which automatically renders all fields defined in ENTITY_METADATA_FIELDS.
+ * 
+ * When you modify the backend EntityUpdate schema:
+ * 1. Update ENTITY_METADATA_FIELDS in types/index.ts
+ * 2. Update getEntityMetadataFields() in EntityMetadataForm.tsx
+ * 3. Both Create and Edit modals will automatically sync
+ */
 export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps) {
-  const [name, setName] = useState('');
-  const [website, setWebsite] = useState('');
+  // Metadata form state - uses the same structure as EditEntityModal
+  const [metadata, setMetadata] = useState<Partial<EntityUpdateData>>({
+    name: '',
+    website: '',
+  });
+  
+  // Additional content (files, text, URLs) - only for creation
   const [text, setText] = useState('');
   const [urls, setUrls] = useState('');
   const [files, setFiles] = useState<File[]>([]);
+  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -30,7 +48,7 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name.trim()) return;
+    if (!metadata.name?.trim()) return;
 
     setIsSubmitting(true);
     setError(null);
@@ -38,10 +56,10 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
     try {
       // Build form data for ingestion
       const formData = new FormData();
-      formData.append('entity_hint_name', name);
+      formData.append('entity_hint_name', metadata.name.trim());
       
-      if (website) {
-        formData.append('entity_hint_domain', website);
+      if (metadata.website) {
+        formData.append('entity_hint_domain', metadata.website);
       }
       
       if (text) {
@@ -73,7 +91,7 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
         // No match found - create new entity from the parking lot item
         const resolvedEntity = await api.parkingLot.resolve(
           result.ingest_id,
-          { create_entity: { name: name.trim() } }
+          { create_entity: { name: metadata.name.trim() } }
         );
         onSuccess(resolvedEntity);
       } else {
@@ -96,82 +114,77 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
 
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
-            <div className="form-group">
-              <label htmlFor="name">Entity Name *</label>
-              <input
-                id="name"
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g., Acme Corporation"
-                required
+            {/* Metadata Section - Automatically synced with EditEntityModal */}
+            <div className="form-section">
+              <h4 className="form-section-title">Entity Information</h4>
+              <EntityMetadataForm 
+                data={metadata}
+                onChange={(newData) => setMetadata(prev => ({ ...prev, ...newData }))}
+                disabled={isSubmitting}
               />
             </div>
 
-            <div className="form-group">
-              <label htmlFor="website">Website</label>
-              <input
-                id="website"
-                type="url"
-                value={website}
-                onChange={(e) => setWebsite(e.target.value)}
-                placeholder="https://example.com"
-              />
-            </div>
+            <hr className="form-divider" />
 
-            <div className="form-group">
-              <label>Files</label>
-              <div 
-                className="file-input"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  onChange={handleFileSelect}
-                />
-                <div>📁 Click to select files</div>
-                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                  PDF, images, text files
+            {/* Content Section - Only for creation */}
+            <div className="form-section">
+              <h4 className="form-section-title">Content (Optional)</h4>
+              
+              <div className="form-group">
+                <label>Files</label>
+                <div 
+                  className="file-input"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    onChange={handleFileSelect}
+                  />
+                  <div>📁 Click to select files</div>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                    PDF, images, text files
+                  </div>
                 </div>
+                {files.length > 0 && (
+                  <div className="file-list">
+                    {files.map((file, index) => (
+                      <div key={index} className="file-tag">
+                        {file.name}
+                        <button 
+                          type="button"
+                          onClick={() => removeFile(index)}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              {files.length > 0 && (
-                <div className="file-list">
-                  {files.map((file, index) => (
-                    <div key={index} className="file-tag">
-                      {file.name}
-                      <button 
-                        type="button"
-                        onClick={() => removeFile(index)}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
-            <div className="form-group">
-              <label htmlFor="text">Notes / Text</label>
-              <textarea
-                id="text"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                placeholder="Enter any notes or text content..."
-              />
-            </div>
+              <div className="form-group">
+                <label htmlFor="text">Notes / Text</label>
+                <textarea
+                  id="text"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  placeholder="Enter any notes or text content..."
+                  rows={3}
+                />
+              </div>
 
-            <div className="form-group">
-              <label htmlFor="urls">URLs (one per line)</label>
-              <textarea
-                id="urls"
-                value={urls}
-                onChange={(e) => setUrls(e.target.value)}
-                placeholder="https://example.com&#10;https://another-link.com"
-                rows={3}
-              />
+              <div className="form-group">
+                <label htmlFor="urls">URLs (one per line)</label>
+                <textarea
+                  id="urls"
+                  value={urls}
+                  onChange={(e) => setUrls(e.target.value)}
+                  placeholder="https://example.com&#10;https://another-link.com"
+                  rows={2}
+                />
+              </div>
             </div>
 
             {error && <div className="error-message">{error}</div>}
@@ -189,7 +202,7 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
             <button 
               type="submit" 
               className="btn-primary"
-              disabled={isSubmitting || !name.trim()}
+              disabled={isSubmitting || !metadata.name?.trim()}
             >
               {isSubmitting ? 'Creating...' : 'Create Entity'}
             </button>

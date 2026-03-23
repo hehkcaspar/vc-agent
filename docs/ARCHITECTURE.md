@@ -296,14 +296,19 @@ App
             │   └── CreateButton
             ├── ViewToggle (list/grid)
             ├── EntityList/EntityGrid
-            │   └── EntityCard/EntityRow
+            │   └── EntityCard/EntityRow (with Edit & Archive buttons)
             ├── CreateEntityModal
+            │   └── EntityMetadataForm (schema-driven)
+            ├── EditEntityModal
+            │   └── EntityMetadataForm (shared config)
             ├── ParkingLotModal
             └── EntityDetail (when selected)
                 ├── Header (Back button)
-                ├── ResourcesZone
-                │   ├── UploadButton
-                │   └── ResourceList
+                ├── ResourcesZoneWithHeader
+                │   ├── ZoneHeader (dynamic: title or preview controls)
+                │   ├── AddResourceMenu (dropdown: File/Text/URL)
+                │   ├── ResourceList
+                │   └── ResourcePreview (PDF/Image/Text viewer)
                 └── ArtifactsZone
                     └── ArtifactList
 ```
@@ -314,6 +319,69 @@ App
 2. **No Authentication**: MVP has no auth (single-user local deployment)
 3. **CORS**: Configured for development (`*`)
 4. **File Uploads**: No size limits in MVP (add for production)
+
+## Design System Architecture
+
+### Schema-Driven Forms
+
+Entity metadata fields are defined once and used everywhere:
+
+**Configuration** (`frontend/src/types/index.ts`):
+```typescript
+export const ENTITY_METADATA_FIELDS: EntityMetadataField[] = [
+  {
+    name: 'name',
+    label: 'Entity Name',
+    type: 'text',
+    required: true,
+    placeholder: 'e.g., Acme Corporation',
+  },
+  {
+    name: 'website',
+    label: 'Website',
+    type: 'text',
+    required: false,
+    placeholder: 'example.com or https://example.com',
+  },
+  {
+    name: 'status',
+    label: 'Status',
+    type: 'select',
+    required: false,
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'archived', label: 'Archived' },
+    ],
+  },
+];
+```
+
+**Benefits:**
+- Single source of truth for form fields
+- Create and Edit modals automatically stay in sync
+- Adding new fields updates both modals automatically
+- Type-safe with TypeScript
+
+### CSS Architecture
+
+**Design Tokens** (`frontend/src/styles/variables.css`):
+- Colors: Background, brand, accent, text, semantic
+- Typography: Font families, sizes
+- Spacing: Consistent scale (0.25rem to 3rem)
+- Radii: Border radius scale
+- Shadows: Elevation system
+- Transitions: Timing functions
+
+**Global Styles** (`frontend/src/styles/global.css`):
+- CSS reset
+- Base element styles
+- Utility animations
+- Scrollbar styling
+
+**Component Styles:**
+- Each component has its own CSS file
+- Uses CSS variables from design system
+- No inline styles (maintainability)
 
 ## Extension Points
 

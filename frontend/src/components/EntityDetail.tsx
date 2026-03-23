@@ -4,6 +4,13 @@ import { useEntityResources, useEntityArtifacts } from '../hooks/useEntities';
 import { api } from '../services/api';
 import './EntityDetail.css';
 
+// Resource types that can be added
+const RESOURCE_TYPES = [
+  { id: 'file', label: '📁 File', description: 'Upload PDF, images, text files' },
+  { id: 'text', label: '📝 Text Note', description: 'Add a text or markdown note' },
+  { id: 'url', label: '🔗 URL', description: 'Add a web link' },
+] as const;
+
 interface EntityDetailProps {
   entity: Entity;
   onBack: () => void;
@@ -34,21 +41,12 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
       </div>
 
       <div className="entity-zones">
-        <div className="zone">
-          <div className="zone-header">
-            <h3>
-              📎 Resources
-              <span className="zone-count">
-                ({resources?.length || 0})
-              </span>
-            </h3>
-            <UploadButton 
-              entityId={entity.id} 
-              onSuccess={mutateResources}
-            />
-          </div>
-          <ResourcesZone resources={resources} isLoading={resourcesLoading} entityId={entity.id} />
-        </div>
+        <ResourcesZoneWithHeader 
+          entityId={entity.id}
+          resources={resources}
+          isLoading={resourcesLoading}
+          onSuccess={mutateResources}
+        />
 
         <div className="zone">
           <div className="zone-header">
@@ -66,34 +64,119 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   );
 }
 
-interface UploadButtonProps {
+interface AddResourceMenuProps {
   entityId: string;
   onSuccess: () => void;
 }
 
-function UploadButton({ entityId, onSuccess }: UploadButtonProps) {
+function AddResourceMenu({ entityId, onSuccess }: AddResourceMenuProps) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [activeModal, setActiveModal] = useState<'file' | 'text' | 'url' | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  // Close menu when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setIsMenuOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleSuccess = () => {
+    setActiveModal(null);
+    setIsMenuOpen(false);
+    onSuccess();
+  };
+
+  return (
+    <>
+      <div className="add-resource-menu" ref={menuRef}>
+        <button
+          className="upload-btn"
+          onClick={() => setIsMenuOpen(!isMenuOpen)}
+        >
+          + Add
+        </button>
+        
+        {isMenuOpen && (
+          <div className="resource-type-dropdown">
+            {RESOURCE_TYPES.map((type) => (
+              <button
+                key={type.id}
+                className="resource-type-option"
+                onClick={() => {
+                  setActiveModal(type.id);
+                  setIsMenuOpen(false);
+                }}
+              >
+                <span className="resource-type-label">{type.label}</span>
+                <span className="resource-type-desc">{type.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {activeModal === 'file' && (
+        <FileUploadModal
+          entityId={entityId}
+          onClose={() => setActiveModal(null)}
+          onSuccess={handleSuccess}
+        />
+      )}
+
+      {activeModal === 'text' && (
+        <AddTextModal
+          entityId={entityId}
+          onClose={() => setActiveModal(null)}
+          onSuccess={handleSuccess}
+        />
+      )}
+
+      {activeModal === 'url' && (
+        <AddUrlModal
+          entityId={entityId}
+          onClose={() => setActiveModal(null)}
+          onSuccess={handleSuccess}
+        />
+      )}
+    </>
+  );
+}
+
+// File Upload Modal
+function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; onClose: () => void; onSuccess: () => void }) {
+  const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      setFiles(Array.from(e.target.files));
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setFiles(files.filter((_, i) => i !== index));
+  };
+
+  const handleSubmit = async () => {
+    if (files.length === 0) return;
 
     setIsUploading(true);
     try {
       const formData = new FormData();
       formData.append('entity_id', entityId);
-      
-      Array.from(files).forEach(file => {
-        formData.append('files', file);
-      });
+      files.forEach(file => formData.append('files', file));
 
       const result = await api.ingest.resources(formData);
 
       if (result.status === 'resolved') {
         onSuccess();
       } else if (result.status === 'resolution_required') {
-        // Should not happen since we provided entity_id, but handle gracefully
         await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
         onSuccess();
       } else {
@@ -103,43 +186,187 @@ function UploadButton({ entityId, onSuccess }: UploadButtonProps) {
       alert('Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'));
     } finally {
       setIsUploading(false);
-      // Reset file input
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
   };
 
   return (
-    <>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        onChange={handleFileSelect}
-        style={{ display: 'none' }}
-        disabled={isUploading}
-      />
-      <button
-        className="upload-btn"
-        onClick={() => fileInputRef.current?.click()}
-        disabled={isUploading}
-      >
-        {isUploading ? '⏳ Uploading...' : '+ Upload'}
-      </button>
-    </>
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Upload Files</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <div className="file-input" onClick={() => fileInputRef.current?.click()}>
+              <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} />
+              <div>📁 Click to select files</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                PDF, images, text files
+              </div>
+            </div>
+            {files.length > 0 && (
+              <div className="file-list">
+                {files.map((file, index) => (
+                  <div key={index} className="file-tag">
+                    {file.name}
+                    <button type="button" onClick={() => removeFile(index)}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onClose} disabled={isUploading}>Cancel</button>
+          <button className="btn-primary" onClick={handleSubmit} disabled={isUploading || files.length === 0}>
+            {isUploading ? 'Uploading...' : 'Upload'}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
-function ResourcesZone({ 
-  resources, 
-  isLoading,
-  entityId
-}: { 
-  resources?: Resource[]; 
-  isLoading: boolean;
+// Add Text Modal
+function AddTextModal({ entityId, onClose, onSuccess }: { entityId: string; onClose: () => void; onSuccess: () => void }) {
+  const [content, setContent] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    if (!content.trim()) return;
+
+    setIsSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('entity_id', entityId);
+      formData.append('text', content);
+
+      const result = await api.ingest.resources(formData);
+
+      if (result.status === 'resolved') {
+        onSuccess();
+      } else if (result.status === 'resolution_required') {
+        await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
+        onSuccess();
+      } else {
+        alert('Failed: ' + result.error);
+      }
+    } catch (err) {
+      alert('Error: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Add Text Note</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <label>Notes / Text *</label>
+            <textarea
+              value={content}
+              onChange={(e) => setContent(e.target.value)}
+              placeholder="Enter your notes or text content..."
+              rows={10}
+              required
+            />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+          <button 
+            className="btn-primary" 
+            onClick={handleSubmit} 
+            disabled={isSubmitting || !content.trim()}
+          >
+            {isSubmitting ? 'Adding...' : 'Add Note'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Add URL Modal
+function AddUrlModal({ entityId, onClose, onSuccess }: { entityId: string; onClose: () => void; onSuccess: () => void }) {
+  const [urls, setUrls] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleSubmit = async () => {
+    const urlList = urls.split('\n').map(u => u.trim()).filter(Boolean);
+    if (urlList.length === 0) return;
+
+    setIsSubmitting(true);
+    try {
+      const formData = new FormData();
+      formData.append('entity_id', entityId);
+      formData.append('urls', JSON.stringify(urlList));
+
+      const result = await api.ingest.resources(formData);
+
+      if (result.status === 'resolved') {
+        onSuccess();
+      } else if (result.status === 'resolution_required') {
+        await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
+        onSuccess();
+      } else {
+        alert('Failed: ' + result.error);
+      }
+    } catch (err) {
+      alert('Error: ' + (err instanceof Error ? err.message : 'Unknown error'));
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Add URLs</h3>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        <div className="modal-body">
+          <div className="form-group">
+            <label>URLs (one per line) *</label>
+            <textarea
+              value={urls}
+              onChange={(e) => setUrls(e.target.value)}
+              placeholder="https://example.com&#10;https://another-link.com"
+              rows={6}
+              required
+            />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn-secondary" onClick={onClose} disabled={isSubmitting}>Cancel</button>
+          <button 
+            className="btn-primary" 
+            onClick={handleSubmit} 
+            disabled={isSubmitting || !urls.trim()}
+          >
+            {isSubmitting ? 'Adding...' : 'Add URLs'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ResourcesZoneWithHeaderProps {
   entityId: string;
-}) {
+  resources?: Resource[];
+  isLoading: boolean;
+  onSuccess: () => void;
+}
+
+function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: ResourcesZoneWithHeaderProps) {
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<'text' | 'image' | 'pdf' | 'unsupported' | null>(null);
@@ -211,87 +438,105 @@ function ResourcesZone({
     }
   };
 
-  if (isLoading) {
-    return <div className="empty-zone">Loading...</div>;
-  }
+  // Determine header content based on whether we're in preview mode
+  const isPreviewMode = selectedResource !== null;
 
-  if (!resources || resources.length === 0) {
-    return <div className="empty-zone">No resources yet</div>;
-  }
-
-  // Show preview mode when a resource is selected
-  if (selectedResource) {
-    return (
-      <div className="resource-preview">
-        <div className="preview-header">
-          <button className="back-btn" onClick={handleBack}>
-            ← Back to list
-          </button>
-          <div className="preview-title">{selectedResource.title}</div>
-          {previewType === 'unsupported' && (
-            <button className="download-btn" onClick={handleDownload}>
-              ⬇ Download
-            </button>
-          )}
-        </div>
-        <div className="preview-content">
-          {isLoadingPreview ? (
-            <div className="preview-loading">Loading...</div>
-          ) : previewType === 'text' ? (
-            <pre className="preview-text">{previewContent}</pre>
-          ) : previewType === 'image' ? (
-            <img src={previewContent!} alt={selectedResource.title} className="preview-image" />
-          ) : previewType === 'pdf' ? (
-            <iframe 
-              src={previewContent!} 
-              title={selectedResource.title}
-              className="preview-pdf"
-            />
-          ) : (
-            <div className="preview-unsupported">
-              <p>Preview not available for this file type.</p>
-              <button className="btn-primary" onClick={handleDownload}>
-                Download File
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // Show list mode
   return (
-    <div className="resource-list">
-      {resources.map(resource => (
-        <div 
-          key={resource.id} 
-          className="resource-item"
-          onClick={() => handleResourceClick(resource)}
-        >
-          <div className="resource-icon">
-            {getResourceIcon(resource.resource_type)}
-          </div>
-          <div className="resource-info">
-            <div className="resource-name">{resource.title}</div>
-            <div className="resource-meta">
-              {resource.resource_type} • {new Date(resource.created_at).toLocaleDateString()}
+    <div className="zone">
+      <div className="zone-header">
+        {isPreviewMode ? (
+          // Preview header - shows back button, filename, and download
+          <>
+            <button className="back-btn" onClick={handleBack}>
+              ← Back to list
+            </button>
+            <div className="preview-title-header">{selectedResource.title}</div>
+            {previewType === 'unsupported' && (
+              <button className="download-btn" onClick={handleDownload}>
+                ⬇ Download
+              </button>
+            )}
+          </>
+        ) : (
+          // List header - shows title and add button
+          <>
+            <h3>
+              📎 Resources
+              <span className="zone-count">
+                ({resources?.length || 0})
+              </span>
+            </h3>
+            <AddResourceMenu entityId={entityId} onSuccess={onSuccess} />
+          </>
+        )}
+      </div>
+      
+      <div className="zone-content">
+        {isLoading ? (
+          <div className="empty-zone">Loading...</div>
+        ) : !resources || resources.length === 0 ? (
+          <div className="empty-zone">No resources yet</div>
+        ) : isPreviewMode ? (
+          // Preview content
+          <div className="resource-preview">
+            <div className="preview-content">
+              {isLoadingPreview ? (
+                <div className="preview-loading">Loading...</div>
+              ) : previewType === 'text' ? (
+                <pre className="preview-text">{previewContent}</pre>
+              ) : previewType === 'image' ? (
+                <img src={previewContent!} alt={selectedResource.title} className="preview-image" />
+              ) : previewType === 'pdf' ? (
+                <iframe 
+                  src={previewContent!} 
+                  title={selectedResource.title}
+                  className="preview-pdf"
+                />
+              ) : (
+                <div className="preview-unsupported">
+                  <p>Preview not available for this file type.</p>
+                  <button className="btn-primary" onClick={handleDownload}>
+                    Download File
+                  </button>
+                </div>
+              )}
             </div>
           </div>
-          {resource.url ? (
-            <a 
-              href={resource.url} 
-              target="_blank" 
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-            >
-              ↗
-            </a>
-          ) : (
-            <span className="view-indicator">👁</span>
-          )}
-        </div>
-      ))}
+        ) : (
+          // List content
+          <div className="resource-list">
+            {resources.map(resource => (
+              <div 
+                key={resource.id} 
+                className="resource-item"
+                onClick={() => handleResourceClick(resource)}
+              >
+                <div className="resource-icon">
+                  {getResourceIcon(resource.resource_type)}
+                </div>
+                <div className="resource-info">
+                  <div className="resource-name">{resource.title}</div>
+                  <div className="resource-meta">
+                    {resource.resource_type} • {new Date(resource.created_at).toLocaleDateString()}
+                  </div>
+                </div>
+                {resource.url ? (
+                  <a 
+                    href={resource.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ↗
+                  </a>
+                ) : (
+                  <span className="view-indicator">👁</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

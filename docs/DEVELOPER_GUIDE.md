@@ -21,7 +21,7 @@ python -m venv venv
 .\venv\Scripts\Activate.ps1
 
 # Install backend dependencies
-pip install fastapi uvicorn sqlalchemy aiosqlite python-multipart pydantic pydantic-settings aiofiles
+pip install -r backend/requirements.txt
 
 # Install frontend dependencies
 cd frontend
@@ -70,53 +70,129 @@ Frontend: http://localhost:3000
 vc-agent/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py              # FastAPI entry point
-│   │   ├── config.py            # Settings
-│   │   ├── models.py            # SQLAlchemy models
-│   │   ├── schemas.py           # Pydantic schemas
-│   │   ├── database.py          # DB connection
+│   │   ├── main.py                  # FastAPI entry point
+│   │   ├── config.py                # Settings
+│   │   ├── models.py                # SQLAlchemy models
+│   │   ├── schemas.py               # Pydantic schemas
+│   │   ├── database.py              # DB connection
 │   │   ├── routers/
-│   │   │   ├── entities.py      # Entity CRUD
-│   │   │   ├── ingest.py        # Ingestion endpoint
-│   │   │   └── parkinglot.py    # Parking lot management
+│   │   │   ├── entities.py          # Entity CRUD + resources/artifacts
+│   │   │   ├── ingest.py            # Ingestion endpoint
+│   │   │   └── parkinglot.py        # Parking lot management
 │   │   └── services/
-│   │       ├── storage.py       # Storage adapter
-│   │       ├── parking.py       # Parking lot manager
-│   │       ├── resolver.py      # Entity resolver
-│   │       └── materializer.py  # Resource materializer
-│   ├── run.py                   # Development server
-│   └── cleanup_parkinglot.py    # Cleanup utility
+│   │       ├── storage.py           # Storage adapter
+│   │       ├── parking.py           # Parking lot manager
+│   │       ├── resolver.py          # Entity resolver
+│   │       └── materializer.py      # Resource materializer
+│   ├── requirements.txt
+│   └── run.py                       # Development server
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Layout.tsx       # App layout with sidebar
-│   │   │   ├── PortfolioTab.tsx # Main portfolio view
-│   │   │   ├── EntityDetail.tsx # Entity detail view
+│   │   │   ├── Layout.tsx           # App layout with sidebar
+│   │   │   ├── PortfolioTab.tsx     # Main portfolio view
+│   │   │   ├── EntityDetail.tsx     # Entity detail with resource viewer
 │   │   │   ├── CreateEntityModal.tsx
+│   │   │   ├── EditEntityModal.tsx  # Edit entity metadata
+│   │   │   ├── EntityMetadataForm.tsx
 │   │   │   └── ParkingLotModal.tsx
 │   │   ├── hooks/
-│   │   │   ├── useEntities.ts   # Entity data hooks
-│   │   │   └── useParkingLot.ts # Parking lot hooks
+│   │   │   ├── useEntities.ts       # Entity data hooks
+│   │   │   └── useParkingLot.ts     # Parking lot hooks
 │   │   ├── services/
-│   │   │   └── api.ts           # API client
+│   │   │   └── api.ts               # API client
 │   │   ├── store/
-│   │   │   └── TabContext.tsx   # Tab state persistence
+│   │   │   └── TabContext.tsx       # Tab state persistence
+│   │   ├── styles/
+│   │   │   ├── variables.css        # Design system tokens
+│   │   │   └── global.css           # Global styles
 │   │   └── types/
-│   │       └── index.ts         # TypeScript types
-│   ├── package.json
+│   │       └── index.ts             # TypeScript types + field config
+│   ├── index.html                   # Google Fonts loaded here
 │   └── vite.config.ts
 │
-├── data/                        # Runtime data (gitignored)
-│   ├── entities/                # File storage
-│   └── vc_portfolio.db          # SQLite database
+├── data/                            # Runtime data (gitignored)
+│   ├── entities/                    # File storage
+│   └── vc_portfolio.db              # SQLite database
 │
-└── docs/                        # Documentation
-    ├── API_REFERENCE.md
-    ├── ARCHITECTURE.md
-    ├── GAP_ANALYSIS.md
-    └── plans/
+└── docs/                            # Documentation
 ```
+
+---
+
+## Frontend Architecture
+
+### Design System
+
+Located in `frontend/src/styles/`:
+
+**variables.css** - CSS custom properties:
+```css
+--color-bg-primary: #0a0a0f;      /* Deep navy background */
+--color-brand-primary: #6366f1;    /* Indigo accent */
+--color-accent-gold: #fbbf24;      /* Gold accent */
+--font-display: 'Playfair Display', serif;
+--font-body: 'Plus Jakarta Sans', sans-serif;
+```
+
+**Typography:**
+- **Playfair Display** - Headings, entity names (elegant serif)
+- **Plus Jakarta Sans** - Body text, UI elements (geometric sans)
+- **JetBrains Mono** - Code blocks, text previews
+
+### State Management
+
+1. **Server State**: SWR (stale-while-revalidate)
+   - Caches API responses
+   - Auto-revalidation on focus
+   - Deduplicates requests
+
+2. **Tab State**: Context + sessionStorage
+   - Persists view mode (list/grid)
+   - Preserves scroll position
+   - Saves selected entity
+   - Survives tab switches
+
+3. **UI State**: Local React state
+   - Modal open/close
+   - Form inputs
+   - Loading states
+
+### Schema-Driven Forms
+
+Entity metadata fields are defined in `frontend/src/types/index.ts`:
+
+```typescript
+export const ENTITY_METADATA_FIELDS: EntityMetadataField[] = [
+  {
+    name: 'name',
+    label: 'Entity Name',
+    type: 'text',
+    required: true,
+    placeholder: 'e.g., Acme Corporation',
+  },
+  {
+    name: 'website',
+    label: 'Website',
+    type: 'text',  // Not 'url' - allows flexible input
+    required: false,
+    placeholder: 'example.com or https://example.com',
+  },
+  {
+    name: 'status',
+    label: 'Status',
+    type: 'select',
+    required: false,
+    options: [
+      { value: 'active', label: 'Active' },
+      { value: 'archived', label: 'Archived' },
+    ],
+  },
+];
+```
+
+Both Create and Edit modals use `EntityMetadataForm.tsx` which renders fields from this config.
 
 ---
 
@@ -152,20 +228,29 @@ MVP uses SQLite with auto-create tables. For schema changes:
 **Adding a New Component:**
 
 1. Create `.tsx` and `.css` files in `frontend/src/components/`
-2. Add to parent component
-3. Build: `npm run build`
+2. Import global styles in `main.tsx`: `import './styles/global.css'`
+3. Use CSS variables from design system
+4. Build: `npm run build`
 
-**Adding a New API Call:**
+**Adding a New Metadata Field:**
 
-1. Add method to `frontend/src/services/api.ts`
-2. Create hook in `frontend/src/hooks/` if needed
-3. Use in component
+1. Update `ENTITY_METADATA_FIELDS` in `frontend/src/types/index.ts`
+2. Update `getEntityMetadataFields()` in `EntityMetadataForm.tsx`
+3. Both Create and Edit modals automatically reflect changes
 
 **State Management:**
 
 - Server state: Use SWR hooks (e.g., `useEntities()`)
 - Tab state: Use `useTabContext()` for persistence
 - Local state: Use `useState()` for UI-only state
+
+**Styling Guidelines:**
+
+- Use CSS variables: `var(--color-bg-primary)`
+- Use spacing scale: `var(--space-4)` (1rem)
+- Use radius scale: `var(--radius-md)` (10px)
+- Add transitions: `transition: all var(--transition-fast)`
+- Use glassmorphism: `backdrop-filter: blur(20px)`
 
 ---
 
@@ -175,11 +260,12 @@ MVP uses SQLite with auto-create tables. For schema changes:
 
 **Entity CRUD:**
 - [ ] Create entity with name only
-- [ ] Create entity with files
-- [ ] Create entity with text
-- [ ] Create entity with URLs
+- [ ] Create entity with website (test auto-https)
+- [ ] Create entity with files, text, URLs
 - [ ] View entity detail
-- [ ] Edit entity name/website
+- [ ] Edit entity name/website/status
+- [ ] Archive entity (should show badge)
+- [ ] Unarchive entity
 - [ ] Delete entity
 
 **Ingestion Pipeline:**
@@ -190,17 +276,27 @@ MVP uses SQLite with auto-create tables. For schema changes:
 - [ ] Can resolve to new entity
 - [ ] Files appear in entity after resolution
 
+**Resource Management:**
+- [ ] Add file to existing entity
+- [ ] Add text note to existing entity
+- [ ] Add URL to existing entity
+- [ ] View PDF inline
+- [ ] View image inline
+- [ ] View text file inline
+- [ ] Download unsupported files
+
 **Tab State:**
 - [ ] Switch view mode (list/grid)
 - [ ] Navigate away and back
 - [ ] View mode is preserved
 - [ ] Selection is preserved
 
-**Upload to Existing:**
-- [ ] Open entity detail
-- [ ] Click Upload button
-- [ ] Select files
-- [ ] Files appear in resources list
+**UI/UX:**
+- [ ] Hover effects on cards
+- [ ] Edit/Archive buttons appear on hover
+- [ ] Modal animations smooth
+- [ ] Archived entities visually distinct
+- [ ] Responsive on different screen sizes
 
 ### API Testing with curl
 
@@ -212,6 +308,11 @@ curl http://localhost:8000/entities
 curl -X POST http://localhost:8000/entities \
   -H "Content-Type: application/json" \
   -d '{"name": "Test Company", "website": "https://test.com"}'
+
+# Update entity status
+curl -X PATCH http://localhost:8000/entities/{id} \
+  -H "Content-Type: application/json" \
+  -d '{"status": "archived"}'
 
 # Ingest with hint
 curl -X POST http://localhost:8000/ingest/resources \
@@ -225,63 +326,6 @@ curl http://localhost:8000/parkinglot
 curl -X POST http://localhost:8000/parkinglot/{ingest_id}/resolve \
   -H "Content-Type: application/json" \
   -d '{"entity_id": "uuid"}'
-```
-
----
-
-## Utilities
-
-### Parking Lot Cleanup
-
-```powershell
-# List all parking lot items
-cd backend
-..\venv\Scripts\python.exe cleanup_parkinglot.py
-
-# Clean up materialized items (keeps DB records, deletes files)
-..\venv\Scripts\python.exe cleanup_parkinglot.py --clean-materialized
-
-# Delete materialized items (DB + files)
-..\venv\Scripts\python.exe cleanup_parkinglot.py --delete
-
-# Delete ALL parking lot items (careful!)
-..\venv\Scripts\python.exe cleanup_parkinglot.py --delete-all
-
-# Clean orphaned folders (no DB record)
-..\venv\Scripts\python.exe cleanup_parkinglot.py --orphans
-```
-
-### Database Inspection
-
-```powershell
-cd backend
-..\venv\Scripts\python.exe -c "
-import asyncio
-from sqlalchemy import select
-from app.database import AsyncSessionLocal
-from app.models import Entity, IngestItem, Resource
-
-async def inspect():
-    async with AsyncSessionLocal() as db:
-        # Count entities
-        result = await db.execute(select(Entity))
-        entities = result.scalars().all()
-        print(f'Entities: {len(entities)}')
-        for e in entities:
-            print(f'  - {e.name}')
-        
-        # Count parking lot items
-        result = await db.execute(select(IngestItem))
-        items = result.scalars().all()
-        print(f'\\nParking Lot Items: {len(items)}')
-        
-        # Count resources
-        result = await db.execute(select(Resource))
-        resources = result.scalars().all()
-        print(f'\\nTotal Resources: {len(resources)}')
-
-asyncio.run(inspect())
-"
 ```
 
 ---
@@ -328,6 +372,15 @@ Check:
 1. DATA_ROOT directory exists and is writable
 2. Disk space available
 3. File size (no limit in MVP, but very large files may timeout)
+
+### TypeScript Errors
+
+```powershell
+cd frontend
+npx tsc --noEmit
+```
+
+Fix any type errors before committing.
 
 ---
 
@@ -377,10 +430,11 @@ npm run build
 ## Contributing
 
 1. Branch from `main`
-2. Make changes
-3. Test thoroughly
-4. Update documentation
-5. Submit PR
+2. Make changes following code style
+3. Test thoroughly (manual checklist)
+4. Run TypeScript checks: `npx tsc --noEmit`
+5. Update documentation
+6. Submit PR
 
 ## Resources
 
