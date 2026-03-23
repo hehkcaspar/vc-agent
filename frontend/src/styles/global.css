@@ -24,7 +24,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Background gradient mesh */
+/* Background subtle texture */
 body::before {
   content: '';
   position: fixed;
@@ -33,9 +33,9 @@ body::before {
   right: 0;
   bottom: 0;
   background: 
-    radial-gradient(ellipse at 20% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-    radial-gradient(ellipse at 80% 80%, rgba(251, 191, 36, 0.05) 0%, transparent 50%),
-    radial-gradient(ellipse at 50% 50%, rgba(99, 102, 241, 0.03) 0%, transparent 70%);
+    radial-gradient(ellipse at 20% 20%, var(--color-brand-glow) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 80%, var(--color-accent-gold-glow) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 50%, var(--color-brand-glow) 0%, transparent 70%);
   pointer-events: none;
   z-index: -1;
 }
@@ -43,9 +43,10 @@ body::before {
 /* Typography */
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-display);
-  font-weight: 600;
-  line-height: 1.2;
+  font-weight: 500;
+  line-height: 1.1;
   color: var(--color-text-primary);
+  letter-spacing: -0.01em;
 }
 
 h1 { font-size: var(--text-3xl); }
@@ -64,17 +65,20 @@ p {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-bg-secondary);
-  border-radius: 4px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-bg-elevated);
+  background: var(--color-border-hover);
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-tertiary);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 /* Selection */

@@ -1,5 +1,9 @@
 # VC Portfolio Manager - Architecture Documentation
 
+For setup and development workflow, see `DEVELOPER_GUIDE.md`.
+For API contract details, see `API_REFERENCE.md`.
+For documentation map, see `README.md`.
+
 ## Overview
 
 The VC Portfolio Manager follows an **Entity-Canonical, Parking-Lot Ingestion** architecture designed for reliability and future extensibility.

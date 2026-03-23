@@ -1,5 +1,9 @@
 # VC Portfolio Manager - API Reference
 
+For architecture/data-flow context, see `ARCHITECTURE.md`.
+For setup and local workflow, see `DEVELOPER_GUIDE.md`.
+For documentation map, see `README.md`.
+
 ## Base URL
 ```
 http://localhost:8000

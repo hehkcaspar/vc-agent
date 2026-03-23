@@ -515,10 +515,22 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
                   {getResourceIcon(resource.resource_type)}
                 </div>
                 <div className="resource-info">
-                  <div className="resource-name">{resource.title}</div>
-                  <div className="resource-meta">
-                    {resource.resource_type} • {new Date(resource.created_at).toLocaleDateString()}
-                  </div>
+              <div className="resource-name">
+                {resource.resource_type === 'url' ? (
+                  (() => {
+                    try {
+                      return new URL(resource.url || '').hostname.replace(/^www\./, '');
+                    } catch {
+                      return resource.url || resource.title;
+                    }
+                  })()
+                ) : (
+                  resource.title
+                )}
+              </div>
+              <div className="resource-meta">
+                {resource.resource_type} • {new Date(resource.created_at).toLocaleDateString()}
+              </div>
                 </div>
                 {resource.url ? (
                   <a 

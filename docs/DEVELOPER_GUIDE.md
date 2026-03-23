@@ -1,5 +1,9 @@
 # VC Portfolio Manager - Developer Guide
 
+For architecture context, see `ARCHITECTURE.md`.
+For endpoint and model contracts, see `API_REFERENCE.md`.
+For documentation map, see `README.md`.
+
 ## Quick Start
 
 ### Prerequisites
