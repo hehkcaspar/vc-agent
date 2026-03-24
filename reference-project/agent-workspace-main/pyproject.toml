@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "agent-workspace"
+version = "0.1.0"
+description = "A domain-agnostic ReAct agent that operates on file workspaces"
+requires-python = ">=3.10"
+dependencies = [
+    "langgraph>=0.2.0",
+    "langchain-openai>=0.3.0",
+    "langchain-core>=0.3.0",
+    "python-dotenv>=1.0.0",
+    "python-docx>=1.1.0",
+    "openpyxl>=3.1.0",
+    "PyMuPDF>=1.23.0",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+resume-screener = [
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "websockets>=12.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.scripts]
+agent-workspace = "agent_workspace.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agent_workspace*"]

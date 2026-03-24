@@ -1,0 +1,1 @@
+The reference-project folder contains repos of other projects only for referece purposes. One should NEVER EDIT, USE, MODIFY any codes within this folder directly, as such reference will be deleted once the project is deployed.

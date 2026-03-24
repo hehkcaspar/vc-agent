@@ -2,6 +2,10 @@
 
 .entity-detail {
   animation: fadeIn var(--transition-base) ease-out;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 /* Header */
@@ -12,6 +16,7 @@
   margin-bottom: var(--space-8);
   padding-bottom: var(--space-6);
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .back-button {
@@ -67,12 +72,16 @@
   text-decoration-color: var(--color-accent-gold);
 }
 
-/* Entity Zones */
+/* Entity Zones — minmax(0,1fr) + min-width:0 on .zone so wide preview content
+   scrolls inside the left column instead of expanding the grid and squeezing Artifacts */
 .entity-zones {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--space-8);
-  align-items: start;
+  align-items: stretch;
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 1200px) {
@@ -84,6 +93,7 @@
 @media (max-width: 900px) {
   .entity-zones {
     grid-template-columns: 1fr;
+    grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 
@@ -95,8 +105,9 @@
   padding: var(--space-8);
   display: flex;
   flex-direction: column;
-  min-height: 500px;
-  max-height: calc(100vh - 200px);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   box-shadow: var(--shadow-sm);
 }
 
@@ -114,6 +125,7 @@
   margin-bottom: var(--space-6);
   padding-bottom: var(--space-4);
   border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
 }
 
 .zone-header h3 {
@@ -215,6 +227,7 @@
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -223,9 +236,20 @@
 }
 
 .zone-content > .resource-preview,
-.zone-content > .resource-list {
+.zone-content > .resource-list,
+.zone-content > .artifact-list {
   flex: 1;
+  min-width: 0;
   min-height: 0;
+}
+
+/* Single empty / loading state fills the scroll area for a balanced card */
+.zone-content > .empty-zone:only-child {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0;
 }
 
 /* Resource List */
@@ -372,12 +396,14 @@
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   flex: 1;
 }
 
 .preview-content {
   flex: 1;
+  min-width: 0;
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -386,6 +412,7 @@
 
 .preview-content > * {
   flex: 1;
+  min-width: 0;
   min-height: 0;
 }
 
@@ -427,10 +454,97 @@
 .preview-pdf {
   width: 100%;
   height: 100%;
-  min-height: 500px;
+  min-height: 0;
   border: 1px solid var(--color-border);
   display: block;
   border-radius: var(--radius-sm);
+}
+
+.preview-html {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overflow-x: auto;
+  padding: var(--space-5);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--color-text-primary);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.preview-html .preview-sheet-title {
+  margin: var(--space-6) 0 var(--space-3);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-tertiary);
+}
+
+.preview-html .preview-sheet-title:first-child {
+  margin-top: 0;
+}
+
+.preview-html .preview-empty {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.preview-html table {
+  width: max-content;
+  max-width: 100%;
+  border-collapse: collapse;
+  margin-bottom: var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+
+.preview-html table td,
+.preview-html table th {
+  border: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
+}
+
+.preview-html table th {
+  background: var(--color-bg-tertiary);
+  font-weight: 600;
+}
+
+.preview-pptx-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 500px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  overflow: auto;
+  background: var(--color-bg-secondary);
+}
+
+.preview-pptx-host {
+  flex: 1;
+  min-height: 520px;
+  width: 100%;
+}
+
+.preview-pptx-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-tertiary);
+  z-index: 2;
 }
 
 .preview-unsupported {

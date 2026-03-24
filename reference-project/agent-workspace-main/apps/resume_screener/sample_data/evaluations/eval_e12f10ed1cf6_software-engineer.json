@@ -1,0 +1,33 @@
+{
+  "id": "eval_e12f10ed1cf6_software-engineer",
+  "resume_id": "e12f10ed1cf6",
+  "position_id": "software-engineer",
+  "candidate_name": "吴少婷",
+  "verdict": "invite",
+  "confidence": "medium",
+  "summary": "候选人吴少婷为长春理工大学人工智能专业在读学生，具备扎实的AI工程实践能力，熟悉LangChain、LangGraph、RAG、Agent等主流AI开发框架，有2个完整的从0到1项目落地经验。技术栈与职位高度匹配，但在AI编程工具的具体使用和开源贡献方面证据不足。",
+  "strengths": [
+    "AI技术栈深度匹配：熟练掌握LangChain、LangGraph、RAG、Agent等核心技术，有实际LLM应用落地经验",
+    "独立项目经验丰富：主导完成\"技成智答\"和\"古镇智链\"两个完整产品，涵盖向量检索、流式输出、对话记忆、知识图谱等核心功能",
+    "全栈开发能力：具备Python后端开发、数据库设计（PostgreSQL/SQLite/Neo4j）、API接口封装、Docker部署等综合能力",
+    "工程思维突出：在项目中体现出Prompt优化、性能调优（检索准确率从70%提升至85%+）、用户体验优化等结果导向意识",
+    "学习能力强：在校期间获得多个国家级、省级AI相关竞赛奖项，展现持续学习和技术热情"
+  ],
+  "gaps": [
+    "未明确提及日常使用Cursor、Windsurf、Claude Code、GitHub Copilot等AI编程工具，需验证是否真正理解vibe coding工作流",
+    "缺乏开源项目贡献或技术分享经历的证据",
+    "前端开发能力（React/Vue）未在简历中体现",
+    "作为在校生，实际工作年限较短，需进一步评估其独立承担复杂架构设计的能力"
+  ],
+  "experience_years": 1.5,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": false
+  },
+  "reasoning": "候选人技术栈与职位核心要求高度匹配，有可验证的AI项目落地经验和较强的工程实践能力，符合\"从0到1产品落地\"的加分项；但AI编程工具使用的具体证据不足，且作为应届生经验相对有限，故给予medium置信度的invite决定。",
+  "evaluated_at": "2026-03-12T02:22:28.768028",
+  "processing_time_seconds": 32.359814,
+  "raw_output": "**VERDICT:** invite\n**CONFIDENCE:** medium\n**CANDIDATE_NAME:** 吴少婷\n**EXPERIENCE_YEARS:** 1.5\n\n**SUMMARY:**\n候选人吴少婷为长春理工大学人工智能专业在读学生，具备扎实的AI工程实践能力，熟悉LangChain、LangGraph、RAG、Agent等主流AI开发框架，有2个完整的从0到1项目落地经验。技术栈与职位高度匹配，但在AI编程工具的具体使用和开源贡献方面证据不足。\n\n**STRENGTHS:**\n- AI技术栈深度匹配：熟练掌握LangChain、LangGraph、RAG、Agent等核心技术，有实际LLM应用落地经验\n- 独立项目经验丰富：主导完成\"技成智答\"和\"古镇智链\"两个完整产品，涵盖向量检索、流式输出、对话记忆、知识图谱等核心功能\n- 全栈开发能力：具备Python后端开发、数据库设计（PostgreSQL/SQLite/Neo4j）、API接口封装、Docker部署等综合能力\n- 工程思维突出：在项目中体现出Prompt优化、性能调优（检索准确率从70%提升至85%+）、用户体验优化等结果导向意识\n- 学习能力强：在校期间获得多个国家级、省级AI相关竞赛奖项，展现持续学习和技术热情\n\n**GAPS:**\n- 未明确提及日常使用Cursor、Windsurf、Claude Code、GitHub Copilot等AI编程工具，需验证是否真正理解vibe coding工作流\n- 缺乏开源项目贡献或技术分享经历的证据\n- 前端开发能力（React/Vue）未在简历中体现\n- 作为在校生，实际工作年限较短，需进一步评估其独立承担复杂架构设计的能力\n\n**REASONING:**\n候选人技术栈与职位核心要求高度匹配，有可验证的AI项目落地经验和较强的工程实践能力，符合\"从0到1产品落地\"的加分项；但AI编程工具使用的具体证据不足，且作为应届生经验相对有限，故给予medium置信度的invite决定。"
+}

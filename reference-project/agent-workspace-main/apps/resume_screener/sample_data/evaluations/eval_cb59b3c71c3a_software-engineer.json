@@ -1,0 +1,33 @@
+{
+  "id": "eval_cb59b3c71c3a_software-engineer",
+  "resume_id": "cb59b3c71c3a",
+  "position_id": "software-engineer",
+  "candidate_name": "王雨",
+  "verdict": "invite",
+  "confidence": "high",
+  "summary": "候选人王雨拥有扎实的计算机背景（哈工大本科+匹兹堡大学硕士），在AI算法和全栈开发领域有丰富经验。简历中明确展示了使用AI工具进行开发的经历，包括RAGFLOW开源贡献、Dify智能体搭建、Coze平台应用等，符合职位对AI协作能力的核心要求。具备从0到1的产品落地经验和独立项目交付能力。",
+  "strengths": [
+    "**AI工具深度使用**: 明确展示使用Coze、Dify、LLAMAFACTORY等AI开发框架，参与RAGFLOW开源项目贡献，具备Agent搭建和工作流优化实战经验",
+    "**全栈开发能力**: 熟练掌握Python(Django/Flask)、Java(Spring Boot)、前端技术(HTML/CSS/JavaScript)，有多数据库交互(MongoDB/Neo4j/MySQL)和API设计经验",
+    "**独立项目经验**: 从0到1完成多个产品级项目，包括AI微医生、AI包装识别、电商网站等，有真实用户场景和交付成果",
+    "**开源贡献**: 向RAGFLOW开源框架提交PR解决多点登录问题，体现技术分享和社区参与意识",
+    "**英文能力**: 托福101-110分，GRE 330-340分，2年海外留学经历，能阅读英文技术资料",
+    "**技术广度**: 熟悉AWS云原生、知识图谱、图神经网络、大语言模型应用等前沿技术栈"
+  ],
+  "gaps": [
+    "简历中未明确提及是否日常使用Cursor/Windsurf/GitHub Copilot等具体AI编程辅助工具（虽然使用了Coze/Dify等AI框架）",
+    "缺乏明确的\"vibe coding\"或快速迭代工作流的直接描述",
+    "大厂背景不明显，主要在创业公司和众包平台工作"
+  ],
+  "experience_years": 4.0,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": false
+  },
+  "reasoning": "候选人高度匹配职位核心要求：AI协作能力强（开源贡献+Agent实战）、全栈技术栈完整、有独立项目交付经验、英文能力优秀。虽有部分加分项需进一步验证，但整体符合INVITE标准。",
+  "evaluated_at": "2026-03-12T00:09:37.362126",
+  "processing_time_seconds": 13.731638,
+  "raw_output": "**VERDICT:** invite\n**CONFIDENCE:** high\n**CANDIDATE_NAME:** 王雨\n**EXPERIENCE_YEARS:** 4\n\n**SUMMARY:**\n候选人王雨拥有扎实的计算机背景（哈工大本科+匹兹堡大学硕士），在AI算法和全栈开发领域有丰富经验。简历中明确展示了使用AI工具进行开发的经历，包括RAGFLOW开源贡献、Dify智能体搭建、Coze平台应用等，符合职位对AI协作能力的核心要求。具备从0到1的产品落地经验和独立项目交付能力。\n\n**STRENGTHS:**\n- **AI工具深度使用**: 明确展示使用Coze、Dify、LLAMAFACTORY等AI开发框架，参与RAGFLOW开源项目贡献，具备Agent搭建和工作流优化实战经验\n- **全栈开发能力**: 熟练掌握Python(Django/Flask)、Java(Spring Boot)、前端技术(HTML/CSS/JavaScript)，有多数据库交互(MongoDB/Neo4j/MySQL)和API设计经验\n- **独立项目经验**: 从0到1完成多个产品级项目，包括AI微医生、AI包装识别、电商网站等，有真实用户场景和交付成果\n- **开源贡献**: 向RAGFLOW开源框架提交PR解决多点登录问题，体现技术分享和社区参与意识\n- **英文能力**: 托福101-110分，GRE 330-340分，2年海外留学经历，能阅读英文技术资料\n- **技术广度**: 熟悉AWS云原生、知识图谱、图神经网络、大语言模型应用等前沿技术栈\n\n**GAPS:**\n- 简历中未明确提及是否日常使用Cursor/Windsurf/GitHub Copilot等具体AI编程辅助工具（虽然使用了Coze/Dify等AI框架）\n- 缺乏明确的\"vibe coding\"或快速迭代工作流的直接描述\n- 大厂背景不明显，主要在创业公司和众包平台工作\n\n**REASONING:**\n候选人高度匹配职位核心要求：AI协作能力强（开源贡献+Agent实战）、全栈技术栈完整、有独立项目交付经验、英文能力优秀。虽有部分加分项需进一步验证，但整体符合INVITE标准。"
+}
