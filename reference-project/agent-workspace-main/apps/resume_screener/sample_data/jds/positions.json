@@ -1,0 +1,227 @@
+{
+  "company": "广州溯理科技有限公司 (Causally)",
+  "company_description": "AI原生应用孵化工作室，探索下一代产品形态与组织形态。人类负责定义目标与判断，AI负责执行与扩展。",
+  "positions": [
+    {
+      "id": "software-engineer",
+      "title": "软件工程师（架构/全栈方向）",
+      "department": "技术",
+      "level": "初级到资深",
+      "headcount": 2,
+      "description": "作为技术Owner，与AI协作构建端到端产品。不是写代码的人，而是定义技术方案、把控质量、驱动AI军团交付成果的架构师。",
+      "requirements": [
+        "计算机/软件工程/人工智能等相关专业本科及以上学历",
+        "扎实的计算机基础与工程思维能力",
+        "熟悉至少一种后端技术栈（Node.js/Python/Go/Java等）",
+        "有独立完成后端或全栈项目的实际经验",
+        "日常使用AI开发工具（Cursor/Windsurf/Claude/Copilot等）辅助编程",
+        "理解vibe coding工作流，习惯边写边试、快速迭代",
+        "能从业务目标拆解技术任务，有缩短反馈闭环的主动性",
+        "能阅读英文技术资料，习惯欧美技术栈",
+        "具备Ownership意识，对交付质量负责到底"
+      ],
+      "experience_levels": {
+        "junior": "在读/实习-1年：参与过2个有真实交付的项目",
+        "mid": "1-2年：参与过产品级项目的核心开发",
+        "senior": "2-5年：主导过产品级项目的架构设计或担任主程序"
+      },
+      "min_years_experience": 0,
+      "max_years_experience": 5,
+      "required_skills": [
+        "后端开发",
+        "全栈开发",
+        "AI辅助编程",
+        "系统设计",
+        "API设计",
+        "数据库",
+        "Git版本控制"
+      ],
+      "technical_keywords": [
+        "Node.js", "Python", "Go", "Java", "TypeScript",
+        "React", "Vue", "Next.js",
+        "PostgreSQL", "MongoDB", "Redis",
+        "Docker", "Kubernetes", "AWS", "阿里云",
+        "LangChain", "LangGraph", "MCP", "Agent",
+        "API", "RESTful", "GraphQL",
+        "Microservices", "Serverless"
+      ],
+      "ai_competency_indicators": [
+        "Cursor", "Windsurf", "Claude Code", "GitHub Copilot",
+        "ChatGPT", "Claude", "vibe coding", "AI编程",
+        "提示词工程", "Prompt Engineering"
+      ],
+      "nice_to_have": [
+        "大厂+小团队/创业混合背景",
+        "从0到1产品落地经验并有真实用户",
+        "Agent框架、记忆系统、上下文工程实战经验",
+        "开源项目/技术分享经历",
+        "前端开发能力（React/Vue）",
+        "DevOps/云原生经验"
+      ],
+      "screening_criteria": {
+        "strong_match": ["AI工具日常使用", "独立项目经验", "全栈能力", "开源贡献"],
+        "deal_breakers": ["不接受AI辅助编程", "纯理论无实践", "仅在大厂做螺丝钉"],
+        "concerns": ["无项目作品", "技术栈不匹配", "缺乏Ownership意识"]
+      },
+      "evaluation_focus": [
+        "是否在日常工作中深度使用AI编程工具",
+        "是否有可演示的个人项目或作品",
+        "技术广度（是否愿意跨栈协作）",
+        "学习能力和迭代速度"
+      ]
+    },
+    {
+      "id": "growth-design-lead",
+      "title": "传播与体验负责人（设计/增长方向）",
+      "department": "增长与设计",
+      "level": "初级到中级",
+      "headcount": 1,
+      "description": "作为「理解用户+表达产品」的核心角色，负责品牌调性、视觉体系、产品体验与增长实验。从品牌故事到落地页，从用户洞察到病毒传播，全流程Owner。",
+      "requirements": [
+        "视觉传达/交互设计/数字媒体/新闻传播等相关专业",
+        "对人性和审美高度敏感，理解什么样的内容会被点击和转发",
+        "能使用Figma/Adobe系列/Webflow等设计工具",
+        "有从0到1搭建网页/H5/活动页的实际作品（非纯静态稿）",
+        "深度使用AI工具（文案/设计/视频/代码生成）",
+        "对增长有体系化兴趣：病毒裂变、SEO、GEO、社媒运营、投放买量",
+        "能根据数据（转化/留存/CAC/互动）调整创意方向",
+        "作品心态，愿意为输出署名，对体验+效果整体负责",
+        "0-2年经验，思维未被大厂固化"
+      ],
+      "experience_levels": {
+        "junior": "应届-1年：有完整设计作品和至少1个上线项目",
+        "mid": "1-2年：主导过品牌或产品的从0到1冷启动"
+      },
+      "min_years_experience": 0,
+      "max_years_experience": 2,
+      "required_skills": [
+        "UI/UX设计",
+        "品牌设计",
+        "增长黑客",
+        "内容创作",
+        "前端落地能力",
+        "数据分析",
+        "AI辅助创作"
+      ],
+      "technical_keywords": [
+        "Figma", "Sketch", "Adobe XD",
+        "Photoshop", "Illustrator", "After Effects",
+        "Webflow", "Framer", "HTML/CSS",
+        "React", "Vue", "Tailwind CSS",
+        "SEO", "GEO", "AARRR", "增长黑客",
+        "小红书", "抖音", "B站", "X/Twitter",
+        "Notion", "飞书", "Airtable"
+      ],
+      "ai_competency_indicators": [
+        "Midjourney", "Stable Diffusion", "ComfyUI",
+        "ChatGPT", "Claude", "Runway", "Sora",
+        "AI设计", "AI文案", "AI视频",
+        "提示词工程", "AIGC"
+      ],
+      "nice_to_have": [
+        "运营过X/小红书/B站/抖音账号并有真实粉丝",
+        "主导过产品从0到1冷启动经验",
+        "设计+计算机跨学科背景",
+        "AIGC动画/短片/H5项目案例",
+        "海外社媒运营经验"
+      ],
+      "screening_criteria": {
+        "strong_match": ["有个人作品集", "运营过社交媒体账号", "能写代码落地设计", "做过增长实验"],
+        "deal_breakers": ["纯美工思维", "不关注数据和效果", "拒绝使用AI工具"],
+        "concerns": ["无落地作品", "只做静态稿", "不懂用户心理"]
+      },
+      "evaluation_focus": [
+        "是否有可展示的在线作品集",
+        "是否用AI工具提升设计效率",
+        "是否有数据驱动的增长思维",
+        "是否能独立将设计落地为可交互页面"
+      ]
+    },
+    {
+      "id": "office-assistant",
+      "title": "办公室助理（行政/人事/运营支持）",
+      "department": "运营",
+      "level": "初级",
+      "headcount": 1,
+      "description": "负责日常行政事务与运营支持，保障小团队高节奏稳定运转。在AI辅助下处理招聘、文档、财务对接等工作，逐步成长为运营负责人。",
+      "requirements": [
+        "本科及以上学历，管理/会计/信息管理/人力资源等相关专业优先",
+        "做事细致可靠，时间观念强，多任务并行时保持条理",
+        "良好的书面与口头沟通能力",
+        "熟练使用飞书/钉钉/Excel/Word/PPT等办公软件",
+        "愿意主动学习使用AI办公工具提升效率",
+        "有基础英文阅读能力，能处理简单英文邮件",
+        "责任心强，愿意与公司共同成长",
+        "0-2年工作经验"
+      ],
+      "experience_levels": {
+        "entry": "应届-2年：有实习或社团组织经验"
+      },
+      "min_years_experience": 0,
+      "max_years_experience": 2,
+      "required_skills": [
+        "行政管理",
+        "人事支持",
+        "文档管理",
+        "财务基础",
+        "沟通协调",
+        "AI办公工具"
+      ],
+      "technical_keywords": [
+        "飞书", "钉钉", "企业微信",
+        "Excel", "Word", "PPT",
+        "Notion", "Airtable",
+        "招聘平台", "BOSS直聘", "拉勾",
+        "报销系统", "财务软件"
+      ],
+      "ai_competency_indicators": [
+        "ChatGPT", "Claude", "Kimi", "文心一言",
+        "AI写作", "AI表格", "AI会议纪要"
+      ],
+      "nice_to_have": [
+        "创业公司行政/人事经验",
+        "项目管理或活动策划经历",
+        "熟悉广州/黄埔区人才政策",
+        "会计初级证书",
+        "英文流利"
+      ],
+      "screening_criteria": {
+        "strong_match": ["有行政/人事实习经验", "使用AI工具处理文档", "细致有条理", "沟通协调能力强"],
+        "deal_breakers": ["拒绝学习新工具", "粗心大意", "沟通能力差"],
+        "concerns": ["无相关经验", "职业规划不清晰", "稳定性存疑"]
+      },
+      "evaluation_focus": [
+        "是否有行政/人事相关经验",
+        "是否主动使用AI工具提升办公效率",
+        "文档处理和沟通协调能力",
+        "学习意愿和成长性"
+      ]
+    }
+  ],
+  "universal_traits": {
+    "title": "五大核心特质",
+    "description": "所有岗位通用评估维度",
+    "traits": [
+      {
+        "name": "结果导向思维",
+        "description": "从目标价值出发，明确问题与标准再选择路径"
+      },
+      {
+        "name": "AI协作能力",
+        "description": "把AI当队友，会提要求、会质疑、会教学、会优化"
+      },
+      {
+        "name": "前沿判断力",
+        "description": "能分辨真正的技术突破与噱头，理解趋势与边界"
+      },
+      {
+        "name": "节奏感与责任",
+        "description": "自主管理节奏，按里程碑启停，拒绝半成品"
+      },
+      {
+        "name": "作品心态",
+        "description": "把每次交付都当作个人作品，反复打磨到自己满意"
+      }
+    ]
+  }
+}

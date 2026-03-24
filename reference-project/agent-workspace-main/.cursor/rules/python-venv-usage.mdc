@@ -1,0 +1,21 @@
+---
+description: Always ensure the correct Python virtual environment is active
+alwaysApply: true
+---
+
+# Python Virtual Environment Discipline
+
+- **Always check venv** before running Python commands (`python`, `pip`, `pytest`, tools, or scripts).
+- **Inspect project layers** for venvs (e.g. `.venv`, `venv`, `env` in current folder or parents) and **activate the most appropriate one** for the project.
+- **Prefer project-local venvs** over global interpreters or user-wide environments.
+- **Create a new venv** if:
+  - No suitable environment exists for the current project, or
+  - Dependencies conflict and an isolated venv is safer.
+- **Use consistent commands** for PowerShell on Windows, for example:
+  - Activate: `.\.venv\Scripts\Activate.ps1`
+  - Create: `python -m venv .venv`
+  - Install: `pip install -r requirements.txt`
+- **Avoid mixing environments**:
+  - Do not install packages into the global interpreter for project-specific needs.
+  - Do not use different venvs for the same project unless explicitly required.
+- **When suggesting tools or commands**, prefer options that respect and reuse the active venv rather than assuming a global Python.

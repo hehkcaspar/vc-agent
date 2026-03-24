@@ -1,0 +1,33 @@
+{
+  "id": "eval_6ffe87ca8abb_software-engineer",
+  "resume_id": "6ffe87ca8abb",
+  "position_id": "software-engineer",
+  "candidate_name": "吴少婷",
+  "verdict": "invite",
+  "confidence": "high",
+  "summary": "候选人吴少婷是长春理工大学人工智能专业在读学生，具备扎实的AI和全栈开发能力，有3个完整的项目落地经验（包括实习项目和个人项目），深度使用LangChain、LangGraph等AI框架。简历中明确展示了AI辅助编程能力和从0到1的产品开发经验，与职位的核心要求高度匹配。",
+  "strengths": [
+    "**AI工具使用经验丰富**: 熟练掌握LangChain、LangGraph、RAG、Agent等技术框架，并在多个项目中实际落地应用，体现了对AI开发工作流的深刻理解",
+    "**独立项目能力强**: 主导了\"技成智答\"和\"古镇智链\"两个完整项目的架构设计和核心开发，展现了从需求分析到技术实现的全流程能力",
+    "**全栈技术广度**: 后端掌握Python、Neo4j、ChromaDB、SQLite等数据库技术，前端/全栈涉及RSS爬虫、数据清洗、API设计、Docker容器化部署",
+    "**产品思维突出**: 在实习项目中实现了从4小时缩短至5分钟/天的效率提升，自动化率达9%，体现了结果导向和缩短反馈闭环的能力",
+    "**开源/竞赛经历**: 获得多项国家级和省级技术竞赛奖项，包括数字媒体科技创新大赛、蓝桥杯、挑战杯等，证明技术实力和持续学习能力",
+    "**Ownership意识强**: 多个项目描述中使用\"主导\"、\"负责\"等词汇，展现了主动承担责任的态度"
+  ],
+  "gaps": [
+    "简历中未明确提及是否使用Cursor、Claude、GitHub Copilot等具体AI编程工具（虽然使用了LangChain/LangGraph框架，但这是AI应用框架而非编程助手）",
+    "作为在校生，缺乏正式全职工作经验，需要验证其在大厂或创业团队的实际协作能力",
+    "前端技术栈（React/Vue）未在简历中明确体现，主要展示的是后端和AI相关技能"
+  ],
+  "experience_years": 1.5,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": true
+  },
+  "reasoning": "候选人具备职位所需的核心AI技术栈和项目落地经验，3个完整项目证明了独立开发能力和产品思维，符合\"技术Owner\"的定位。虽然缺少明确的AI编程工具使用证据，但其对LangChain/LangGraph等框架的深度应用表明了对AI工作流的理解。建议面试时重点考察AI编程工具使用习惯和团队协作能力。",
+  "evaluated_at": "2026-03-12T00:11:52.076519",
+  "processing_time_seconds": 25.450768,
+  "raw_output": "**VERDICT:** invite\n**CONFIDENCE:** high\n**CANDIDATE_NAME:** 吴少婷\n**EXPERIENCE_YEARS:** 1.5\n\n**SUMMARY:**\n候选人吴少婷是长春理工大学人工智能专业在读学生，具备扎实的AI和全栈开发能力，有3个完整的项目落地经验（包括实习项目和个人项目），深度使用LangChain、LangGraph等AI框架。简历中明确展示了AI辅助编程能力和从0到1的产品开发经验，与职位的核心要求高度匹配。\n\n**STRENGTHS:**\n- **AI工具使用经验丰富**: 熟练掌握LangChain、LangGraph、RAG、Agent等技术框架，并在多个项目中实际落地应用，体现了对AI开发工作流的深刻理解\n- **独立项目能力强**: 主导了\"技成智答\"和\"古镇智链\"两个完整项目的架构设计和核心开发，展现了从需求分析到技术实现的全流程能力\n- **全栈技术广度**: 后端掌握Python、Neo4j、ChromaDB、SQLite等数据库技术，前端/全栈涉及RSS爬虫、数据清洗、API设计、Docker容器化部署\n- **产品思维突出**: 在实习项目中实现了从4小时缩短至5分钟/天的效率提升，自动化率达9%，体现了结果导向和缩短反馈闭环的能力\n- **开源/竞赛经历**: 获得多项国家级和省级技术竞赛奖项，包括数字媒体科技创新大赛、蓝桥杯、挑战杯等，证明技术实力和持续学习能力\n- **Ownership意识强**: 多个项目描述中使用\"主导\"、\"负责\"等词汇，展现了主动承担责任的态度\n\n**GAPS:**\n- 简历中未明确提及是否使用Cursor、Claude、GitHub Copilot等具体AI编程工具（虽然使用了LangChain/LangGraph框架，但这是AI应用框架而非编程助手）\n- 作为在校生，缺乏正式全职工作经验，需要验证其在大厂或创业团队的实际协作能力\n- 前端技术栈（React/Vue）未在简历中明确体现，主要展示的是后端和AI相关技能\n\n**REASONING:**\n候选人具备职位所需的核心AI技术栈和项目落地经验，3个完整项目证明了独立开发能力和产品思维，符合\"技术Owner\"的定位。虽然缺少明确的AI编程工具使用证据，但其对LangChain/LangGraph等框架的深度应用表明了对AI工作流的理解。建议面试时重点考察AI编程工具使用习惯和团队协作能力。"
+}

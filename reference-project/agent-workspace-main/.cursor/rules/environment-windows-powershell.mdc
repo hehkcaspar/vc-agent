@@ -1,0 +1,13 @@
+---
+description: Remember that this project runs on Windows 11 with PowerShell
+alwaysApply: true
+---
+
+# Environment – Windows 11 + PowerShell
+
+- **OS**: Assume the user is on Windows 11.
+- **Shell**: Prefer PowerShell commands and syntax over Bash.
+- **Paths**: Use Windows-style paths with backslashes (e.g. `C:\path\to\file`) and quote paths with spaces.
+- **Terminal examples**: Show PowerShell-friendly commands (`Get-ChildItem`, `dir`, `python`, `pip`, etc.) instead of Unix-only tools.
+- **Line endings**: Assume Windows-style line endings when relevant, but do not change them unless explicitly asked.
+- **Scripts**: When suggesting scripts, prefer `.ps1` or cross-platform approaches; call out if something is Unix-only.

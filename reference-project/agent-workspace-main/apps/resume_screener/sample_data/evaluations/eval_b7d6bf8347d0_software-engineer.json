@@ -1,0 +1,32 @@
+{
+  "id": "eval_b7d6bf8347d0_software-engineer",
+  "resume_id": "b7d6bf8347d0",
+  "position_id": "software-engineer",
+  "candidate_name": "黄晨",
+  "verdict": "reject",
+  "confidence": "high",
+  "summary": "候选人黄晨是UI设计师/交互设计师背景，拥有10年设计经验，但完全不符合软件工程师（架构/全栈方向）的技术岗位要求。简历中没有任何后端开发、全栈开发或AI辅助编程的相关技能或项目经验。教育背景为艺术设计本科，而非计算机相关专业。",
+  "strengths": [
+    "10年UI/UX设计工作经验，熟悉Figma、XD等设计工具",
+    "参与过大疆无人机、建设银行等大型ToB/ToC项目",
+    "有产品策划和用户体验设计能力"
+  ],
+  "gaps": [
+    "**无后端开发经验**：简历中未提及任何Node.js、Python、Go、Java等后端技术栈",
+    "**无全栈开发能力**：没有独立完成后端或全栈项目的实际经验",
+    "**无AI编程工具使用证据**：未提及Cursor、Claude、Copilot等AI辅助编程工具的使用",
+    "**专业不匹配**：教育背景为艺术设计本科，非计算机/软件工程/人工智能相关专业",
+    "**职位定位错误**：候选人求职意向为UI设计师，期望薪资15-20K，与软件工程师岗位完全不匹配"
+  ],
+  "experience_years": 10.0,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": false
+  },
+  "reasoning": "候选人是纯设计背景的UI设计师，完全没有软件开发、后端技术、AI辅助编程等必备技能，属于明显的职位不匹配，建议直接拒绝。",
+  "evaluated_at": "2026-03-12T03:06:37.335464",
+  "processing_time_seconds": 12.913318,
+  "raw_output": "**VERDICT:** reject\n**CONFIDENCE:** high\n**CANDIDATE_NAME:** 黄晨\n**EXPERIENCE_YEARS:** 10\n\n**SUMMARY:**\n候选人黄晨是UI设计师/交互设计师背景，拥有10年设计经验，但完全不符合软件工程师（架构/全栈方向）的技术岗位要求。简历中没有任何后端开发、全栈开发或AI辅助编程的相关技能或项目经验。教育背景为艺术设计本科，而非计算机相关专业。\n\n**STRENGTHS:**\n- 10年UI/UX设计工作经验，熟悉Figma、XD等设计工具\n- 参与过大疆无人机、建设银行等大型ToB/ToC项目\n- 有产品策划和用户体验设计能力\n\n**GAPS:**\n- **无后端开发经验**：简历中未提及任何Node.js、Python、Go、Java等后端技术栈\n- **无全栈开发能力**：没有独立完成后端或全栈项目的实际经验\n- **无AI编程工具使用证据**：未提及Cursor、Claude、Copilot等AI辅助编程工具的使用\n- **专业不匹配**：教育背景为艺术设计本科，非计算机/软件工程/人工智能相关专业\n- **职位定位错误**：候选人求职意向为UI设计师，期望薪资15-20K，与软件工程师岗位完全不匹配\n\n**REASONING:**\n候选人是纯设计背景的UI设计师，完全没有软件开发、后端技术、AI辅助编程等必备技能，属于明显的职位不匹配，建议直接拒绝。"
+}

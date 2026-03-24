@@ -1,0 +1,33 @@
+{
+  "id": "eval_a8fe4f49bff0_software-engineer",
+  "resume_id": "a8fe4f49bff0",
+  "position_id": "software-engineer",
+  "candidate_name": "钟李涛",
+  "verdict": "invite",
+  "confidence": "high",
+  "summary": "候选人钟李涛是华南理工大学智能科学与技术专业2026届本科毕业生，具备扎实的AI大模型工程能力。他独立完成了两个AI项目（RAG法律助手和情绪对话助手），展示了从模型选型、微调、部署到前端交互的全链路开发能力。技术栈与职位高度匹配，尤其在Agent框架、RAG工程化方面有实战经验。",
+  "strengths": [
+    "**AI工具使用能力强**: 简历中明确提到熟练使用LlamaIndex构建LLM驱动应用，熟悉LangGraph构建复杂多代理应用，了解MCP调用，具备完整的AI辅助开发经验",
+    "**独立项目经验丰富**: 独立完成「基于RAG的劳动法法律助手」和「多风格情绪对话助手」两个全栈项目，有真实可演示的Web产品交付",
+    "**技术栈高度匹配**: 熟练掌握Python、FastAPI、PyTorch等后端技术，熟悉ChromaDB、vLLM、Ollama等AI基础设施，符合职位对后端+AI能力的要求",
+    "**Agent/RAG实战经验**: 有RAG工程化落地经验（Text Splitters-向量化-检索-生成全流程），熟悉LangChain/LlamaIndex框架，这是加分项中的核心技能",
+    "**全栈能力**: 能够搭建Streamlit可视化前端，实现用户实时交互，具备端到端产品开发能力",
+    "**开源意识**: 提供GitHub项目链接（https://github.com/zhong-li-tao/project），展示代码透明度和分享意愿"
+  ],
+  "gaps": [
+    "**缺乏企业工作经验**: 作为2026届应届生，没有正式工作经历，需要验证其在真实团队协作和大型项目中的表现",
+    "**未明确提及AI编程工具**: 简历中未明确提到使用Cursor、Claude Code、GitHub Copilot等日常AI编程工具，需面试时确认",
+    "**前端技术栈较单一**: 主要使用Streamlit，未体现React/Vue等主流前端框架经验，可能影响全栈协作灵活性"
+  ],
+  "experience_years": 0.0,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": true
+  },
+  "reasoning": "候选人虽然缺乏企业工作经验，但其独立完成的两个AI项目充分展示了全栈开发能力、AI工程化能力和Ownership意识，技术栈与职位核心要求高度匹配，且具备Agent/RAG实战经验这一关键加分项，符合INVITE标准。",
+  "evaluated_at": "2026-03-12T02:46:22.668511",
+  "processing_time_seconds": 17.417462,
+  "raw_output": "**VERDICT:** invite\n**CONFIDENCE:** high\n**CANDIDATE_NAME:** 钟李涛\n**EXPERIENCE_YEARS:** 0 (应届毕业生)\n\n**SUMMARY:**\n候选人钟李涛是华南理工大学智能科学与技术专业2026届本科毕业生，具备扎实的AI大模型工程能力。他独立完成了两个AI项目（RAG法律助手和情绪对话助手），展示了从模型选型、微调、部署到前端交互的全链路开发能力。技术栈与职位高度匹配，尤其在Agent框架、RAG工程化方面有实战经验。\n\n**STRENGTHS:**\n- **AI工具使用能力强**: 简历中明确提到熟练使用LlamaIndex构建LLM驱动应用，熟悉LangGraph构建复杂多代理应用，了解MCP调用，具备完整的AI辅助开发经验\n- **独立项目经验丰富**: 独立完成「基于RAG的劳动法法律助手」和「多风格情绪对话助手」两个全栈项目，有真实可演示的Web产品交付\n- **技术栈高度匹配**: 熟练掌握Python、FastAPI、PyTorch等后端技术，熟悉ChromaDB、vLLM、Ollama等AI基础设施，符合职位对后端+AI能力的要求\n- **Agent/RAG实战经验**: 有RAG工程化落地经验（Text Splitters-向量化-检索-生成全流程），熟悉LangChain/LlamaIndex框架，这是加分项中的核心技能\n- **全栈能力**: 能够搭建Streamlit可视化前端，实现用户实时交互，具备端到端产品开发能力\n- **开源意识**: 提供GitHub项目链接（https://github.com/zhong-li-tao/project），展示代码透明度和分享意愿\n\n**GAPS:**\n- **缺乏企业工作经验**: 作为2026届应届生，没有正式工作经历，需要验证其在真实团队协作和大型项目中的表现\n- **未明确提及AI编程工具**: 简历中未明确提到使用Cursor、Claude Code、GitHub Copilot等日常AI编程工具，需面试时确认\n- **前端技术栈较单一**: 主要使用Streamlit，未体现React/Vue等主流前端框架经验，可能影响全栈协作灵活性\n\n**REASONING:**\n候选人虽然缺乏企业工作经验，但其独立完成的两个AI项目充分展示了全栈开发能力、AI工程化能力和Ownership意识，技术栈与职位核心要求高度匹配，且具备Agent/RAG实战经验这一关键加分项，符合INVITE标准。"
+}

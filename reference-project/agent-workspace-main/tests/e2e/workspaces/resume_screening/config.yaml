@@ -1,0 +1,17 @@
+# Workspace Configuration
+workspace:
+  resources_dir: resources
+  instructions_dir: instructions
+  artifacts_dir: artifacts
+  snapshots_dir: .snapshots
+
+extraction:
+  max_text_chars: 15000
+  max_images: 10
+  max_excel_rows: 100
+  max_excel_sheets: 5
+
+agent:
+  max_iterations: 20
+  memory_turns: 20
+  trace_enabled: true

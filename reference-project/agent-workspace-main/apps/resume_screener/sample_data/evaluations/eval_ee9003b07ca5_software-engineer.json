@@ -1,0 +1,35 @@
+{
+  "id": "eval_ee9003b07ca5_software-engineer",
+  "resume_id": "ee9003b07ca5",
+  "position_id": "software-engineer",
+  "candidate_name": "孙荣阳",
+  "verdict": "invite",
+  "confidence": "medium",
+  "summary": "候选人拥有5.5年Python开发经验，技术栈匹配（Python/Flask/Django/Redis/MongoDB等），具备全栈能力和系统架构设计经验。但简历中未明确提及AI编程工具的使用（如Cursor、Claude、Copilot等），这是职位的核心要求之一，需要进一步验证。",
+  "strengths": [
+    "扎实的Python后端开发能力，精通Django、Flask框架，熟悉RESTful API设计",
+    "具备全栈开发经验，有Vue.js前端协作经验，了解ElementUI等前端技术",
+    "丰富的系统设计经验：主导过Apollo自动驾驶云平台微服务架构设计，使用K8s+Docker分布式部署",
+    "数据库与缓存优化能力强：熟练使用MySQL、MongoDB、Redis、PostgreSQL，有布隆过滤器去重、索引优化等实战经验",
+    "DevOps/云原生经验：熟悉Docker、Kubernetes、Jenkins流水线、Prometheus监控体系",
+    "独立项目交付能力：从0到1完成多个项目（智慧餐厅、微博模拟平台、翻译语料系统等）",
+    "英语阅读能力：能理解英文技术资料（Apollo项目文档、技术栈均为欧美主流技术）"
+  ],
+  "gaps": [
+    "**关键缺失**：简历中完全未提及AI编程工具的使用（Cursor、Windsurf、Claude、GitHub Copilot等），无法确认是否日常使用AI辅助编程",
+    "缺乏明确的\"vibe coding\"或快速迭代工作流的证据",
+    "个人作品/开源贡献不明显，所有项目均为公司项目，无独立开源项目或个人作品集",
+    "未体现Agent框架、LangChain、记忆系统等加分项技能"
+  ],
+  "experience_years": 5.5,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": false
+  },
+  "reasoning": "候选人技术能力扎实，符合后端/全栈开发的核心要求，但作为\"与AI协作构建端到端产品\"的架构师岗位，AI工具使用习惯是核心筛选条件，目前无法确认其是否符合，需面试时重点验证。",
+  "evaluated_at": "2026-03-12T02:31:17.833177",
+  "processing_time_seconds": 11.725914,
+  "raw_output": "**VERDICT:** waitlist\n**CONFIDENCE:** medium\n**CANDIDATE_NAME:** 孙荣阳\n**EXPERIENCE_YEARS:** 5.5\n\n**SUMMARY:**\n候选人拥有5.5年Python开发经验，技术栈匹配（Python/Flask/Django/Redis/MongoDB等），具备全栈能力和系统架构设计经验。但简历中未明确提及AI编程工具的使用（如Cursor、Claude、Copilot等），这是职位的核心要求之一，需要进一步验证。\n\n**STRENGTHS:**\n- 扎实的Python后端开发能力，精通Django、Flask框架，熟悉RESTful API设计\n- 具备全栈开发经验，有Vue.js前端协作经验，了解ElementUI等前端技术\n- 丰富的系统设计经验：主导过Apollo自动驾驶云平台微服务架构设计，使用K8s+Docker分布式部署\n- 数据库与缓存优化能力强：熟练使用MySQL、MongoDB、Redis、PostgreSQL，有布隆过滤器去重、索引优化等实战经验\n- DevOps/云原生经验：熟悉Docker、Kubernetes、Jenkins流水线、Prometheus监控体系\n- 独立项目交付能力：从0到1完成多个项目（智慧餐厅、微博模拟平台、翻译语料系统等）\n- 英语阅读能力：能理解英文技术资料（Apollo项目文档、技术栈均为欧美主流技术）\n\n**GAPS:**\n- **关键缺失**：简历中完全未提及AI编程工具的使用（Cursor、Windsurf、Claude、GitHub Copilot等），无法确认是否日常使用AI辅助编程\n- 缺乏明确的\"vibe coding\"或快速迭代工作流的证据\n- 个人作品/开源贡献不明显，所有项目均为公司项目，无独立开源项目或个人作品集\n- 未体现Agent框架、LangChain、记忆系统等加分项技能\n\n**REASONING:**\n候选人技术能力扎实，符合后端/全栈开发的核心要求，但作为\"与AI协作构建端到端产品\"的架构师岗位，AI工具使用习惯是核心筛选条件，目前无法确认其是否符合，需面试时重点验证。"
+}

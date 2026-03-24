@@ -1,0 +1,33 @@
+{
+  "id": "eval_fe66702e0486_software-engineer",
+  "resume_id": "fe66702e0486",
+  "position_id": "software-engineer",
+  "candidate_name": "徐楚辉",
+  "verdict": "invite",
+  "confidence": "medium",
+  "summary": "候选人拥有扎实的全栈技术背景（Next.js/TypeScript/Node.js/Python），具备从0到1的产品落地经验，包括虚拟主播平台和AI投资分析平台。在AI应用方面有实际项目经验（LLM API集成、Prompt Engineering），但简历未明确提及日常使用AI编程工具（如Cursor/Copilot）的证据。",
+  "strengths": [
+    "全栈开发能力突出：熟练掌握Next.js、TypeScript、TailwindCSS前端技术及Node.js、Python后端开发，符合职位核心技术要求",
+    "从0到1产品经验：作为联合创始人主导虚拟主播平台研发，独立开发portalyze.ai AI投资分析平台并上线运营，有真实用户和交付成果",
+    "AI技术应用实践：具备LLM API集成、Prompt Engineering、AI智能体开发经验，使用Dify平台进行AI应用开发",
+    "创业背景与Ownership意识：有联合创始人经历，负责产品规划、客户对接、团队管理，展现结果导向思维",
+    "DevOps与部署能力：熟悉Vercel部署、VPS反向代理、Docker容器化，保障产品稳定运行",
+    "英文能力与国际视野：美国本科教育背景，习惯欧美技术栈，能阅读英文技术资料"
+  ],
+  "gaps": [
+    "未明确提及日常使用AI编程工具（Cursor/Claude Code/GitHub Copilot等）的具体证据，需面试验证是否真正理解vibe coding工作流",
+    "技术栈偏游戏/3D方向（UE5 C++、Unity），传统企业级后端经验相对较少",
+    "近期工作以兼职和独立项目为主，缺乏大型团队协作经验，需评估适应公司流程的能力"
+  ],
+  "experience_years": 6.0,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": true
+  },
+  "reasoning": "候选人全栈能力强、有可验证的独立项目作品和AI应用经验，符合职位对Owner心态和技术广度的要求；但AI编程工具使用习惯需进一步验证，因此给予邀请面试机会以便深入考察。",
+  "evaluated_at": "2026-03-12T00:05:32.665551",
+  "processing_time_seconds": 27.816911,
+  "raw_output": "**VERDICT:** invite\n**CONFIDENCE:** medium\n**CANDIDATE_NAME:** 徐楚辉\n**EXPERIENCE_YEARS:** 6\n\n**SUMMARY:**\n候选人拥有扎实的全栈技术背景（Next.js/TypeScript/Node.js/Python），具备从0到1的产品落地经验，包括虚拟主播平台和AI投资分析平台。在AI应用方面有实际项目经验（LLM API集成、Prompt Engineering），但简历未明确提及日常使用AI编程工具（如Cursor/Copilot）的证据。\n\n**STRENGTHS:**\n- 全栈开发能力突出：熟练掌握Next.js、TypeScript、TailwindCSS前端技术及Node.js、Python后端开发，符合职位核心技术要求\n- 从0到1产品经验：作为联合创始人主导虚拟主播平台研发，独立开发portalyze.ai AI投资分析平台并上线运营，有真实用户和交付成果\n- AI技术应用实践：具备LLM API集成、Prompt Engineering、AI智能体开发经验，使用Dify平台进行AI应用开发\n- 创业背景与Ownership意识：有联合创始人经历，负责产品规划、客户对接、团队管理，展现结果导向思维\n- DevOps与部署能力：熟悉Vercel部署、VPS反向代理、Docker容器化，保障产品稳定运行\n- 英文能力与国际视野：美国本科教育背景，习惯欧美技术栈，能阅读英文技术资料\n\n**GAPS:**\n- 未明确提及日常使用AI编程工具（Cursor/Claude Code/GitHub Copilot等）的具体证据，需面试验证是否真正理解vibe coding工作流\n- 技术栈偏游戏/3D方向（UE5 C++、Unity），传统企业级后端经验相对较少\n- 近期工作以兼职和独立项目为主，缺乏大型团队协作经验，需评估适应公司流程的能力\n\n**REASONING:**\n候选人全栈能力强、有可验证的独立项目作品和AI应用经验，符合职位对Owner心态和技术广度的要求；但AI编程工具使用习惯需进一步验证，因此给予邀请面试机会以便深入考察。"
+}

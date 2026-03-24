@@ -229,6 +229,10 @@ MVP uses SQLite with auto-create tables. For schema changes:
 
 ### Frontend Development
 
+**Entity detail layout and scrolling**
+
+On desktop, the app shell is viewport-height-bounded and `main` scrolls only when needed (for example a long portfolio list). On the entity detail screen, Resources and Artifacts columns grow to use the space below the entity header; overflowing lists and file previews scroll inside each zone’s `.zone-content`, not the whole page. See **Viewport layout and scrolling** in `docs/ARCHITECTURE.md` for the flex/grid rules and file references.
+
 **Adding a New Component:**
 
 1. Create `.tsx` and `.css` files in `frontend/src/components/`

@@ -1,7 +1,21 @@
 import { useState, useRef, useEffect } from 'react';
+import { init as initPptxPreview } from 'pptx-preview';
 import { Entity, Resource, Artifact, ArtifactView } from '../types';
 import { useEntityResources, useEntityArtifacts } from '../hooks/useEntities';
 import { api } from '../services/api';
+import {
+  resolveEffectiveMime,
+  isImageType,
+  isTextLike,
+  isPdf,
+  isXlsx,
+  isDocx,
+  isPptx,
+  xlsxToPreviewHtml,
+  docxToPreviewHtml,
+  withBuiltinPdfViewerOptions,
+  revokeBlobObjectUrl,
+} from '../lib/resourcePreview';
 import './EntityDetail.css';
 
 // Resource types that can be added
@@ -57,7 +71,9 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
               </span>
             </h3>
           </div>
-          <ArtifactsZone artifacts={artifacts} isLoading={artifactsLoading} entityId={entity.id} />
+          <div className="zone-content">
+            <ArtifactsZone artifacts={artifacts} isLoading={artifactsLoading} entityId={entity.id} />
+          </div>
         </div>
       </div>
     </div>
@@ -369,8 +385,45 @@ interface ResourcesZoneWithHeaderProps {
 function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: ResourcesZoneWithHeaderProps) {
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
-  const [previewType, setPreviewType] = useState<'text' | 'image' | 'pdf' | 'unsupported' | null>(null);
+  const [previewType, setPreviewType] = useState<
+    'text' | 'image' | 'pdf' | 'html' | 'pptx' | 'unsupported' | null
+  >(null);
   const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [pptxBuffer, setPptxBuffer] = useState<ArrayBuffer | null>(null);
+  const [pptxRenderLoading, setPptxRenderLoading] = useState(false);
+  const pptxHostRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (previewType !== 'pptx' || !pptxBuffer || !pptxHostRef.current) {
+      return;
+    }
+    const host = pptxHostRef.current;
+    host.innerHTML = '';
+    setPptxRenderLoading(true);
+    const previewer = initPptxPreview(host, {
+      width: 960,
+      height: 540,
+    });
+    let cancelled = false;
+    previewer
+      .preview(pptxBuffer)
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewType('unsupported');
+          setPptxBuffer(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPptxRenderLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+      previewer.destroy();
+      host.innerHTML = '';
+    };
+  }, [previewType, pptxBuffer]);
 
   const handleResourceClick = async (resource: Resource) => {
     if (resource.resource_type === 'url' && resource.url) {
@@ -382,29 +435,61 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
     setIsLoadingPreview(true);
     setPreviewContent(null);
     setPreviewType(null);
+    setPptxBuffer(null);
+    setPptxRenderLoading(false);
+
+    const filename = resource.original_filename || resource.title || '';
+    const mimeType = resolveEffectiveMime(resource.mime_type, filename);
 
     try {
       const response = await api.entities.viewResource(entityId, resource.id);
-      const mimeType = resource.mime_type || '';
-      
-      if (mimeType.startsWith('image/')) {
+
+      if (isImageType(mimeType, filename)) {
         const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
+        const type =
+          blob.type && blob.type !== 'application/octet-stream'
+            ? blob.type
+            : mimeType.startsWith('image/')
+              ? mimeType
+              : 'image/png';
+        const typedBlob =
+          blob.type === type ? blob : new Blob([await blob.arrayBuffer()], { type });
+        const url = window.URL.createObjectURL(typedBlob);
         setPreviewContent(url);
         setPreviewType('image');
-      } else if (mimeType.includes('text') || mimeType.includes('markdown') || mimeType.includes('json')) {
+      } else if (isTextLike(mimeType, filename)) {
         const text = await response.text();
         setPreviewContent(text);
         setPreviewType('text');
-      } else if (mimeType.includes('pdf')) {
+      } else if (isPdf(mimeType, filename)) {
         const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        setPreviewContent(url);
+        const objectUrl = window.URL.createObjectURL(blob);
+        setPreviewContent(withBuiltinPdfViewerOptions(objectUrl));
         setPreviewType('pdf');
+      } else if (isXlsx(mimeType, filename)) {
+        const buf = await response.arrayBuffer();
+        try {
+          setPreviewContent(xlsxToPreviewHtml(buf));
+          setPreviewType('html');
+        } catch {
+          setPreviewType('unsupported');
+        }
+      } else if (isDocx(mimeType, filename)) {
+        const buf = await response.arrayBuffer();
+        try {
+          setPreviewContent(await docxToPreviewHtml(buf));
+          setPreviewType('html');
+        } catch {
+          setPreviewType('unsupported');
+        }
+      } else if (isPptx(mimeType, filename)) {
+        const buf = await response.arrayBuffer();
+        setPptxBuffer(buf);
+        setPreviewType('pptx');
       } else {
         setPreviewType('unsupported');
       }
-    } catch (err) {
+    } catch {
       setPreviewType('unsupported');
     } finally {
       setIsLoadingPreview(false);
@@ -413,11 +498,13 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
 
   const handleBack = () => {
     if (previewContent && (previewType === 'image' || previewType === 'pdf')) {
-      window.URL.revokeObjectURL(previewContent);
+      revokeBlobObjectUrl(previewContent);
     }
     setSelectedResource(null);
     setPreviewContent(null);
     setPreviewType(null);
+    setPptxBuffer(null);
+    setPptxRenderLoading(false);
   };
 
   const handleDownload = async () => {
@@ -451,7 +538,9 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
               ← Back to list
             </button>
             <div className="preview-title-header">{selectedResource.title}</div>
-            {previewType === 'unsupported' && (
+            {(previewType === 'unsupported' ||
+              previewType === 'html' ||
+              previewType === 'pptx') && (
               <button className="download-btn" onClick={handleDownload}>
                 ⬇ Download
               </button>
@@ -492,6 +581,18 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
                   title={selectedResource.title}
                   className="preview-pdf"
                 />
+              ) : previewType === 'html' ? (
+                <div
+                  className="preview-html"
+                  dangerouslySetInnerHTML={{ __html: previewContent! }}
+                />
+              ) : previewType === 'pptx' ? (
+                <div className="preview-pptx-wrap">
+                  {pptxRenderLoading && (
+                    <div className="preview-loading preview-pptx-loading">Loading presentation…</div>
+                  )}
+                  <div ref={pptxHostRef} className="preview-pptx-host" />
+                </div>
               ) : (
                 <div className="preview-unsupported">
                   <p>Preview not available for this file type.</p>

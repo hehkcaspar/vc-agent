@@ -1,0 +1,32 @@
+{
+  "id": "eval_512dd78f89ee_software-engineer",
+  "resume_id": "512dd78f89ee",
+  "position_id": "software-engineer",
+  "candidate_name": "孙荣阳",
+  "verdict": "invite",
+  "confidence": "medium",
+  "summary": "候选人拥有6年Python开发经验，技术栈匹配（Python、Flask、Django、Redis、MongoDB、MySQL、Docker、K8s），具备全栈能力和系统架构设计经验。但简历中完全未提及任何AI编程工具的使用（如Cursor、Claude、Copilot等），这是职位的核心要求之一，需要进一步验证其AI协作能力。",
+  "strengths": [
+    "扎实的Python后端开发经验，熟悉Django/Flask/Tornado框架，有微服务架构设计经验（Apollo自动驾驶云平台项目使用k8s+docker分布式部署）",
+    "具备全栈能力，了解Vue.js、ElementUI、前端交互技术（Ajax、JavaScript），能独立完成前后端协作",
+    "DevOps/云原生经验丰富，精通Docker容器化、Kubernetes集群管理、Jenkins自动化流水线、Prometheus监控体系",
+    "有从0到1的项目落地经验，包括爬虫框架、测试执行平台、智慧餐厅等多个独立项目",
+    "计算机本科背景，专业对口，基础扎实"
+  ],
+  "gaps": [
+    "**关键缺失：简历中没有任何AI编程工具的提及**（如Cursor、Windsurf、Claude、GitHub Copilot等），无法确认是否日常使用AI辅助编程，这与职位核心要求\"日常使用AI开发工具辅助编程\"存在不确定性",
+    "缺乏Agent框架、LangChain、Prompt Engineering等AI相关经验的明确证据",
+    "项目多为在大厂（网易、零跑科技、中国移动等）参与式开发，需确认是否有独立主导的Owner级项目经验"
+  ],
+  "experience_years": 6.0,
+  "skills_match": {},
+  "ai_competency": {
+    "uses_ai_tools": true,
+    "has_projects": true,
+    "ownership_mindset": true
+  },
+  "reasoning": "候选人的技术栈和项目经验与职位高度匹配，具备架构设计和全栈能力，但AI协作能力这一核心筛选条件无法从简历中确认，存在不确定性，建议通过面试进一步验证其AI工具使用习惯和vibe coding工作流的理解。",
+  "evaluated_at": "2026-03-12T00:16:01.182492",
+  "processing_time_seconds": 11.692654,
+  "raw_output": "**VERDICT:** waitlist\n**CONFIDENCE:** medium\n**CANDIDATE_NAME:** 孙荣阳\n**EXPERIENCE_YEARS:** 6\n\n**SUMMARY:**\n候选人拥有6年Python开发经验，技术栈匹配（Python、Flask、Django、Redis、MongoDB、MySQL、Docker、K8s），具备全栈能力和系统架构设计经验。但简历中完全未提及任何AI编程工具的使用（如Cursor、Claude、Copilot等），这是职位的核心要求之一，需要进一步验证其AI协作能力。\n\n**STRENGTHS:**\n- 扎实的Python后端开发经验，熟悉Django/Flask/Tornado框架，有微服务架构设计经验（Apollo自动驾驶云平台项目使用k8s+docker分布式部署）\n- 具备全栈能力，了解Vue.js、ElementUI、前端交互技术（Ajax、JavaScript），能独立完成前后端协作\n- DevOps/云原生经验丰富，精通Docker容器化、Kubernetes集群管理、Jenkins自动化流水线、Prometheus监控体系\n- 有从0到1的项目落地经验，包括爬虫框架、测试执行平台、智慧餐厅等多个独立项目\n- 计算机本科背景，专业对口，基础扎实\n\n**GAPS:**\n- **关键缺失：简历中没有任何AI编程工具的提及**（如Cursor、Windsurf、Claude、GitHub Copilot等），无法确认是否日常使用AI辅助编程，这与职位核心要求\"日常使用AI开发工具辅助编程\"存在不确定性\n- 缺乏Agent框架、LangChain、Prompt Engineering等AI相关经验的明确证据\n- 项目多为在大厂（网易、零跑科技、中国移动等）参与式开发，需确认是否有独立主导的Owner级项目经验\n\n**REASONING:**\n候选人的技术栈和项目经验与职位高度匹配，具备架构设计和全栈能力，但AI协作能力这一核心筛选条件无法从简历中确认，存在不确定性，建议通过面试进一步验证其AI工具使用习惯和vibe coding工作流的理解。"
+}

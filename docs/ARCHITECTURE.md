@@ -308,14 +308,37 @@ App
             ├── ParkingLotModal
             └── EntityDetail (when selected)
                 ├── Header (Back button)
-                ├── ResourcesZoneWithHeader
-                │   ├── ZoneHeader (dynamic: title or preview controls)
-                │   ├── AddResourceMenu (dropdown: File/Text/URL)
-                │   ├── ResourceList
-                │   └── ResourcePreview (PDF/Image/Text viewer)
-                └── ArtifactsZone
-                    └── ArtifactList
+                ├── entity-zones (two-column grid; stacked on narrow viewports)
+                ├── ResourcesZoneWithHeader (.zone)
+                │   ├── ZoneHeader (list: title + AddResourceMenu; preview: back + title + download)
+                │   └── .zone-content (scrolls)
+                │       ├── ResourceList
+                │       └── ResourcePreview (PDF/Image/Text/HTML viewer)
+                └── Artifacts .zone
+                    ├── ZoneHeader
+                    └── .zone-content (scrolls)
+                        └── ArtifactsZone → ArtifactList
 ```
+
+### Viewport layout and scrolling
+
+The shell and entity detail view are wired so **long resource previews** (for example DOCX rendered as HTML) scroll **inside the Resources column**, not by growing the whole document.
+
+**Desktop (viewport width ≥ 769px)**
+
+- `Layout.css`: `.layout` uses `height` / `max-height: 100vh` and `overflow: hidden` so the app chrome stays within the window.
+- `Layout.css`: `.main-content` uses `min-height: 0`, `overflow-y: auto`, and a column flex container so it can shrink inside the row, scroll the portfolio list when needed, and pass a bounded height to its children.
+- `EntityDetail.css`: `.entity-detail` is `flex: 1` / `min-height: 0`; `.entity-zones` is a grid with `minmax(0, 1fr)` rows so both zones share the remaining height below the entity header; each `.zone` is a column flex card; `.zone-content` is `flex: 1` / `min-height: 0` / `overflow-y: auto` so lists and previews scroll inside the card.
+
+**Mobile (width < 769px)**
+
+- The layout is not locked to `100vh` the same way, so drawer/header behavior is unchanged.
+
+**Preview panels**
+
+- PDF iframes (`.preview-pdf`) use `min-height: 0` so they respect the constrained preview stack instead of forcing a large minimum height.
+
+Relevant files: `frontend/src/components/Layout.css`, `frontend/src/components/EntityDetail.css`, `frontend/src/components/EntityDetail.tsx`.
 
 ## Security Considerations
 
