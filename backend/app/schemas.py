@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List, Literal
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 
@@ -78,6 +78,7 @@ class ArtifactCreate(ArtifactBase):
 class ArtifactResponse(ArtifactBase):
     id: str
     entity_id: str
+    title: Optional[str] = None
     version: int
     status: str
     relative_path: str
@@ -146,3 +147,95 @@ class ResolveToNewRequest(BaseModel):
 class ResolveRequest(BaseModel):
     entity_id: Optional[str] = None
     create_entity: Optional[dict] = None
+
+
+# ============== Entity chat ==============
+
+class ChatSessionCreate(BaseModel):
+    title: Optional[str] = None
+
+
+class ChatSessionResponse(BaseModel):
+    id: str
+    entity_id: str
+    title: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChatMessageResponse(BaseModel):
+    id: str
+    session_id: str
+    role: str
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class ChatSessionDetailResponse(BaseModel):
+    session: ChatSessionResponse
+    messages: List[ChatMessageResponse]
+
+
+class ChatMessageCreate(BaseModel):
+    text: str
+    resource_ids: List[str] = Field(default_factory=list)
+    artifact_ids: List[str] = Field(default_factory=list)
+    model_profile_id: Optional[str] = None
+    # When set, overrides server CHAT_USE_DEEP_AGENT for this message only.
+    use_deep_agent: Optional[bool] = None
+
+
+class ChatMessageResult(BaseModel):
+    assistant_message: ChatMessageResponse
+    warnings: List[str] = Field(default_factory=list)
+    run_id: Optional[str] = None
+    tool_trace: Optional[dict] = None
+
+
+class ChatMessageJobAccepted(BaseModel):
+    """Deep-agent message accepted; poll GET .../jobs/{job_id} until status is terminal."""
+
+    job_id: str
+    user_message: ChatMessageResponse
+    warnings: List[str] = Field(default_factory=list)
+    status: Literal["pending"] = "pending"
+
+
+class ChatMessageJobStatus(BaseModel):
+    job_id: str
+    status: Literal["pending", "running", "succeeded", "failed"]
+    step_detail: Optional[str] = None
+    user_message_id: str
+    assistant_message: Optional[ChatMessageResponse] = None
+    warnings: List[str] = Field(default_factory=list)
+    error_message: Optional[str] = None
+    run_id: Optional[str] = None
+    tool_trace: Optional[dict] = None
+
+
+class PresetInfoResponse(BaseModel):
+    id: str
+    label: str
+    description: str
+
+
+class PresetRunRequest(BaseModel):
+    resource_ids: List[str] = Field(default_factory=list)
+    artifact_ids: List[str] = Field(default_factory=list)
+    session_id: Optional[str] = None
+    industry: Optional[str] = None
+    stage: Optional[str] = None
+    artifact_type: Optional[Literal["memo", "factsheet", "report", "other"]] = None
+    artifact_status: Optional[Literal["draft", "final"]] = None
+
+
+class PresetRunResponse(BaseModel):
+    artifact_id: str
+    assistant_summary: str
+    warnings: List[str] = Field(default_factory=list)

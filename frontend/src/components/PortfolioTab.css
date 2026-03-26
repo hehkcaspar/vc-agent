@@ -101,39 +101,8 @@
   transform: translateY(0);
 }
 
-/* View Toggle */
-.view-toggle {
-  display: flex;
-  gap: var(--space-1);
+.portfolio-view-toggle {
   margin-bottom: var(--space-6);
-  padding: 4px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  width: fit-content;
-}
-
-.view-toggle button {
-  padding: var(--space-2) var(--space-4);
-  background: transparent;
-  border-radius: 2px;
-  color: var(--color-text-secondary);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  transition: all var(--transition-fast);
-}
-
-.view-toggle button:hover {
-  color: var(--color-text-primary);
-}
-
-.view-toggle button.active {
-  background: var(--color-bg-elevated);
-  color: var(--color-text-primary);
-  box-shadow: var(--shadow-sm);
-  border: 1px solid var(--color-border);
 }
 
 /* Entity Grid */

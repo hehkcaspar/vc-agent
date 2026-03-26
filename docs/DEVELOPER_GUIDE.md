@@ -49,6 +49,20 @@ $env:DATA_ROOT = "D:\\vc-data\\entities"
 $env:DATABASE_URL = "sqlite+aiosqlite:///D:/vc-data/vc_portfolio.db"
 ```
 
+A commented template listing all backend variables is in [`backend/.env_sample`](backend/.env_sample); copy it to `backend/.env` and adjust.
+
+**Portfolio chat (Gemini):** set an API key (either name is accepted by the backend client):
+
+```powershell
+$env:GEMINI_API_KEY = "your-key"
+# or
+$env:GOOGLE_API_KEY = "your-key"
+```
+
+Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info`), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_ARTIFACT_CHARS`, `CHAT_MAX_HISTORY_MESSAGES`.
+
+**Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (default false), `CHAT_DEFAULT_MODEL_PROFILE` (e.g. `gemini_google`; override per message with JSON `model_profile_id`), `CHAT_AGENT_RECURSION_LIMIT`, Moonshot OpenAI-compatible chat: `MOONSHOT_API_KEY` or **`KIMI_CODE_API_KEY`** (same Open Platform Bearer key), plus `MOONSHOT_BASE_URL` / `MOONSHOT_MODEL` for `kimi_moonshot`. Edit-policy flags: `CHAT_ARTIFACT_OVERWRITE_ENABLED`, `CHAT_ARTIFACT_DEFAULT_EDIT_MODE`, `CHAT_ARTIFACT_RESOLVE_MIN_SCORE`. Enable **LangSmith** tracing via standard LangChain env vars if desired (`LANGCHAIN_TRACING_V2`, etc.). See `backend/app/config.py` and `backend/.env_sample`.
+
 ### 3. Run Development Servers
 
 **Terminal 1 - Backend:**
@@ -66,6 +80,15 @@ npm run dev
 ```
 Frontend: http://localhost:3000
 
+**API proxy:** Dev server forwards `/api/*` to FastAPI (strip `/api`). Default target is `http://127.0.0.1:8000`.
+
+If the browser shows 404s for `/api/entities` and a JSON body like `{"message":"no Route matched with those values"}`, something other than Uvicorn is usually listening on port 8000 (for example **Kong**). Fix by either:
+
+- Running FastAPI on a free port and setting **`frontend/.env`**: `VITE_PROXY_TARGET=http://127.0.0.1:<port>`, then restart `npm run dev`, or
+- Bypassing the proxy: `VITE_API_URL=http://127.0.0.1:<port>` in `frontend/.env` (calls the API directly; backend CORS already allows all origins in dev).
+
+See `frontend/.env.example`.
+
 ---
 
 ## Project Structure
@@ -80,14 +103,18 @@ vc-agent/
 │   │   ├── schemas.py               # Pydantic schemas
 │   │   ├── database.py              # DB connection
 │   │   ├── routers/
-│   │   │   ├── entities.py          # Entity CRUD + resources/artifacts
+│   │   │   ├── entities.py          # Entity CRUD + resources/artifacts + artifact view/update
+│   │   │   ├── chat.py              # Gemini chat sessions, messages, presets
 │   │   │   ├── ingest.py            # Ingestion endpoint
 │   │   │   └── parkinglot.py        # Parking lot management
 │   │   └── services/
 │   │       ├── storage.py           # Storage adapter
 │   │       ├── parking.py           # Parking lot manager
 │   │       ├── resolver.py          # Entity resolver
-│   │       └── materializer.py      # Resource materializer
+│   │       ├── materializer.py      # Resource materializer
+│   │       ├── gemini_runner.py     # Gemini generate + JSON extraction helpers
+│   │       ├── preset_registry.py   # Chat preset definitions (e.g. red_team, extract_info)
+│   │       └── artifact_service.py  # Artifact file helpers / versioning
 │   ├── requirements.txt
 │   └── run.py                       # Development server
 │
@@ -95,8 +122,10 @@ vc-agent/
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── Layout.tsx           # App layout with sidebar
-│   │   │   ├── PortfolioTab.tsx     # Main portfolio view
-│   │   │   ├── EntityDetail.tsx     # Entity detail with resource viewer
+│   │   │   ├── PortfolioTab.tsx     # Main portfolio view (list/grid segmented toggle)
+│   │   │   ├── EntityDetail.tsx     # Entity workspace: resources, chat, artifacts + viewer modal
+│   │   │   ├── EntityConversation.tsx  # Gemini chat UI, presets, artifact cards
+│   │   │   ├── JsonArtifactFormEditor.tsx  # Structured JSON editor (form mode)
 │   │   │   ├── CreateEntityModal.tsx
 │   │   │   ├── EditEntityModal.tsx  # Edit entity metadata
 │   │   │   ├── EntityMetadataForm.tsx
@@ -110,7 +139,8 @@ vc-agent/
 │   │   │   └── TabContext.tsx       # Tab state persistence
 │   │   ├── styles/
 │   │   │   ├── variables.css        # Design system tokens
-│   │   │   └── global.css           # Global styles
+│   │   │   ├── segmented-toggle.css # Shared list/grid and Form/Raw JSON toggle styling
+│   │   │   └── global.css           # Global styles (imports segmented-toggle)
 │   │   └── types/
 │   │       └── index.ts             # TypeScript types + field config
 │   ├── index.html                   # Google Fonts loaded here
@@ -131,19 +161,21 @@ vc-agent/
 
 Located in `frontend/src/styles/`:
 
-**variables.css** - CSS custom properties:
+**variables.css** - CSS custom properties (light theme defaults; dark theme overrides exist under `[data-theme="dark"]`). Examples:
+
 ```css
---color-bg-primary: #0a0a0f;      /* Deep navy background */
---color-brand-primary: #6366f1;    /* Indigo accent */
---color-accent-gold: #fbbf24;      /* Gold accent */
---font-display: 'Playfair Display', serif;
---font-body: 'Plus Jakarta Sans', sans-serif;
+--color-bg-primary: #F9F9F7;
+--color-brand-primary: #1E293B;
+--color-accent-gold: #C89A58;
+--font-display: 'Cormorant Garamond', Georgia, serif;
+--font-body: 'Manrope', -apple-system, BlinkMacSystemFont, sans-serif;
+--font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 ```
 
 **Typography:**
-- **Playfair Display** - Headings, entity names (elegant serif)
-- **Plus Jakarta Sans** - Body text, UI elements (geometric sans)
-- **JetBrains Mono** - Code blocks, text previews
+- **Cormorant Garamond** (`--font-display`) — Headings and prominent titles
+- **Manrope** (`--font-body`) — Body and UI
+- **JetBrains Mono** (`--font-mono`) — Code, JSON, metadata lines
 
 ### State Management
 
@@ -162,6 +194,22 @@ Located in `frontend/src/styles/`:
    - Modal open/close
    - Form inputs
    - Loading states
+
+### Segmented toggles (shared UI)
+
+Multi-option switches (portfolio **List / Grid**, JSON artifact **Form / Raw JSON**) use the same pattern:
+
+- Container: `className="segmented-toggle"` (imported globally via `styles/global.css` → `segmented-toggle.css`).
+- Selected segment: add `active` to that `<button type="button">`.
+- Local spacing only: add a second class (for example `portfolio-view-toggle` in `PortfolioTab.css`).
+
+Inactive segments sit on the tertiary track; the active segment uses elevated background, border, and `--shadow-sm` so it reads clearly as selected (not as part of the content area below).
+
+### Entity chat, presets, and JSON artifacts
+
+On **Entity detail**, the layout is a three-column **notebook** pattern: Resources | Chat | Artifacts. Chat calls `POST /entities/{id}/chat/...` (see `API_REFERENCE.md`). Presets (e.g. `red_team` → markdown artifact, `extract_info` → JSON artifact) are registered in `backend/app/services/preset_registry.py`.
+
+**JSON artifact viewer** (`EntityDetail.tsx` → `ArtifactViewerModal`): valid JSON artifacts open a modal with **Form** (compact `JsonArtifactFormEditor`) and **Raw JSON** (textarea). Saving **Raw JSON** requires parseable JSON; soft line wraps in the textarea are **display only** and do not insert characters. Edits persist via `PUT /entities/{entity_id}/artifacts/{artifact_id}/content`. The textarea uses a flex-friendly width (`min-width: 0` on the control chain) so resize does not create phantom horizontal gaps.
 
 ### Schema-Driven Forms
 
@@ -254,11 +302,9 @@ On desktop, the app shell is viewport-height-bounded and `main` scrolls only whe
 
 **Styling Guidelines:**
 
-- Use CSS variables: `var(--color-bg-primary)`
-- Use spacing scale: `var(--space-4)` (1rem)
-- Use radius scale: `var(--radius-md)` (10px)
-- Add transitions: `transition: all var(--transition-fast)`
-- Use glassmorphism: `backdrop-filter: blur(20px)`
+- Use CSS variables: `var(--color-bg-primary)`, spacing `--space-*`, radii `--radius-*`, shadows `--shadow-*`
+- Prefer existing component patterns (`EntityDetail.css`, `PortfolioTab.css`) over one-off control styling
+- For new two-or-more-option switches, reuse `segmented-toggle` (see **Segmented toggles** above)
 
 ---
 
@@ -298,6 +344,11 @@ On desktop, the app shell is viewport-height-bounded and `main` scrolls only whe
 - [ ] Navigate away and back
 - [ ] View mode is preserved
 - [ ] Selection is preserved
+
+**Entity chat & artifacts:**
+- [ ] Send a message with optional resource/artifact context
+- [ ] Run a preset (e.g. red team / extract info) and see artifact card or update in Artifacts
+- [ ] Open a JSON artifact: Form vs Raw JSON toggle matches portfolio toggle styling; save from either mode
 
 **UI/UX:**
 - [ ] Hover effects on cards

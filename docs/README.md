@@ -9,6 +9,10 @@ This folder is the canonical source for technical documentation.
 - `ARCHITECTURE.md` - Backend/frontend architecture, data flow, storage model, and extension points.
 - `API_REFERENCE.md` - Endpoint contracts and data models.
 
+## Plans
+
+- `plans/2026-03-26-vc-portfolio-agent-harness-design-and-plan.md` — Agent harness, multimodel, tools, and artifact editing (canonical).
+
 ## Recommended Reading Order
 
 1. `../README.md`

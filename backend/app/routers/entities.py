@@ -1,10 +1,11 @@
-from typing import List, Literal
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+import json
+from datetime import datetime
+from typing import Any, List, Literal
+
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-import uuid
-from datetime import datetime
 from app.database import get_db
 from app.models import Entity, Resource, Artifact
 from app.schemas import (
@@ -16,6 +17,7 @@ from app.schemas import (
     ArtifactCreate
 )
 from app.services.storage import storage
+from app.services.artifact_service import create_artifact_for_entity
 import aiofiles
 import mimetypes
 import os
@@ -177,45 +179,18 @@ async def create_artifact(
     - **content**: Markdown content of the artifact
     - **status**: draft or final
     """
-    # Verify entity exists
     result = await db.execute(
         select(Entity).where(Entity.id == entity_id)
     )
-    entity = result.scalar_one_or_none()
-    if not entity:
+    if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Entity not found")
-    
-    # Get next version number
-    result = await db.execute(
-        select(Artifact)
-        .where(Artifact.entity_id == entity_id)
-        .where(Artifact.artifact_type == artifact_type)
-        .order_by(Artifact.version.desc())
-    )
-    latest = result.scalar_one_or_none()
-    version = (latest.version + 1) if latest else 1
-    
-    # Create artifact ID and path
-    artifact_id = str(uuid.uuid4())
-    relative_path = f"{entity_id}/artifacts/{artifact_id}/v{version}.md"
-    
-    # Ensure directory exists and write file
-    await storage.ensure_dir(f"{entity_id}/artifacts/{artifact_id}")
-    await storage.write_file(relative_path, content.encode('utf-8'))
-    
-    # Create database record
-    artifact = Artifact(
-        id=artifact_id,
-        entity_id=entity_id,
-        artifact_type=artifact_type,
-        version=version,
-        status=status,
-        relative_path=relative_path
-    )
-    db.add(artifact)
-    await db.commit()
-    await db.refresh(artifact)
-    
+
+    try:
+        artifact = await create_artifact_for_entity(
+            db, entity_id, artifact_type, content, status
+        )
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Entity not found")
     return artifact
 
 
@@ -307,3 +282,53 @@ async def view_artifact(
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read artifact: {str(e)}")
+
+
+@router.put("/{entity_id}/artifacts/{artifact_id}/content", response_model=ArtifactResponse)
+async def update_artifact_content(
+    entity_id: str,
+    artifact_id: str,
+    payload: Any = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Replace artifact file contents with JSON-serializable data (pretty-printed JSON on disk)."""
+    result = await db.execute(select(Entity).where(Entity.id == entity_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    result = await db.execute(
+        select(Artifact).where(
+            Artifact.id == artifact_id,
+            Artifact.entity_id == entity_id,
+        )
+    )
+    artifact = result.scalar_one_or_none()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    if payload is not None and not isinstance(
+        payload, (dict, list, str, int, float, bool)
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Body must be JSON: object, array, string, number, boolean, or null",
+        )
+
+    try:
+        text = json.dumps(payload, indent=2, ensure_ascii=False)
+    except (TypeError, ValueError) as e:
+        raise HTTPException(
+            status_code=400, detail=f"Value is not JSON-serializable: {e}"
+        ) from e
+
+    try:
+        await storage.write_file(artifact.relative_path, text.encode("utf-8"))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to write artifact: {e}"
+        ) from e
+
+    artifact.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(artifact)
+    return artifact

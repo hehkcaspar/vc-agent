@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import init_db
-from app.routers import entities, parkinglot, ingest
+from app.routers import entities, parkinglot, ingest, chat
 
 
 @asynccontextmanager
@@ -33,6 +33,7 @@ app.add_middleware(
 
 # Include routers
 app.include_router(entities.router)
+app.include_router(chat.router)
 app.include_router(parkinglot.router)
 app.include_router(ingest.router)
 

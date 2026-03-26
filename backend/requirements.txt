@@ -1,5 +1,5 @@
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
+fastapi>=0.115.0,<0.116.0
+uvicorn[standard]>=0.32.0,<0.35.0
 # 2.0.25 (and other early 2.0.x) crash on Python 3.13 at import:
 # AssertionError: SQLCoreOperations ... TypingOnly ... __static_attributes__, __firstlineno__
 sqlalchemy[asyncio]==2.0.48
@@ -10,3 +10,12 @@ pydantic==2.12.5
 pydantic-settings==2.10.1
 python-dotenv==1.2.2
 aiofiles==23.2.1
+google-genai>=1.56.0,<2.0.0
+# LangChain Deep Agents (chat harness); pins verified for Python 3.13 on Windows
+deepagents==0.4.12
+langchain==1.2.13
+langchain-core==1.2.22
+langchain-google-genai==4.2.1
+langchain-openai==1.1.12
+pytest>=8.0.0
+httpx>=0.28.1,<1.0.0

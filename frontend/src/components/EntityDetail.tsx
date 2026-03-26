@@ -1,4 +1,6 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { init as initPptxPreview } from 'pptx-preview';
 import { Entity, Resource, Artifact, ArtifactView } from '../types';
 import { useEntityResources, useEntityArtifacts } from '../hooks/useEntities';
@@ -16,6 +18,8 @@ import {
   withBuiltinPdfViewerOptions,
   revokeBlobObjectUrl,
 } from '../lib/resourcePreview';
+import { EntityConversation } from './EntityConversation';
+import { JsonArtifactFormEditor } from './JsonArtifactFormEditor';
 import './EntityDetail.css';
 
 // Resource types that can be added
@@ -25,6 +29,22 @@ const RESOURCE_TYPES = [
   { id: 'url', label: '🔗 URL', description: 'Add a web link' },
 ] as const;
 
+function artifactDisplayLabel(artifact: Artifact): string {
+  const t = artifact.title?.trim();
+  if (t) return `${t} (v${artifact.version})`;
+  return `${artifact.artifact_type} (v${artifact.version})`;
+}
+
+function tryFormatArtifactJson(content: string): string | null {
+  const t = content.trim();
+  if (!t.startsWith('{') && !t.startsWith('[')) return null;
+  try {
+    return JSON.stringify(JSON.parse(t), null, 2);
+  } catch {
+    return null;
+  }
+}
+
 interface EntityDetailProps {
   entity: Entity;
   onBack: () => void;
@@ -32,7 +52,29 @@ interface EntityDetailProps {
 
 export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const { resources, isLoading: resourcesLoading, mutate: mutateResources } = useEntityResources(entity.id);
-  const { artifacts, isLoading: artifactsLoading } = useEntityArtifacts(entity.id);
+  const { artifacts, isLoading: artifactsLoading, mutate: mutateArtifacts } = useEntityArtifacts(entity.id);
+
+  const [chatResourceIds, setChatResourceIds] = useState<Set<string>>(() => new Set());
+  const [chatArtifactIds, setChatArtifactIds] = useState<Set<string>>(() => new Set());
+  const [viewerArtifact, setViewerArtifact] = useState<Artifact | null>(null);
+
+  const toggleChatResource = useCallback((id: string) => {
+    setChatResourceIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleChatArtifact = useCallback((id: string) => {
+    setChatArtifactIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   return (
     <div className="entity-detail">
@@ -54,28 +96,58 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
         </div>
       </div>
 
-      <div className="entity-zones">
-        <ResourcesZoneWithHeader 
+      <div className="entity-zones entity-zones--notebook">
+        <ResourcesZoneWithHeader
           entityId={entity.id}
           resources={resources}
           isLoading={resourcesLoading}
           onSuccess={mutateResources}
+          chatSelectedIds={chatResourceIds}
+          onToggleChatSelected={toggleChatResource}
         />
 
-        <div className="zone">
+        <div className="zone zone--chat-main">
+          <div className="zone-content zone-content--conversation">
+            <EntityConversation
+              key={entity.id}
+              entityId={entity.id}
+              resources={resources}
+              artifacts={artifacts}
+              selectedResources={chatResourceIds}
+              selectedArtifacts={chatArtifactIds}
+              onArtifactsChanged={() => mutateArtifacts()}
+              onViewArtifact={setViewerArtifact}
+            />
+          </div>
+        </div>
+
+        <div className="zone zone--sidebar">
           <div className="zone-header">
             <h3>
-              📝 Artifacts
-              <span className="zone-count">
-                ({artifacts?.length || 0})
-              </span>
+              Artifacts
+              <span className="zone-count">({artifacts?.length || 0})</span>
             </h3>
           </div>
           <div className="zone-content">
-            <ArtifactsZone artifacts={artifacts} isLoading={artifactsLoading} entityId={entity.id} />
+            <ArtifactsZone
+              artifacts={artifacts}
+              isLoading={artifactsLoading}
+              chatSelectedIds={chatArtifactIds}
+              onToggleChatSelected={toggleChatArtifact}
+              onOpenArtifact={setViewerArtifact}
+            />
           </div>
         </div>
       </div>
+
+      {viewerArtifact && (
+        <ArtifactViewerModal
+          artifact={viewerArtifact}
+          entityId={entity.id}
+          onClose={() => setViewerArtifact(null)}
+          onSaved={() => void mutateArtifacts()}
+        />
+      )}
     </div>
   );
 }
@@ -380,9 +452,18 @@ interface ResourcesZoneWithHeaderProps {
   resources?: Resource[];
   isLoading: boolean;
   onSuccess: () => void;
+  chatSelectedIds: Set<string>;
+  onToggleChatSelected: (id: string) => void;
 }
 
-function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: ResourcesZoneWithHeaderProps) {
+function ResourcesZoneWithHeader({
+  entityId,
+  resources,
+  isLoading,
+  onSuccess,
+  chatSelectedIds,
+  onToggleChatSelected,
+}: ResourcesZoneWithHeaderProps) {
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
   const [previewType, setPreviewType] = useState<
@@ -529,7 +610,7 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
   const isPreviewMode = selectedResource !== null;
 
   return (
-    <div className="zone">
+    <div className="zone zone--sidebar">
       <div className="zone-header">
         {isPreviewMode ? (
           // Preview header - shows back button, filename, and download
@@ -550,7 +631,7 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
           // List header - shows title and add button
           <>
             <h3>
-              📎 Resources
+              Resources
               <span className="zone-count">
                 ({resources?.length || 0})
               </span>
@@ -645,6 +726,17 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
                 ) : (
                   <span className="view-indicator">👁</span>
                 )}
+                <label
+                  className="resource-chat-toggle"
+                  title="Include in chat context"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    checked={chatSelectedIds.has(resource.id)}
+                    onChange={() => onToggleChatSelected(resource.id)}
+                  />
+                </label>
               </div>
             ))}
           </div>
@@ -654,17 +746,19 @@ function ResourcesZoneWithHeader({ entityId, resources, isLoading, onSuccess }: 
   );
 }
 
-function ArtifactsZone({ 
-  artifacts, 
+function ArtifactsZone({
+  artifacts,
   isLoading,
-  entityId
-}: { 
-  artifacts?: Artifact[]; 
+  chatSelectedIds,
+  onToggleChatSelected,
+  onOpenArtifact,
+}: {
+  artifacts?: Artifact[];
   isLoading: boolean;
-  entityId: string;
+  chatSelectedIds: Set<string>;
+  onToggleChatSelected: (id: string) => void;
+  onOpenArtifact: (artifact: Artifact) => void;
 }) {
-  const [viewingArtifact, setViewingArtifact] = useState<Artifact | null>(null);
-
   if (isLoading) {
     return <div className="empty-zone">Loading...</div>;
   }
@@ -680,77 +774,285 @@ function ArtifactsZone({
           <div 
             key={artifact.id} 
             className="resource-item"
-            onClick={() => setViewingArtifact(artifact)}
+            onClick={() => onOpenArtifact(artifact)}
           >
             <div className="resource-icon">📝</div>
             <div className="resource-info">
               <div className="resource-name">
-                {artifact.artifact_type} (v{artifact.version})
+                {artifactDisplayLabel(artifact)}
               </div>
               <div className="resource-meta">
                 {artifact.status} • {new Date(artifact.created_at).toLocaleDateString()}
               </div>
             </div>
             <span className="view-indicator">👁</span>
+            <label
+              className="resource-chat-toggle"
+              title="Include in chat context"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="checkbox"
+                checked={chatSelectedIds.has(artifact.id)}
+                onChange={() => onToggleChatSelected(artifact.id)}
+              />
+            </label>
           </div>
         ))}
       </div>
-      {viewingArtifact && (
-        <ArtifactViewerModal
-          artifact={viewingArtifact}
-          entityId={entityId}
-          onClose={() => setViewingArtifact(null)}
-        />
-      )}
     </>
   );
 }
 
-function ArtifactViewerModal({ 
-  artifact, 
-  entityId, 
-  onClose 
-}: { 
-  artifact: Artifact; 
-  entityId: string; 
+function ArtifactViewerModal({
+  artifact,
+  entityId,
+  onClose,
+  onSaved,
+}: {
+  artifact: Artifact;
+  entityId: string;
   onClose: () => void;
+  onSaved?: () => void;
 }) {
   const [content, setContent] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [jsonDraft, setJsonDraft] = useState<unknown | null>(null);
+  const [jsonBaseline, setJsonBaseline] = useState<string | null>(null);
+  const [rawJsonText, setRawJsonText] = useState('');
+  const [showRawJson, setShowRawJson] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    const loadContent = async () => {
+    let cancelled = false;
+    setIsLoading(true);
+    setJsonDraft(null);
+    setJsonBaseline(null);
+    setSaveError(null);
+    setShowRawJson(false);
+    (async () => {
       try {
         const response = await fetch(`/api/entities/${entityId}/artifacts/${artifact.id}/view`);
         const data: ArtifactView = await response.json();
+        if (cancelled) return;
         setContent(data.content);
-      } catch (err) {
-        setContent('Error loading content');
+        const raw = data.content;
+        if (tryFormatArtifactJson(raw) !== null) {
+          try {
+            const parsed = JSON.parse(raw.trim()) as unknown;
+            setJsonDraft(parsed);
+            const stable = JSON.stringify(parsed);
+            setJsonBaseline(stable);
+            setRawJsonText(JSON.stringify(parsed, null, 2));
+          } catch {
+            setJsonDraft(null);
+            setJsonBaseline(null);
+            setRawJsonText('');
+          }
+        } else {
+          setJsonDraft(null);
+          setJsonBaseline(null);
+          setRawJsonText('');
+        }
+      } catch {
+        if (!cancelled) setContent('Error loading content');
       } finally {
-        setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       }
+    })();
+    return () => {
+      cancelled = true;
     };
-    loadContent();
   }, [artifact.id, entityId]);
+
+  const isJsonArtifact = jsonDraft !== null && jsonBaseline !== null;
+
+  const rawJsonCanonical = (): string | null => {
+    try {
+      return JSON.stringify(JSON.parse(rawJsonText));
+    } catch {
+      return null;
+    }
+  };
+
+  const dirty = (() => {
+    if (!isJsonArtifact || jsonBaseline === null) return false;
+    if (showRawJson) {
+      const c = rawJsonCanonical();
+      if (c === null) return true;
+      return c !== jsonBaseline;
+    }
+    return JSON.stringify(jsonDraft) !== jsonBaseline;
+  })();
+
+  const rawJsonInvalidMessage = (): string | null => {
+    if (!showRawJson) return null;
+    try {
+      JSON.parse(rawJsonText);
+      return null;
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Invalid JSON';
+    }
+  };
+
+  const handleSaveJson = async () => {
+    if (!isJsonArtifact || jsonBaseline === null) return;
+    setSaveError(null);
+
+    let payload: unknown;
+    if (showRawJson) {
+      try {
+        payload = JSON.parse(rawJsonText);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : 'Parse error';
+        setSaveError(`Invalid JSON — fix syntax before saving. (${msg})`);
+        return;
+      }
+    } else {
+      if (jsonDraft === null) return;
+      payload = jsonDraft;
+    }
+
+    setSaving(true);
+    try {
+      await api.entities.updateArtifactContent(entityId, artifact.id, payload);
+      const stable = JSON.stringify(payload);
+      setJsonBaseline(stable);
+      setJsonDraft(payload);
+      setRawJsonText(JSON.stringify(payload, null, 2));
+      onSaved?.();
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal viewer-modal" onClick={e => e.stopPropagation()}>
+      <div
+        className={
+          `modal viewer-modal artifact-viewer-modal${isJsonArtifact ? ' artifact-viewer-modal--json' : ''}`
+        }
+        onClick={e => e.stopPropagation()}
+      >
         <div className="modal-header">
-          <h3>{artifact.artifact_type} (v{artifact.version})</h3>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <h3>{artifactDisplayLabel(artifact)}</h3>
+          <button type="button" className="modal-close" onClick={onClose}>×</button>
         </div>
         <div className="modal-body viewer-body">
           {isLoading ? (
             <div className="loading">Loading...</div>
           ) : content !== null ? (
-            <div className="markdown-viewer">
-              {content.split('\n').map((line, i) => (
-                <p key={i}>{line || <br />}</p>
-              ))}
-            </div>
+            isJsonArtifact ? (
+              <div className="artifact-json-editor-shell">
+                <div className="artifact-viewer-json-toolbar">
+                  <div className="segmented-toggle" role="tablist" aria-label="View mode">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={!showRawJson}
+                      className={!showRawJson ? 'active' : ''}
+                      onClick={() => {
+                        if (!showRawJson) return;
+                        try {
+                          const p = JSON.parse(rawJsonText) as unknown;
+                          setJsonDraft(p);
+                          setShowRawJson(false);
+                          setSaveError(null);
+                        } catch (e) {
+                          const msg = e instanceof Error ? e.message : 'Parse error';
+                          setSaveError(`Invalid JSON — cannot switch to Form. (${msg})`);
+                        }
+                      }}
+                    >
+                      Form
+                    </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={showRawJson}
+                      className={showRawJson ? 'active' : ''}
+                      onClick={() => {
+                        setRawJsonText(JSON.stringify(jsonDraft, null, 2));
+                        setSaveError(null);
+                        setShowRawJson(true);
+                      }}
+                    >
+                      Raw JSON
+                    </button>
+                  </div>
+                  {dirty && <span className="artifact-viewer-dirty">Unsaved changes</span>}
+                  {showRawJson && rawJsonInvalidMessage() && (
+                    <span className="artifact-viewer-json-invalid" role="status">
+                      Invalid JSON
+                    </span>
+                  )}
+                </div>
+                {saveError && (
+                  <div className="entity-conversation-error artifact-viewer-save-error">{saveError}</div>
+                )}
+                {showRawJson ? (
+                  <textarea
+                    className="artifact-json-textarea"
+                    value={rawJsonText}
+                    onChange={(e) => setRawJsonText(e.target.value)}
+                    spellCheck={false}
+                    autoComplete="off"
+                    aria-label="Raw JSON"
+                  />
+                ) : (
+                  <div className="artifact-json-form-shell">
+                    <JsonArtifactFormEditor
+                      value={jsonDraft}
+                      onChange={setJsonDraft}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="markdown-viewer">
+                <ReactMarkdown
+                  remarkPlugins={[remarkGfm]}
+                  components={{
+                    a: ({ href, children, ...props }) => (
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        {...props}
+                      >
+                        {children}
+                      </a>
+                    ),
+                  }}
+                >
+                  {content}
+                </ReactMarkdown>
+              </div>
+            )
           ) : null}
         </div>
+        {isJsonArtifact && (
+          <div className="modal-footer artifact-viewer-footer">
+            <button type="button" className="btn-secondary" onClick={onClose}>
+              Close
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => void handleSaveJson()}
+              disabled={
+                saving ||
+                !dirty ||
+                (showRawJson && rawJsonInvalidMessage() !== null)
+              }
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

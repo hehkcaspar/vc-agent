@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
+import { ChatModelProfileProvider } from '../context/ChatModelProfileContext';
 import { PortfolioTab } from './PortfolioTab';
+import { SidebarModelSelect } from './SidebarModelSelect';
 import './Layout.css';
 
 type TabId = 'portfolio';
 type Theme = 'light' | 'dark';
 
-export function Layout() {
+function LayoutShell() {
   const [activeTab, setActiveTab] = useState<TabId>('portfolio');
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -105,6 +107,7 @@ export function Layout() {
           </button>
         </nav>
         <div className="sidebar-footer">
+          <SidebarModelSelect />
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle Theme">
             <span className="nav-icon">{theme === 'light' ? '🌙' : '☀️'}</span>
             <span className="theme-text">{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
@@ -117,5 +120,13 @@ export function Layout() {
         {renderTab()}
       </main>
     </div>
+  );
+}
+
+export function Layout() {
+  return (
+    <ChatModelProfileProvider>
+      <LayoutShell />
+    </ChatModelProfileProvider>
   );
 }

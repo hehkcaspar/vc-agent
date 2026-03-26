@@ -23,6 +23,9 @@ class Entity(Base):
 
     resources = relationship("Resource", back_populates="entity", cascade="all, delete-orphan")
     artifacts = relationship("Artifact", back_populates="entity", cascade="all, delete-orphan")
+    chat_sessions = relationship(
+        "ConversationSession", back_populates="entity", cascade="all, delete-orphan"
+    )
 
 
 class IngestItem(Base):
@@ -63,6 +66,7 @@ class Artifact(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
     artifact_type = Column(String, nullable=False)  # memo, factsheet, report, other
+    title = Column(String, nullable=True)
     version = Column(Integer, default=1)
     status = Column(String, default="draft")  # draft, final
     relative_path = Column(String, nullable=False)
@@ -70,3 +74,86 @@ class Artifact(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     entity = relationship("Entity", back_populates="artifacts")
+
+
+class ConversationSession(Base):
+    __tablename__ = "conversation_sessions"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
+    title = Column(String, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    entity = relationship("Entity", back_populates="chat_sessions")
+    messages = relationship(
+        "ConversationMessage",
+        back_populates="session",
+        cascade="all, delete-orphan",
+    )
+
+
+class ConversationMessage(Base):
+    __tablename__ = "conversation_messages"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    session_id = Column(String, ForeignKey("conversation_sessions.id"), nullable=False)
+    role = Column(String, nullable=False)  # user, assistant, system
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    session = relationship("ConversationSession", back_populates="messages")
+
+
+class ChatCompletionJob(Base):
+    """Background deep-agent chat run; client polls for step_detail and completion."""
+
+    __tablename__ = "chat_completion_jobs"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
+    session_id = Column(String, ForeignKey("conversation_sessions.id"), nullable=False)
+    user_message_id = Column(String, ForeignKey("conversation_messages.id"), nullable=False)
+
+    status = Column(String, nullable=False, default="pending")
+    # Human-readable progress for the UI (tool names, phase, errors).
+    step_detail = Column(String, nullable=True)
+    agent_run_id = Column(String, nullable=True)
+    assistant_message_id = Column(String, ForeignKey("conversation_messages.id"), nullable=True)
+    error_message = Column(Text, nullable=True)
+    warnings_json = Column(Text, nullable=True)
+    tool_trace_json = Column(Text, nullable=True)
+
+    resource_ids_json = Column(Text, nullable=False)
+    artifact_ids_json = Column(Text, nullable=False)
+    model_profile_id = Column(String, nullable=True)
+    harness_extras = Column(Text, nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class ArtifactEditEvent(Base):
+    """Audit log for artifact edit attempts (Option B harness; design §8.5)."""
+
+    __tablename__ = "artifact_edit_events"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    correlation_id = Column(String, nullable=False, index=True)
+    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
+    session_id = Column(String, ForeignKey("conversation_sessions.id"), nullable=True)
+    artifact_id = Column(String, nullable=True)
+
+    requested_mode = Column(String, nullable=True)  # versioned | overwrite
+    resolved_mode = Column(String, nullable=True)
+    state = Column(String, nullable=False)
+    intent_summary = Column(Text, nullable=True)
+    tool_context_json = Column(Text, nullable=True)
+    validation_result_json = Column(Text, nullable=True)
+    before_checksum = Column(String, nullable=True)
+    after_checksum = Column(String, nullable=True)
+    error_message = Column(Text, nullable=True)
+    run_id = Column(String, nullable=True)
+    pipeline_version = Column(String, default="option_b")
+
+    created_at = Column(DateTime, default=datetime.utcnow)
