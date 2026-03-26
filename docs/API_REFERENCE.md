@@ -217,27 +217,41 @@ Resolve a parking lot item to an entity.
 
 ---
 
-## Entity chat (Gemini + optional Deep Agent harness)
+## Entity chat (Gemini one-shot + optional Deep Agent harness)
 
 All routes are scoped to an existing entity.
 
-**Default message path (legacy):** one-shot generation via **google-genai**; set `GEMINI_API_KEY` or `GOOGLE_API_KEY`.
+### Which path runs for `POST .../messages`?
 
-**Optional harness:** when `CHAT_USE_DEEP_AGENT=true`, `POST .../messages` runs a **LangChain Deep Agents** graph with entity-scoped tools (list/read/resolve/validate/apply artifacts). Model profiles: `gemini_google` (LangChain `ChatGoogleGenerativeAI` + optional Google Search tool binding) and `kimi_moonshot` (**LangChain `ChatOpenAI`** against Moonshot’s **OpenAI-compatible** API, `https://api.moonshot.ai/v1`). Set `MOONSHOT_API_KEY` or alias `KIMI_CODE_API_KEY` (same Open Platform key used for coding/agent tools; not the separate `api.moonshot.ai/anthropic` Claude-style URL). Optional: `MOONSHOT_BASE_URL`, `MOONSHOT_MODEL`. See `backend/app/config.py` and `backend/app/services/model_profiles.py`.
+The server computes an **effective** deep-agent flag per request:
+
+```text
+use_deep_agent = body.use_deep_agent if body.use_deep_agent is not None else CHAT_USE_DEEP_AGENT
+```
+
+- **`use_deep_agent` true:** LangChain **Deep Agents** (`create_deep_agent`) with entity-scoped tools (`portfolio_*` in `portfolio_deep_agent.py`). The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API (e.g. read artifacts) and **poll** job status for step text.
+- **`use_deep_agent` false:** **Legacy** one-shot call via **google-genai** (`generate_with_context`). Returns **`200 OK`** with the assistant message in the body (no job).
+
+The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) always use the legacy Gemini preset pipeline, not the harness.
+
+**Context selection:** Selected `resource_ids` / `artifact_ids` inline excerpts into the user turn and help edit resolution. They are **optional** in Agent mode: tools can **list/read** all entity artifacts and resources without prior selection.
+
+### Environment (summary)
 
 | Variable | Purpose |
 |----------|---------|
-| `GEMINI_MODEL` | Main chat and general generation (default `gemini-3.1-pro-preview`) |
-| `GEMINI_METADATA_EXTRACTION_MODEL` | Structured JSON extraction for presets such as `extract_info` (default `gemini-3.1-flash-lite-preview`) |
-| `CHAT_USE_DEEP_AGENT` | When true, use Deep Agents for `POST .../messages` (default false) |
-| `CHAT_AGENT_RECURSION_LIMIT` | LangGraph recursion limit for harness (default 50) |
-| `CHAT_ARTIFACT_OVERWRITE_ENABLED` | Allow in-place artifact overwrite from harness tools (default false) |
-| `CHAT_ARTIFACT_DEFAULT_EDIT_MODE` | `versioned` or `overwrite` default when ambiguous |
-| `CHAT_ARTIFACT_RESOLVE_MIN_SCORE` | Minimum resolver score before applying edits |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Legacy chat + presets |
+| `GEMINI_MODEL` | Main chat model id (default `gemini-3.1-pro-preview`) |
+| `GEMINI_METADATA_EXTRACTION_MODEL` | Presets such as `extract_info` (default `gemini-3.1-flash-lite-preview`) |
+| `CHAT_USE_DEEP_AGENT` | Server default for deep agent when request omits `use_deep_agent` |
+| `CHAT_DEFAULT_MODEL_PROFILE` | Default profile id if client omits `model_profile_id` |
+| `CHAT_AGENT_RECURSION_LIMIT` | LangGraph recursion limit (default 50) |
+| `CHAT_ARTIFACT_*` | Edit policy (overwrite gate, default mode, resolver threshold) |
+| `MOONSHOT_API_KEY`, `KIMI_CODE_API_KEY`, URLs, `KIMI_CODE_MODEL`, etc. | Moonshot Open Platform vs Kimi Code routing — see `backend/app/config.py`, `backend/.env_sample`, `model_profiles.py` |
 
-Other optional settings: `CHAT_ENABLE_GOOGLE_SEARCH`, `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_ARTIFACT_CHARS`, `CHAT_MAX_HISTORY_MESSAGES` (see `backend/app/config.py`). **Preset runs** remain on the dedicated preset pipeline (not the harness).
+Other: `CHAT_ENABLE_GOOGLE_SEARCH`, attachment/history limits. Deep-agent steps are pushed to `chat_completion_jobs.step_detail` for UI polling.
 
-Mutating artifact content from the harness goes through **Option B**: resolve → validate → `portfolio_apply_artifact_edit` → SQLite **`artifact_edit_events`** audit rows (states such as `intent_received`, `edit_payload_validated`, `applied`, `failed`). Domain tools also include **resource** list/read (`portfolio_list_resources`, `portfolio_read_resource`) for parity with entity materials (text/URL; large binaries may be rejected in-tool).
+**Artifact edits (Option B):** resolve → validate → `portfolio_apply_artifact_edit` → audit rows in **`artifact_edit_events`**. Tools include resource list/read for entity materials (text/URL; some binaries rejected in-tool).
 
 ### `GET /entities/{entity_id}/chat/presets`
 
@@ -262,15 +276,31 @@ Send a user turn. JSON body:
 ```json
 {
   "text": "What are the top risks?",
-  "resource_ids": ["uuid", "..."],
-  "artifact_ids": ["uuid", "..."],
-  "model_profile_id": "optional: gemini_google | kimi_moonshot"
+  "resource_ids": ["uuid"],
+  "artifact_ids": ["uuid"],
+  "model_profile_id": "gemini_google",
+  "use_deep_agent": true
 }
 ```
 
-With **legacy** chat, checked resources and artifacts are attached as context (PDF/images as native parts where supported). With **Deep Agent** chat, text-inline context is inlined into the user message; binary attachments may be skipped with warnings (see harness preamble builder). Google Search follows the active model profile when enabled.
+| Field | Required | Description |
+|-------|----------|-------------|
+| `text` | yes | User message |
+| `resource_ids` | no | Canonical resources to emphasize this turn |
+| `artifact_ids` | no | Canonical artifacts to emphasize / edit hints |
+| `model_profile_id` | no | `gemini_google` \| `kimi_moonshot` (harness only) |
+| `use_deep_agent` | no | If set, overrides server `CHAT_USE_DEEP_AGENT` for **this** message |
 
-Returns the new assistant message, optional `warnings`, and when the harness is on: optional `run_id` and coarse `tool_trace`.
+**Responses**
+
+- **`202 Accepted`** — Deep agent path. Body (`ChatMessageJobAccepted`): `job_id`, `user_message` (already stored), `warnings`. Client should **poll** `GET .../jobs/{job_id}` until `status` is `succeeded` or `failed`; then load session messages or read `assistant_message` from the job payload.
+- **`200 OK`** — Legacy path. Body (`ChatMessageResult`): `assistant_message`, `warnings` (no `run_id` / `tool_trace` unless you extend legacy).
+
+Legacy: multimodal context where supported. Harness: text-inline preamble from selections; tools can fetch the rest. Search behavior follows the active profile when enabled.
+
+### `GET /entities/{entity_id}/chat/sessions/{session_id}/jobs/{job_id}`
+
+Poll deep-agent progress after a `202` from `POST .../messages`. Returns `ChatMessageJobStatus`: `status` (`pending` \| `running` \| `succeeded` \| `failed`), `step_detail` (human-readable step for UI), optional `assistant_message` when succeeded, `error_message`, `warnings`, `run_id`, `tool_trace`.
 
 ### `POST /entities/{entity_id}/chat/presets/{preset_id}/run`
 
@@ -334,6 +364,10 @@ When `session_id` is provided, the run can append a short assistant message to t
 | relative_path | string | Path under `DATA_ROOT` to file (typically `v{n}.md` or `v{n}.json`) |
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
+
+### Chat completion job (Deep Agent only)
+
+Persisted in **`chat_completion_jobs`** for async turns. Not exposed as a full CRUD resource; use the job GET above. Stores `status`, `step_detail`, FKs to `user_message_id` / `assistant_message_id`, serialized attachment ids, `harness_extras`, `warnings_json`, `tool_trace_json`, `agent_run_id` (correlates with `artifact_edit_events.run_id`).
 
 ### IngestItem (Parking Lot)
 | Field | Type | Description |

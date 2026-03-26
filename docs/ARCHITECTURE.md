@@ -108,12 +108,15 @@ class StorageAdapter(ABC):
     async def exists(self, relative_path: str) -> bool
 ```
 
-#### Portfolio chat harness (optional)
+#### Portfolio chat (legacy + optional Deep Agent)
 
-- **Legacy path:** `POST .../chat/sessions/{id}/messages` calls `google-genai` once per turn with optional Google Search (presets unchanged).
-- **Deep Agent path** (`CHAT_USE_DEEP_AGENT`): same HTTP route invokes **LangChain Deep Agents** (`create_deep_agent`) in a worker thread with entity-scoped tools in `portfolio_deep_agent.py` (artifacts + resources list/read, edit pipeline). Canonical artifact **writes** use **Option B** in `artifact_editing.py` (resolve → validate → apply); attempts are logged to **`artifact_edit_events`**.
-- **Versioning:** new versions follow `create_artifact_for_entity` lineage rules (`artifact_service.py`). **Overwrite** replaces bytes at the existing `relative_path` and updates `updated_at`, gated by `CHAT_ARTIFACT_OVERWRITE_ENABLED`.
-- **Storage:** `artifact_service` resolves `storage` through `app.services.storage.storage` so tests or alternate adapters can swap the module attribute consistently.
+- **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings (`schemas.ChatMessageCreate`).
+- **Legacy path:** synchronous `google-genai` (`generate_with_context`); response **`200`** with `ChatMessageResult`. Presets (`POST .../presets/.../run`) always use this Gemini pipeline, not Deep Agents.
+- **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → `portfolio_deep_agent.on_status`). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages. This keeps long runs from blocking other HTTP traffic.
+- **Tools:** `portfolio_deep_agent.build_portfolio_tools` — list/read artifacts and resources, resolve target, validate/apply edits. Agent can **discover** corpus via tools; optional **`resource_ids` / `artifact_ids`** seed the turn and help edit resolution (`session_artifact_ids`).
+- **Option B edits:** `artifact_editing.py` (resolve → validate → apply); audit **`artifact_edit_events`**; versioning via `artifact_service.create_artifact_for_entity` / overwrite policy.
+- **Profiles:** `model_profiles.py` — `gemini_google`, `kimi_moonshot` (Moonshot vs Kimi Code base URLs per env). **`CHAT_DEFAULT_MODEL_PROFILE`** when `model_profile_id` omitted.
+- **Storage:** `artifact_service` uses `app.services.storage.storage` for testability.
 
 ## Data Flow
 
@@ -216,6 +219,8 @@ DATA_ROOT/
             └── v2.md
 ```
 
+SQLite **`create_all`** runs on startup; incremental **SQLite** column adds for older DBs live in `database.py` (e.g. `artifacts.title`, `artifact_edit_events.*`). Optional offline reset: `backend/scripts/reset_sqlite_db.py --yes` (stop the API first).
+
 ## Database Schema
 
 ```sql
@@ -273,6 +278,11 @@ artifacts (
     updated_at TIMESTAMP,
     FOREIGN KEY (entity_id) REFERENCES entities(id)
 )
+
+-- Chat (sessions + messages + async deep-agent jobs)
+-- conversation_sessions, conversation_messages: see SQLAlchemy models
+-- chat_completion_jobs: pending/running deep-agent work; links user_message_id → assistant_message_id when done
+-- artifact_edit_events: audit log for harness artifact edits (Option B)
 ```
 
 ## Frontend Architecture
@@ -322,7 +332,7 @@ App
                 │   └── .zone-content (scrolls)
                 │       ├── ResourceList
                 │       └── ResourcePreview (PDF/Image/Text/HTML viewer)
-                ├── EntityConversation (.zone--chat-main): sessions, Gemini transcript, preset shortcuts, artifact cards
+                ├── EntityConversation (.zone--chat-main): sessions, transcript, **Run preset** dashed shortcuts (one-shot) vs **Agent** pill (persistent mode, On/Off + `use_deep_agent`), composer shell (+ / send), **async polling** on `202` + status line in textarea; optional `ChatModelProfileContext` / sidebar model selector (Layout)
                 ├── Artifacts .zone
                 │   ├── ZoneHeader
                 │   └── .zone-content (scrolls)
