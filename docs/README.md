@@ -28,7 +28,8 @@ This folder is the canonical source for technical documentation.
 
 ## Update Checklist
 
-- If API behavior changes, update `API_REFERENCE.md`.
+- If API behavior changes, update `API_REFERENCE.md` (including chat `202` vs `200`, `use_deep_agent`, job polling).
 - If system behavior/data flow changes, update `ARCHITECTURE.md`.
 - If setup/workflow changes, update `DEVELOPER_GUIDE.md`.
 - If user-facing capabilities change, update `../README.md`.
+- Historical design notes live in `plans/`; treat `API_REFERENCE.md` + `ARCHITECTURE.md` as the **source of truth** for current behavior.

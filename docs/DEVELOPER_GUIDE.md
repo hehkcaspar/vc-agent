@@ -8,7 +8,7 @@ For documentation map, see `README.md`.
 
 ### Prerequisites
 
-- Python 3.11+
+- **Python 3.13** (recommended; 3.11+ generally ok — see root `README.md` for pin notes)
 - Node.js 18+
 - Windows 11 (or any OS with PowerShell support)
 
@@ -61,7 +61,11 @@ $env:GOOGLE_API_KEY = "your-key"
 
 Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info`), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_ARTIFACT_CHARS`, `CHAT_MAX_HISTORY_MESSAGES`.
 
-**Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (default false), `CHAT_DEFAULT_MODEL_PROFILE` (e.g. `gemini_google`; override per message with JSON `model_profile_id`), `CHAT_AGENT_RECURSION_LIMIT`, Moonshot OpenAI-compatible chat: `MOONSHOT_API_KEY` or **`KIMI_CODE_API_KEY`** (same Open Platform Bearer key), plus `MOONSHOT_BASE_URL` / `MOONSHOT_MODEL` for `kimi_moonshot`. Edit-policy flags: `CHAT_ARTIFACT_OVERWRITE_ENABLED`, `CHAT_ARTIFACT_DEFAULT_EDIT_MODE`, `CHAT_ARTIFACT_RESOLVE_MIN_SCORE`. Enable **LangSmith** tracing via standard LangChain env vars if desired (`LANGCHAIN_TRACING_V2`, etc.). See `backend/app/config.py` and `backend/.env_sample`.
+**Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (server default when the client omits `use_deep_agent`), `CHAT_DEFAULT_MODEL_PROFILE`, per-message `model_profile_id` / **`use_deep_agent`** body field, `CHAT_AGENT_RECURSION_LIMIT`, Moonshot / Kimi Code keys and URLs (`MOONSHOT_*`, `KIMI_CODE_*`, see `config.py`). Edit-policy: `CHAT_ARTIFACT_*`. **LangSmith:** standard LangChain env vars. See `backend/.env_sample`.
+
+**SQLite dev reset:** with the API stopped, from `backend`:  
+`..\venv\Scripts\python.exe scripts\reset_sqlite_db.py --yes`  
+recreates `data/vc_portfolio.db` from current models (does not delete files under `data/entities/`).
 
 ### 3. Run Development Servers
 
@@ -108,28 +112,36 @@ vc-agent/
 │   │   │   ├── ingest.py            # Ingestion endpoint
 │   │   │   └── parkinglot.py        # Parking lot management
 │   │   └── services/
-│   │       ├── storage.py           # Storage adapter
-│   │       ├── parking.py           # Parking lot manager
-│   │       ├── resolver.py          # Entity resolver
-│   │       ├── materializer.py      # Resource materializer
-│   │       ├── gemini_runner.py     # Gemini generate + JSON extraction helpers
-│   │       ├── preset_registry.py   # Chat preset definitions (e.g. red_team, extract_info)
-│   │       └── artifact_service.py  # Artifact file helpers / versioning
+│   │       ├── storage.py             # Storage adapter
+│   │       ├── parking.py             # Parking lot manager
+│   │       ├── resolver.py            # Entity resolver
+│   │       ├── materializer.py        # Resource materializer
+│   │       ├── gemini_runner.py       # Legacy Gemini generate + JSON extraction
+│   │       ├── gemini_context.py      # Multimodal parts + harness attachment text
+│   │       ├── preset_registry.py     # Chat presets (red_team, extract_info)
+│   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent)
+│   │       ├── artifact_service.py    # Artifact create/version/overwrite helpers
+│   │       ├── artifact_editing.py    # Option B resolve/validate/apply + edit events
+│   │       ├── metadata_extraction.py # Normalized JSON for extract_info
+│   │       ├── model_profiles.py      # Gemini / Kimi ChatModel wiring for harness
+│   │       └── portfolio_deep_agent.py # Deep Agents tools + invoke wrapper
 │   ├── requirements.txt
 │   └── run.py                       # Development server
 │
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── Layout.tsx           # App layout with sidebar
+│   │   │   ├── Layout.tsx           # App layout; sidebar may include chat model selector
 │   │   │   ├── PortfolioTab.tsx     # Main portfolio view (list/grid segmented toggle)
 │   │   │   ├── EntityDetail.tsx     # Entity workspace: resources, chat, artifacts + viewer modal
-│   │   │   ├── EntityConversation.tsx  # Gemini chat UI, presets, artifact cards
+│   │   │   ├── EntityConversation.tsx  # Chat UI: presets, Agent toggle, async job polling, composer shell
 │   │   │   ├── JsonArtifactFormEditor.tsx  # Structured JSON editor (form mode)
 │   │   │   ├── CreateEntityModal.tsx
 │   │   │   ├── EditEntityModal.tsx  # Edit entity metadata
 │   │   │   ├── EntityMetadataForm.tsx
 │   │   │   └── ParkingLotModal.tsx
+│   │   ├── context/
+│   │   │   └── ChatModelProfileContext.tsx  # Persisted harness profile id
 │   │   ├── hooks/
 │   │   │   ├── useEntities.ts       # Entity data hooks
 │   │   │   └── useParkingLot.ts     # Parking lot hooks
@@ -205,11 +217,15 @@ Multi-option switches (portfolio **List / Grid**, JSON artifact **Form / Raw JSO
 
 Inactive segments sit on the tertiary track; the active segment uses elevated background, border, and `--shadow-sm` so it reads clearly as selected (not as part of the content area below).
 
-### Entity chat, presets, and JSON artifacts
+### Entity chat, presets, Agent mode, and JSON artifacts
 
-On **Entity detail**, the layout is a three-column **notebook** pattern: Resources | Chat | Artifacts. Chat calls `POST /entities/{id}/chat/...` (see `API_REFERENCE.md`). Presets (e.g. `red_team` → markdown artifact, `extract_info` → JSON artifact) are registered in `backend/app/services/preset_registry.py`.
+On **Entity detail**, the layout is a three-column **notebook**: Resources | Chat | Artifacts.
 
-**JSON artifact viewer** (`EntityDetail.tsx` → `ArtifactViewerModal`): valid JSON artifacts open a modal with **Form** (compact `JsonArtifactFormEditor`) and **Raw JSON** (textarea). Saving **Raw JSON** requires parseable JSON; soft line wraps in the textarea are **display only** and do not insert characters. Edits persist via `PUT /entities/{entity_id}/artifacts/{artifact_id}/content`. The textarea uses a flex-friendly width (`min-width: 0` on the control chain) so resize does not create phantom horizontal gaps.
+- **Presets** (`EntityConversation`): labeled **Run preset** — **one-shot** actions (dashed pills); they call `POST .../chat/presets/{id}/run` and create artifacts via the **legacy** Gemini pipeline (`preset_registry.py`).
+- **Agent** pill: **persistent mode** for ordinary messages (`use_deep_agent` in the POST body, preference in `localStorage`). **On** → deep agent path → typically **`202`** + poll `GET .../jobs/{job_id}`; status text can appear in the composer while the user switches sessions elsewhere. **Off** → **`200`** one-shot `generate_with_context`. See `API_REFERENCE.md`.
+- **Context:** side-column selections send `resource_ids` / `artifact_ids` (optional; Agent tools can still list/read entity files).
+
+**JSON artifact viewer** (`EntityDetail.tsx` → `ArtifactViewerModal`): Form vs Raw JSON; saves via `PUT .../artifacts/{id}/content`. See existing notes on soft-wrap and `min-width: 0`.
 
 ### Schema-Driven Forms
 
@@ -346,9 +362,12 @@ On desktop, the app shell is viewport-height-bounded and `main` scrolls only whe
 - [ ] Selection is preserved
 
 **Entity chat & artifacts:**
-- [ ] Send a message with optional resource/artifact context
-- [ ] Run a preset (e.g. red team / extract info) and see artifact card or update in Artifacts
-- [ ] Open a JSON artifact: Form vs Raw JSON toggle matches portfolio toggle styling; save from either mode
+- [ ] Send with **Agent off**: `200` and immediate assistant reply
+- [ ] Send with **Agent on** (if server supports harness): `202`, progress in composer, final message after poll
+- [ ] Optional: override server default using Agent toggle vs `CHAT_USE_DEEP_AGENT`
+- [ ] Optional resource/artifact context; Agent without selection still reaches corpus via tools
+- [ ] Run a **preset** (one-shot) and see artifact card / new artifact row
+- [ ] JSON artifact: Form / Raw JSON save
 
 **UI/UX:**
 - [ ] Hover effects on cards

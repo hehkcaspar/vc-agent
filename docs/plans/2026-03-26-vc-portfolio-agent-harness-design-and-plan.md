@@ -1,6 +1,6 @@
 # VC Portfolio Agent Harness — Unified Design and Plan
 
-**Canonical document** for the VC Portfolio **agent harness**, **chat**, **tools**, **multimodel**, and **artifact editing** planning. Prior split and MVP-only planning files under `docs/plans/` were removed; treat this as the single source of truth.
+**Planning and rationale** for the portfolio **agent harness**, **chat**, **tools**, **multimodel**, and **artifact editing**. For **current HTTP contracts and behavior** (including `202` async jobs, `GET .../jobs/{id}`, `use_deep_agent`, and env vars), use **`docs/API_REFERENCE.md`** and **`docs/ARCHITECTURE.md`** — they track the codebase; this file tracks **design intent** and the original task checklist.
 
 **How to use this doc for implementation**
 
@@ -294,17 +294,9 @@ If ever exposed over HTTP, prefer **internal/admin/test** routes only. **Primary
 
 ## 10. API surface
 
-**User-facing (required)**
+**Implemented contracts** (legacy vs deep agent, `use_deep_agent`, `202` + `GET .../jobs/{job_id}`, schemas) are documented in **`docs/API_REFERENCE.md`**.
 
-- `POST /entities/{entity_id}/chat/sessions/{session_id}/messages` — runs **agent harness** for each user message; optional fields later: `tool_trace`, `run_id`, `job_id`.
-
-**Optional**
-
-- Admin/test-only helpers (dry-run, replay)—**not** required for product UX.
-
-**Response**
-
-- Today: one assistant `ConversationMessage`. Later: optional structured trace alongside final text.
+**Design intent (summary):** entity-scoped chat messages; harness path persists user text then completes assistant text asynchronously; mutating artifacts flows through Option B tools + audit. Optional admin/test routes remain out of scope unless needed.
 
 ---
 
