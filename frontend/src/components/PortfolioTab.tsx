@@ -93,14 +93,16 @@ export function PortfolioTab() {
         </div>
       </div>
 
-      <div className="view-toggle">
+      <div className="segmented-toggle portfolio-view-toggle">
         <button 
+          type="button"
           className={viewMode === 'list' ? 'active' : ''}
           onClick={() => handleViewModeChange('list')}
         >
           List
         </button>
         <button 
+          type="button"
           className={viewMode === 'grid' ? 'active' : ''}
           onClick={() => handleViewModeChange('grid')}
         >

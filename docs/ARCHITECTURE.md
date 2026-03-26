@@ -108,6 +108,13 @@ class StorageAdapter(ABC):
     async def exists(self, relative_path: str) -> bool
 ```
 
+#### Portfolio chat harness (optional)
+
+- **Legacy path:** `POST .../chat/sessions/{id}/messages` calls `google-genai` once per turn with optional Google Search (presets unchanged).
+- **Deep Agent path** (`CHAT_USE_DEEP_AGENT`): same HTTP route invokes **LangChain Deep Agents** (`create_deep_agent`) in a worker thread with entity-scoped tools in `portfolio_deep_agent.py` (artifacts + resources list/read, edit pipeline). Canonical artifact **writes** use **Option B** in `artifact_editing.py` (resolve → validate → apply); attempts are logged to **`artifact_edit_events`**.
+- **Versioning:** new versions follow `create_artifact_for_entity` lineage rules (`artifact_service.py`). **Overwrite** replaces bytes at the existing `relative_path` and updates `updated_at`, gated by `CHAT_ARTIFACT_OVERWRITE_ENABLED`.
+- **Storage:** `artifact_service` resolves `storage` through `app.services.storage.storage` so tests or alternate adapters can swap the module attribute consistently.
+
 ## Data Flow
 
 ### 1. Create Entity (with files)
@@ -258,9 +265,10 @@ artifacts (
     id TEXT PRIMARY KEY,
     entity_id TEXT NOT NULL,
     artifact_type TEXT NOT NULL,  -- memo, factsheet, report, other
+    title TEXT,                     -- optional: e.g. extract_info, used for display/versioning
     version INTEGER DEFAULT 1,
     status TEXT DEFAULT 'draft',
-    relative_path TEXT NOT NULL,
+    relative_path TEXT NOT NULL,  -- vN.md or vN.json under artifact folder
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     FOREIGN KEY (entity_id) REFERENCES entities(id)
@@ -298,7 +306,7 @@ App
             ├── Header
             │   ├── ParkingLotBadge
             │   └── CreateButton
-            ├── ViewToggle (list/grid)
+            ├── segmented-toggle (list/grid; shared styles in styles/segmented-toggle.css)
             ├── EntityList/EntityGrid
             │   └── EntityCard/EntityRow (with Edit & Archive buttons)
             ├── CreateEntityModal
@@ -308,16 +316,18 @@ App
             ├── ParkingLotModal
             └── EntityDetail (when selected)
                 ├── Header (Back button)
-                ├── entity-zones (two-column grid; stacked on narrow viewports)
+                ├── entity-zones--notebook (three columns on desktop: Resources | Chat | Artifacts)
                 ├── ResourcesZoneWithHeader (.zone)
-                │   ├── ZoneHeader (list: title + AddResourceMenu; preview: back + title + download)
+                │   ├── ZoneHeader + chat context toggles per resource
                 │   └── .zone-content (scrolls)
                 │       ├── ResourceList
                 │       └── ResourcePreview (PDF/Image/Text/HTML viewer)
-                └── Artifacts .zone
-                    ├── ZoneHeader
-                    └── .zone-content (scrolls)
-                        └── ArtifactsZone → ArtifactList
+                ├── EntityConversation (.zone--chat-main): sessions, Gemini transcript, preset shortcuts, artifact cards
+                ├── Artifacts .zone
+                │   ├── ZoneHeader
+                │   └── .zone-content (scrolls)
+                │       └── ArtifactsZone → ArtifactList
+                └── ArtifactViewerModal (markdown or JSON): segmented-toggle Form / Raw JSON; PUT …/content for JSON saves
 ```
 
 ### Viewport layout and scrolling
@@ -328,7 +338,7 @@ The shell and entity detail view are wired so **long resource previews** (for ex
 
 - `Layout.css`: `.layout` uses `height` / `max-height: 100vh` and `overflow: hidden` so the app chrome stays within the window.
 - `Layout.css`: `.main-content` uses `min-height: 0`, `overflow-y: auto`, and a column flex container so it can shrink inside the row, scroll the portfolio list when needed, and pass a bounded height to its children.
-- `EntityDetail.css`: `.entity-detail` is `flex: 1` / `min-height: 0`; `.entity-zones` is a grid with `minmax(0, 1fr)` rows so both zones share the remaining height below the entity header; each `.zone` is a column flex card; `.zone-content` is `flex: 1` / `min-height: 0` / `overflow-y: auto` so lists and previews scroll inside the card.
+- `EntityDetail.css`: `.entity-detail` is `flex: 1` / `min-height: 0`; `.entity-zones--notebook` is a three-column grid (Resources, Chat, Artifacts) with `minmax(0, 1fr)` so columns shrink correctly; each `.zone` is a column flex card; `.zone-content` is `flex: 1` / `min-height: 0` / `overflow-y: auto` so lists and previews scroll inside the card.
 
 **Mobile (width < 769px)**
 

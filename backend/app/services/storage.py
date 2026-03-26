@@ -105,6 +105,20 @@ class LocalFilesystemAdapter(StorageAdapter):
         if full_path.exists():
             shutil.rmtree(full_path, ignore_errors=True)
 
+    def read_file_sync(self, relative_path: str) -> bytes:
+        full_path = self.get_full_path(relative_path)
+        return full_path.read_bytes()
+
+    def write_file_sync(self, relative_path: str, content: bytes) -> str:
+        full_path = self.get_full_path(relative_path)
+        full_path.parent.mkdir(parents=True, exist_ok=True)
+        full_path.write_bytes(content)
+        return str(full_path)
+
+    def ensure_dir_sync(self, relative_path: str) -> None:
+        full_path = self.get_full_path(relative_path)
+        full_path.mkdir(parents=True, exist_ok=True)
+
 
 # Global storage instance
 storage = LocalFilesystemAdapter(settings.DATA_ROOT)

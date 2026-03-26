@@ -1,0 +1,50 @@
+/* Two-or-more-option segmented control — use for any width (fit-content). */
+
+.segmented-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding: 4px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  width: fit-content;
+  max-width: 100%;
+}
+
+.segmented-toggle button {
+  padding: var(--space-2) var(--space-4);
+  margin: 0;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    box-shadow var(--transition-fast),
+    border-color var(--transition-fast);
+}
+
+.segmented-toggle button:hover:not(.active):not(.is-active) {
+  color: var(--color-text-primary);
+}
+
+.segmented-toggle button:focus-visible {
+  outline: 2px solid var(--color-brand-primary);
+  outline-offset: 2px;
+}
+
+.segmented-toggle button.active,
+.segmented-toggle button.is-active {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+  box-shadow: var(--shadow-sm);
+  border-color: var(--color-border);
+}

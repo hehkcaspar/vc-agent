@@ -1,9 +1,32 @@
-import { Entity, EntityUpdateData, Resource, Artifact, IngestItem, IngestResponse } from '../types';
+import {
+  Entity,
+  EntityUpdateData,
+  Resource,
+  Artifact,
+  IngestItem,
+  IngestResponse,
+  ChatSession,
+  ChatSessionDetail,
+  ChatMessage,
+  ChatMessageResult,
+  ChatMessageJobStatus,
+  PostChatMessageResult,
+  PresetInfo,
+  PresetRunResponse,
+} from '../types';
 
-const API_BASE = '/api';
+/** When set (e.g. http://127.0.0.1:8000), call FastAPI directly and skip the /api dev proxy. */
+const DIRECT_API = import.meta.env.VITE_API_URL?.trim() ?? '';
+const useDirectApi = /^https?:\/\//i.test(DIRECT_API);
+const API_PREFIX = useDirectApi ? DIRECT_API.replace(/\/$/, '') : '/api';
+
+function apiUrl(path: string): string {
+  const p = path.startsWith('/') ? path : `/${path}`;
+  return `${API_PREFIX}${p}`;
+}
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE}${url}`, {
+  const response = await fetch(apiUrl(url), {
     headers: {
       'Accept': 'application/json',
       ...options?.headers,
@@ -37,17 +60,23 @@ export const api = {
         body: JSON.stringify(data),
       }),
     delete: (id: string) =>
-      fetch(`/entities/${id}`, { method: 'DELETE' }),
+      fetch(apiUrl(`/entities/${id}`), { method: 'DELETE' }),
     getResources: (id: string) =>
       fetchJson<Resource[]>(`/entities/${id}/resources`),
     getArtifacts: (id: string) =>
       fetchJson<Artifact[]>(`/entities/${id}/artifacts`),
     viewResource: (entityId: string, resourceId: string) =>
-      fetch(`${API_BASE}/entities/${entityId}/resources/${resourceId}/view`),
+      fetch(apiUrl(`/entities/${entityId}/resources/${resourceId}/view`)),
     createArtifact: (entityId: string, data: FormData) =>
       fetchJson<Artifact>(`/entities/${entityId}/artifacts`, {
         method: 'POST',
         body: data,
+      }),
+    updateArtifactContent: (entityId: string, artifactId: string, payload: unknown) =>
+      fetchJson<Artifact>(`/entities/${entityId}/artifacts/${artifactId}/content`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
       }),
   },
 
@@ -76,5 +105,89 @@ export const api = {
       fetchJson<{ message: string; ingest_id: string }>(`/parkinglot/${id}/retry`, {
         method: 'POST',
       }),
+  },
+
+  chat: {
+    listPresets: (entityId: string) =>
+      fetchJson<PresetInfo[]>(`/entities/${entityId}/chat/presets`),
+    listSessions: (entityId: string) =>
+      fetchJson<ChatSession[]>(`/entities/${entityId}/chat/sessions`),
+    createSession: (entityId: string, body: { title?: string }) =>
+      fetchJson<ChatSession>(`/entities/${entityId}/chat/sessions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    getSession: (entityId: string, sessionId: string) =>
+      fetchJson<ChatSessionDetail>(
+        `/entities/${entityId}/chat/sessions/${sessionId}`
+      ),
+    postMessage: async (
+      entityId: string,
+      sessionId: string,
+      body: {
+        text: string;
+        resource_ids: string[];
+        artifact_ids: string[];
+        model_profile_id?: string | null;
+        /** When set, overrides server default for this message. */
+        use_deep_agent?: boolean | null;
+      }
+    ): Promise<PostChatMessageResult> => {
+      const response = await fetch(
+        apiUrl(`/entities/${entityId}/chat/sessions/${sessionId}/messages`),
+        {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        }
+      );
+      const data = (await response.json().catch(() => ({}))) as Record<
+        string,
+        unknown
+      >;
+      if (response.status === 202) {
+        return {
+          kind: 'accepted',
+          jobId: String(data.job_id ?? ''),
+          userMessage: data.user_message as ChatMessage,
+          warnings: (data.warnings as string[]) ?? [],
+        };
+      }
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.detail === 'string'
+            ? data.detail
+            : response.statusText || `HTTP ${response.status}`
+        );
+      }
+      return { kind: 'completed', result: data as unknown as ChatMessageResult };
+    },
+    getMessageJob: (entityId: string, sessionId: string, jobId: string) =>
+      fetchJson<ChatMessageJobStatus>(
+        `/entities/${entityId}/chat/sessions/${sessionId}/jobs/${jobId}`
+      ),
+    runPreset: (
+      entityId: string,
+      presetId: string,
+      body: {
+        resource_ids: string[];
+        artifact_ids: string[];
+        session_id?: string | null;
+        industry?: string | null;
+        stage?: string | null;
+      }
+    ) =>
+      fetchJson<PresetRunResponse>(
+        `/entities/${entityId}/chat/presets/${presetId}/run`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }
+      ),
   },
 };

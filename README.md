@@ -8,6 +8,8 @@ VC Portfolio Manager is a web application for managing portfolio companies as ca
 - Ingest files, text, and URLs without data loss.
 - Resolve inbound content to existing/new entities.
 - Browse entity resources and artifacts in a responsive UI.
+- **Entity workspace:** Gemini-backed chat with sessions, context from selected resources/artifacts, and shortcuts (presets) that can generate markdown or structured **JSON** artifacts (for example portfolio metadata extraction).
+- **Artifact viewer:** Markdown preview or JSON editors with **Form** vs **Raw JSON** modes (shared segmented-toggle styling with list/grid).
 - Support light/dark themes and adaptive layout for desktop/laptop/mobile.
 
 ## Tech Stack
