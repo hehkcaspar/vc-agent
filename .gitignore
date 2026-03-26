@@ -15,6 +15,9 @@ env/
 ENV/
 .venv
 
+# Secrets / local environment
+.env
+
 # Node
 node_modules/
 dist/
