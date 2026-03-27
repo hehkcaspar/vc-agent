@@ -135,6 +135,41 @@ Get all resources for an entity (sorted by created_at desc).
 ]
 ```
 
+#### PATCH /entities/{id}/resources/{resource_id}
+Update mutable resource fields.
+
+**Request Body:**
+```json
+{
+  "title": "Renamed file title"
+}
+```
+
+**Response:** `ResourceResponse` for the updated row.
+
+#### DELETE /entities/{id}/resources/{resource_id}
+Delete a resource row and best-effort remove its backing file from storage.
+
+**Response:**
+```json
+{
+  "message": "Resource deleted successfully"
+}
+```
+
+#### GET /entities/{id}/resources/{resource_id}/view
+View or download a resource payload.
+
+- For `file` / `text` resources: returns a file stream (`FileResponse`) with inferred/declared MIME type.
+- For `url` resources: returns JSON with the URL target:
+
+```json
+{
+  "url": "https://example.com",
+  "type": "url"
+}
+```
+
 #### GET /entities/{id}/artifacts
 Get all artifacts for an entity (sorted by created_at desc).
 
@@ -156,6 +191,30 @@ Get all artifacts for an entity (sorted by created_at desc).
 ```
 
 `title` is optional and may be `null`. JSON artifacts (for example from the `extract_info` preset) use a `.json` file suffix in `relative_path`; markdown reports use `.md`.
+
+#### PATCH /entities/{id}/artifacts/{artifact_id}
+Update mutable artifact fields.
+
+**Request Body:**
+```json
+{
+  "title": "extract_info"
+}
+```
+
+`title` may also be an empty string to clear it (`null` persisted in DB).
+
+**Response:** `ArtifactResponse` for the updated row.
+
+#### DELETE /entities/{id}/artifacts/{artifact_id}
+Delete an artifact row and best-effort remove its stored file.
+
+**Response:**
+```json
+{
+  "message": "Artifact deleted successfully"
+}
+```
 
 #### GET /entities/{id}/artifacts/{artifact_id}/view
 
@@ -180,6 +239,17 @@ Replace the artifact file on disk with **pretty-printed JSON** derived from the 
 **Request body:** arbitrary JSON (for example a nested `object`).
 
 **Response:** `ArtifactResponse` for the updated row (same shape as list items, including `title` and `relative_path`).
+
+### Resource and artifact row actions in UI
+
+The Entity detail side columns use a compact row model with these API mappings:
+
+- **Rename resource** -> `PATCH /entities/{id}/resources/{resource_id}`
+- **Delete resource** -> `DELETE /entities/{id}/resources/{resource_id}`
+- **Download/open resource** -> `GET /entities/{id}/resources/{resource_id}/view`
+- **Rename artifact** -> `PATCH /entities/{id}/artifacts/{artifact_id}`
+- **Delete artifact** -> `DELETE /entities/{id}/artifacts/{artifact_id}`
+- **Download artifact text** -> `GET /entities/{id}/artifacts/{artifact_id}/view`
 
 ---
 
@@ -217,7 +287,7 @@ Resolve a parking lot item to an entity.
 
 ---
 
-## Entity chat (Gemini one-shot + optional Deep Agent harness)
+## Entity chat (one-shot + optional Deep Agent harness)
 
 All routes are scoped to an existing entity.
 
@@ -230,9 +300,9 @@ use_deep_agent = body.use_deep_agent if body.use_deep_agent is not None else CHA
 ```
 
 - **`use_deep_agent` true:** LangChain **Deep Agents** (`create_deep_agent`) with entity-scoped tools (`portfolio_*` in `portfolio_deep_agent.py`). The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API (e.g. read artifacts) and **poll** job status for step text.
-- **`use_deep_agent` false:** **Legacy** one-shot call via **google-genai** (`generate_with_context`). Returns **`200 OK`** with the assistant message in the body (no job).
+- **`use_deep_agent` false:** one-shot model call (`generate_with_context`). Returns **`200 OK`** with the assistant message in the body (no job).
 
-The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) always use the legacy Gemini preset pipeline, not the harness.
+The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) now also accept `use_deep_agent` and `model_profile_id`, so shortcut runs can follow the same mode/profile selection.
 
 **Context selection:** Selected `resource_ids` / `artifact_ids` inline excerpts into the user turn and help edit resolution. They are **optional** in Agent mode: tools can **list/read** all entity artifacts and resources without prior selection.
 
@@ -246,12 +316,22 @@ The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `
 | `CHAT_USE_DEEP_AGENT` | Server default for deep agent when request omits `use_deep_agent` |
 | `CHAT_DEFAULT_MODEL_PROFILE` | Default profile id if client omits `model_profile_id` |
 | `CHAT_AGENT_RECURSION_LIMIT` | LangGraph recursion limit (default 50) |
-| `CHAT_ARTIFACT_*` | Edit policy (overwrite gate, default mode, resolver threshold) |
+| `CHAT_ARTIFACT_*` | Edit policy: default **`versioned`** vs **`overwrite`**, overwrite enabled flag, resolver score threshold |
+| `CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY` | `create_new` (default) or `allow_edit` — when `create_new`, casual “save / note / 记下来” turns without a selected artifact cannot mutate via `portfolio_apply_artifact_edit` until the model uses `portfolio_create_artifact` (or user wording / selection implies a clear edit). |
 | `MOONSHOT_API_KEY`, `KIMI_CODE_API_KEY`, URLs, `KIMI_CODE_MODEL`, etc. | Moonshot Open Platform vs Kimi Code routing — see `backend/app/config.py`, `backend/.env_sample`, `model_profiles.py` |
 
 Other: `CHAT_ENABLE_GOOGLE_SEARCH`, attachment/history limits. Deep-agent steps are pushed to `chat_completion_jobs.step_detail` for UI polling.
 
-**Artifact edits (Option B):** resolve → validate → `portfolio_apply_artifact_edit` → audit rows in **`artifact_edit_events`**. Tools include resource list/read for entity materials (text/URL; some binaries rejected in-tool).
+**Deep-agent artifact tools (summary):**
+
+- **`portfolio_list_artifacts` / `portfolio_list_resources`** — discover corpus.
+- **`portfolio_read_artifact` / `portfolio_read_resource`** — text payloads (policies in `artifact_editing.read_*`).
+- **`portfolio_resolve_artifact_target`**, **`portfolio_validate_artifact_edit`**, **`portfolio_apply_artifact_edit`** — Option B pipeline; **`apply`** is the only tool that mutates existing artifact bytes / versions.
+- **`portfolio_create_artifact`** — new canonical artifact row + file (`.md` / `.json` / `.txt`), independent lineage.
+
+If policy is `create_new` and the user message looks like “persist this” but no artifact id was attached for the turn, **`portfolio_apply_artifact_edit`** may return **`create_intent_requires_create_tool`** in the tool JSON instead of writing.
+
+**Artifact edits (Option B):** resolve → validate → `portfolio_apply_artifact_edit` → audit **`artifact_edit_events`**. Parsed PDF/Office text available via read tools and harness preamble.
 
 ### `GET /entities/{entity_id}/chat/presets`
 
@@ -321,6 +401,23 @@ Run a preset and **create a new canonical artifact** (markdown or JSON on disk +
 Response: `{ "artifact_id", "assistant_summary", "warnings" }` (exact fields may include artifact metadata for UI artifact cards).
 
 When `session_id` is provided, the run can append a short assistant message to that session (for example an artifact card referencing the new artifact).
+
+`PresetRunRequest` supports:
+
+```json
+{
+  "resource_ids": ["..."],
+  "artifact_ids": ["..."],
+  "session_id": "...",
+  "model_profile_id": "gemini_google",
+  "use_deep_agent": true
+}
+```
+
+Notes:
+- `use_deep_agent: false` -> one-shot preset generation path.
+- `use_deep_agent: true` -> deep-agent preset execution path.
+- `extract_info` applies tolerant JSON parsing (raw JSON, fenced JSON, or prose-wrapped JSON object) before normalization.
 
 ---
 

@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     CHAT_ARTIFACT_DEFAULT_EDIT_MODE: Literal["versioned", "overwrite"] = "versioned"
     CHAT_ARTIFACT_OVERWRITE_ENABLED: bool = False
     CHAT_ARTIFACT_RESOLVE_MIN_SCORE: float = 0.65
+    # When user intent sounds like "save/create artifact" but no explicit target is provided,
+    # prefer creating a new artifact instead of editing an existing lineage.
+    CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY: Literal[
+        "create_new", "allow_edit"
+    ] = "create_new"
     # Kimi / Moonshot OpenAI-compatible API (/v1/chat/completions).
     # - Open Platform (console API keys): https://api.moonshot.ai/v1 or https://api.moonshot.cn/v1
     # - Kimi Code platform (/login "Kimi Code" in kimi-cli): https://api.kimi.com/coding/v1
@@ -57,6 +62,12 @@ class Settings(BaseSettings):
     # Kimi K2.5: disable extended thinking on OpenAI-compatible calls (default True). Thinking
     # requires reasoning_content on prior tool messages; LangChain agent history omits it → HTTP 400.
     KIMI_DISABLE_THINKING_FOR_SEARCH: bool = True
+
+    # LangSmith tracing (project-level runtime config).
+    LANGSMITH_TRACING: bool = False
+    LANGSMITH_API_KEY: str = ""
+    LANGSMITH_PROJECT: str = "vc-portfolio-agent"
+    LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
 
     @property
     def database_url_sync(self) -> str:

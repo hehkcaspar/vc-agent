@@ -18,6 +18,8 @@ from app.services.artifact_service import (
     create_artifact_for_entity_sync,
     overwrite_artifact_content_sync,
 )
+from app.services.deep_agent_office_extractors import extract_office_text
+from app.services.document_text import extract_pdf_text
 
 
 def content_checksum(content: str) -> str:
@@ -137,12 +139,36 @@ def read_resource_payload_sync(
     mime = (row.mime_type or "").strip() or mimetypes.guess_type(
         row.original_filename or row.title or ""
     )[0] or "application/octet-stream"
-    if mime == "application/pdf" or mime.startswith("image/"):
+    if mime == "application/pdf":
+        try:
+            text = extract_pdf_text(raw, max_chars=settings.CHAT_MAX_ARTIFACT_CHARS)
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": "pdf_text_extraction_failed",
+                "mime_type": mime,
+                "details": str(e),
+            }
+        if not text.strip():
+            return {
+                "ok": False,
+                "error": "pdf_has_no_extractable_text",
+                "mime_type": mime,
+            }
+        return {
+            "ok": True,
+            "resource_id": row.id,
+            "title": row.title,
+            "resource_type": row.resource_type,
+            "mime_type": mime,
+            "text": text,
+        }
+    if mime.startswith("image/"):
         return {
             "ok": False,
             "error": "binary_not_supported_in_tool",
             "mime_type": mime,
-            "hint": "Binary was omitted; ask the user to refer to the uploaded file or use legacy chat for multimodal context.",
+            "hint": "Image binary cannot be read as plain text in this tool.",
         }
     if mime.startswith("text/") or mime in ("application/json", "application/xml"):
         try:
@@ -150,6 +176,24 @@ def read_resource_payload_sync(
         except UnicodeDecodeError:
             text = raw.decode("latin-1", errors="replace")
     else:
+        office_text = extract_office_text(
+            raw, mime_type=mime, max_chars=settings.CHAT_MAX_ARTIFACT_CHARS
+        )
+        if office_text is not None:
+            if not office_text.strip():
+                return {
+                    "ok": False,
+                    "error": "office_has_no_extractable_text",
+                    "mime_type": mime,
+                }
+            return {
+                "ok": True,
+                "resource_id": row.id,
+                "title": row.title,
+                "resource_type": row.resource_type,
+                "mime_type": mime,
+                "text": office_text,
+            }
         try:
             text = raw.decode("utf-8")
         except Exception:

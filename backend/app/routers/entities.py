@@ -5,9 +5,9 @@ from typing import Any, List, Literal
 from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from app.database import get_db
-from app.models import Entity, Resource, Artifact
+from app.models import ChatCompletionJob, Entity, Resource, Artifact
 from app.schemas import (
     EntityCreate, 
     EntityUpdate, 
@@ -111,8 +111,15 @@ async def delete_entity(
     if not entity:
         raise HTTPException(status_code=404, detail="Entity not found")
     
+    # Remove background chat jobs first; they do not cascade from Entity.
+    await db.execute(
+        delete(ChatCompletionJob).where(ChatCompletionJob.entity_id == entity_id)
+    )
     await db.delete(entity)
     await db.commit()
+
+    # Best-effort filesystem cleanup for this entity's resources/artifacts.
+    await storage.delete_recursive(f"entities/{entity_id}")
     return {"message": "Entity deleted successfully"}
 
 
@@ -192,6 +199,134 @@ async def create_artifact(
     except ValueError:
         raise HTTPException(status_code=404, detail="Entity not found")
     return artifact
+
+
+@router.patch("/{entity_id}/resources/{resource_id}", response_model=ResourceResponse)
+async def update_resource(
+    entity_id: str,
+    resource_id: str,
+    payload: dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update mutable resource fields (currently title only)."""
+    result = await db.execute(select(Entity).where(Entity.id == entity_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    result = await db.execute(
+        select(Resource).where(
+            Resource.id == resource_id,
+            Resource.entity_id == entity_id,
+        )
+    )
+    resource = result.scalar_one_or_none()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    title = payload.get("title")
+    if title is not None:
+        t = str(title).strip()
+        if not t:
+            raise HTTPException(status_code=400, detail="title cannot be empty")
+        resource.title = t
+
+    resource.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(resource)
+    return resource
+
+
+@router.delete("/{entity_id}/resources/{resource_id}")
+async def delete_resource(
+    entity_id: str,
+    resource_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a resource and best-effort remove its backing file."""
+    result = await db.execute(select(Entity).where(Entity.id == entity_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    result = await db.execute(
+        select(Resource).where(
+            Resource.id == resource_id,
+            Resource.entity_id == entity_id,
+        )
+    )
+    resource = result.scalar_one_or_none()
+    if not resource:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    rel_path = resource.relative_path
+    await db.delete(resource)
+    await db.commit()
+
+    if rel_path:
+        await storage.delete_file(rel_path)
+    return {"message": "Resource deleted successfully"}
+
+
+@router.patch("/{entity_id}/artifacts/{artifact_id}", response_model=ArtifactResponse)
+async def update_artifact(
+    entity_id: str,
+    artifact_id: str,
+    payload: dict[str, Any] = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Update mutable artifact fields (currently title only)."""
+    result = await db.execute(select(Entity).where(Entity.id == entity_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    result = await db.execute(
+        select(Artifact).where(
+            Artifact.id == artifact_id,
+            Artifact.entity_id == entity_id,
+        )
+    )
+    artifact = result.scalar_one_or_none()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    title = payload.get("title")
+    if title is not None:
+        t = str(title).strip()
+        artifact.title = t or None
+
+    artifact.updated_at = datetime.utcnow()
+    await db.commit()
+    await db.refresh(artifact)
+    return artifact
+
+
+@router.delete("/{entity_id}/artifacts/{artifact_id}")
+async def delete_artifact(
+    entity_id: str,
+    artifact_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete an artifact and best-effort remove its file."""
+    result = await db.execute(select(Entity).where(Entity.id == entity_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    result = await db.execute(
+        select(Artifact).where(
+            Artifact.id == artifact_id,
+            Artifact.entity_id == entity_id,
+        )
+    )
+    artifact = result.scalar_one_or_none()
+    if not artifact:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    rel_path = artifact.relative_path
+    await db.delete(artifact)
+    await db.commit()
+
+    if rel_path:
+        await storage.delete_file(rel_path)
+    return {"message": "Artifact deleted successfully"}
 
 
 @router.get("/{entity_id}/resources/{resource_id}/view")

@@ -232,6 +232,12 @@
   color: var(--color-accent-gold);
 }
 
+.card-actions .card-delete-btn:hover {
+  background: rgba(220, 53, 69, 0.08);
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
 /* Entity List */
 .entity-list {
   display: flex;
@@ -327,6 +333,12 @@
   color: var(--color-accent-gold);
 }
 
+.entity-row .btn-icon.delete-btn:hover {
+  background: rgba(220, 53, 69, 0.08);
+  border-color: var(--color-error);
+  color: var(--color-error);
+}
+
 /* Archived State */
 .entity-row.archived,
 .entity-card.archived {
@@ -393,6 +405,101 @@
   font-size: var(--text-sm);
   text-transform: uppercase;
   letter-spacing: 0.1em;
+}
+
+.portfolio-delete-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: var(--z-modal);
+}
+
+.portfolio-delete-modal {
+  width: 100%;
+  max-width: 34rem;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+}
+
+.portfolio-delete-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-5) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.portfolio-delete-modal-header h3 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-2xl);
+  font-weight: 500;
+  color: var(--color-text-primary);
+}
+
+.portfolio-delete-modal-close {
+  width: 2rem;
+  height: 2rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-tertiary);
+  cursor: pointer;
+}
+
+.portfolio-delete-modal-close:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.portfolio-delete-modal-body {
+  padding: var(--space-6);
+}
+
+.portfolio-delete-modal-body p {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--color-text-primary);
+}
+
+.portfolio-delete-modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-6);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+
+.portfolio-delete-confirm {
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.portfolio-delete-confirm--danger {
+  border-color: var(--color-error);
+  background: var(--color-error);
+  color: #fff;
+}
+
+.portfolio-delete-confirm:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 /* Responsive */

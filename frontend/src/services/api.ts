@@ -59,14 +59,51 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       }),
-    delete: (id: string) =>
-      fetch(apiUrl(`/entities/${id}`), { method: 'DELETE' }),
+    delete: async (id: string) => {
+      const response = await fetch(apiUrl(`/entities/${id}`), { method: 'DELETE' });
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || `HTTP ${response.status}`);
+      }
+    },
     getResources: (id: string) =>
       fetchJson<Resource[]>(`/entities/${id}/resources`),
     getArtifacts: (id: string) =>
       fetchJson<Artifact[]>(`/entities/${id}/artifacts`),
+    updateResource: (entityId: string, resourceId: string, data: { title: string }) =>
+      fetchJson<Resource>(`/entities/${entityId}/resources/${resourceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    deleteResource: async (entityId: string, resourceId: string) => {
+      const response = await fetch(apiUrl(`/entities/${entityId}/resources/${resourceId}`), {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || `HTTP ${response.status}`);
+      }
+    },
+    updateArtifact: (entityId: string, artifactId: string, data: { title: string }) =>
+      fetchJson<Artifact>(`/entities/${entityId}/artifacts/${artifactId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    deleteArtifact: async (entityId: string, artifactId: string) => {
+      const response = await fetch(apiUrl(`/entities/${entityId}/artifacts/${artifactId}`), {
+        method: 'DELETE',
+      });
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || `HTTP ${response.status}`);
+      }
+    },
     viewResource: (entityId: string, resourceId: string) =>
       fetch(apiUrl(`/entities/${entityId}/resources/${resourceId}/view`)),
+    viewArtifact: (entityId: string, artifactId: string) =>
+      fetchJson<{ content: string }>(`/entities/${entityId}/artifacts/${artifactId}/view`),
     createArtifact: (entityId: string, data: FormData) =>
       fetchJson<Artifact>(`/entities/${entityId}/artifacts`, {
         method: 'POST',
@@ -122,6 +159,16 @@ export const api = {
       fetchJson<ChatSessionDetail>(
         `/entities/${entityId}/chat/sessions/${sessionId}`
       ),
+    deleteSession: async (entityId: string, sessionId: string) => {
+      const response = await fetch(
+        apiUrl(`/entities/${entityId}/chat/sessions/${sessionId}`),
+        { method: 'DELETE' }
+      );
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || `HTTP ${response.status}`);
+      }
+    },
     postMessage: async (
       entityId: string,
       sessionId: string,
@@ -177,6 +224,8 @@ export const api = {
         resource_ids: string[];
         artifact_ids: string[];
         session_id?: string | null;
+        model_profile_id?: string | null;
+        use_deep_agent?: boolean | null;
         industry?: string | null;
         stage?: string | null;
       }

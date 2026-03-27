@@ -222,6 +222,14 @@ pytest --cov=app tests/
 pytest tests/test_entities.py
 ```
 
+**Optional — real Gemini / deep-agent E2E** (isolated DB; see `docs/DEVELOPER_GUIDE.md` → Testing):
+
+```powershell
+$env:RUN_E2E_LLM = "1"
+cd backend
+pytest tests/test_chat_e2e_llm.py -v --tb=short
+```
+
 ### Frontend Testing
 
 ```powershell

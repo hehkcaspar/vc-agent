@@ -17,6 +17,8 @@ ENV/
 
 # Secrets / local environment
 .env
+**/.env
+backend/.env
 
 # Node
 node_modules/

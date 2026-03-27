@@ -229,6 +229,8 @@ class PresetRunRequest(BaseModel):
     resource_ids: List[str] = Field(default_factory=list)
     artifact_ids: List[str] = Field(default_factory=list)
     session_id: Optional[str] = None
+    model_profile_id: Optional[str] = None
+    use_deep_agent: Optional[bool] = None
     industry: Optional[str] = None
     stage: Optional[str] = None
     artifact_type: Optional[Literal["memo", "factsheet", "report", "other"]] = None

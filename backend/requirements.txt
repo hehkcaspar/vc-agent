@@ -17,5 +17,6 @@ langchain==1.2.13
 langchain-core==1.2.22
 langchain-google-genai==4.2.1
 langchain-openai==1.1.12
+pypdf>=6.0.0
 pytest>=8.0.0
 httpx>=0.28.1,<1.0.0

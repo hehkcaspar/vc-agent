@@ -21,6 +21,9 @@ export function PortfolioTab() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isParkingLotOpen, setIsParkingLotOpen] = useState(false);
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Entity | null>(null);
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
+  const [isDeletingEntity, setIsDeletingEntity] = useState(false);
   
   const { entities, isLoading, mutate } = useEntities();
   const { count: parkingLotCount } = useParkingLotCount();
@@ -57,6 +60,36 @@ export function PortfolioTab() {
       mutate();
     } catch (err) {
       alert(err instanceof Error ? err.message : 'Failed to update status');
+    }
+  };
+
+  const requestDeleteEntity = (e: React.MouseEvent, entity: Entity) => {
+    e.stopPropagation();
+    setDeleteTarget(entity);
+    setDeleteStep(1);
+  };
+
+  const closeDeleteModal = () => {
+    if (isDeletingEntity) return;
+    setDeleteTarget(null);
+    setDeleteStep(1);
+  };
+
+  const handleDeleteEntity = async () => {
+    if (!deleteTarget) return;
+    setIsDeletingEntity(true);
+    try {
+      await api.entities.delete(deleteTarget.id);
+      if (selectedEntity?.id === deleteTarget.id) {
+        setSelectedEntity(null);
+      }
+      setDeleteTarget(null);
+      setDeleteStep(1);
+      mutate();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to delete entity');
+    } finally {
+      setIsDeletingEntity(false);
     }
   };
 
@@ -129,6 +162,7 @@ export function PortfolioTab() {
                   setEditingEntity(entity);
                 }}
                 onArchive={(e) => handleArchive(e, entity)}
+                onDelete={(e) => requestDeleteEntity(e, entity)}
               />
             ) : (
               <EntityCard 
@@ -140,6 +174,7 @@ export function PortfolioTab() {
                   setEditingEntity(entity);
                 }}
                 onArchive={(e) => handleArchive(e, entity)}
+                onDelete={(e) => requestDeleteEntity(e, entity)}
               />
             )
           ))}
@@ -169,11 +204,69 @@ export function PortfolioTab() {
           onSuccess={handleEntityUpdated}
         />
       )}
+
+      {deleteTarget && (
+        <div className="portfolio-delete-modal-overlay" role="dialog" aria-modal="true" aria-label="Delete entity">
+          <div className="portfolio-delete-modal">
+            <div className="portfolio-delete-modal-header">
+              <h3>{deleteStep === 1 ? 'Delete entity?' : 'Final confirmation'}</h3>
+              <button
+                type="button"
+                className="portfolio-delete-modal-close"
+                onClick={closeDeleteModal}
+                disabled={isDeletingEntity}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="portfolio-delete-modal-body">
+              {deleteStep === 1 ? (
+                <p>
+                  Delete <strong>{deleteTarget.name}</strong>? This removes the entity and its related
+                  resources/artifacts.
+                </p>
+              ) : (
+                <p>This action cannot be undone. Confirm again to permanently delete this entity.</p>
+              )}
+            </div>
+            <div className="portfolio-delete-modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={closeDeleteModal}
+                disabled={isDeletingEntity}
+              >
+                Cancel
+              </button>
+              {deleteStep === 1 ? (
+                <button
+                  type="button"
+                  className="portfolio-delete-confirm"
+                  onClick={() => setDeleteStep(2)}
+                  disabled={isDeletingEntity}
+                >
+                  Continue
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="portfolio-delete-confirm portfolio-delete-confirm--danger"
+                  onClick={() => void handleDeleteEntity()}
+                  disabled={isDeletingEntity}
+                >
+                  {isDeletingEntity ? 'Deleting…' : 'Delete forever'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function EntityRow({ entity, onClick, onEdit, onArchive }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void }) {
+function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   const isArchived = entity.status === 'archived';
   return (
     <div className={`entity-row ${isArchived ? 'archived' : ''}`} onClick={onClick}>
@@ -202,12 +295,19 @@ function EntityRow({ entity, onClick, onEdit, onArchive }: { entity: Entity; onC
         >
           {isArchived ? '📂' : '📥'}
         </button>
+        <button
+          className="btn-icon delete-btn"
+          onClick={onDelete}
+          title="Delete entity"
+        >
+          🗑️
+        </button>
       </div>
     </div>
   );
 }
 
-function EntityCard({ entity, onClick, onEdit, onArchive }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void }) {
+function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   const isArchived = entity.status === 'archived';
   return (
     <div className={`entity-card ${isArchived ? 'archived' : ''}`} onClick={onClick}>
@@ -225,6 +325,13 @@ function EntityCard({ entity, onClick, onEdit, onArchive }: { entity: Entity; on
           title={isArchived ? 'Unarchive entity' : 'Archive entity'}
         >
           {isArchived ? '📂' : '📥'}
+        </button>
+        <button
+          className="btn-icon card-delete-btn"
+          onClick={onDelete}
+          title="Delete entity"
+        >
+          🗑️
         </button>
       </div>
       {isArchived && <div className="archived-overlay">Archived</div>}

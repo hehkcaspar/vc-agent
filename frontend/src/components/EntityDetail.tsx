@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react';
+import { useState, useRef, useEffect, useCallback, ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { init as initPptxPreview } from 'pptx-preview';
@@ -66,12 +66,32 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
       return next;
     });
   }, []);
+  const setAllChatResources = useCallback((ids: string[], checked: boolean) => {
+    setChatResourceIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }, []);
 
   const toggleChatArtifact = useCallback((id: string) => {
     setChatArtifactIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }, []);
+  const setAllChatArtifacts = useCallback((ids: string[], checked: boolean) => {
+    setChatArtifactIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (checked) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
   }, []);
@@ -104,6 +124,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
           onSuccess={mutateResources}
           chatSelectedIds={chatResourceIds}
           onToggleChatSelected={toggleChatResource}
+          onSetAllChatSelected={setAllChatResources}
         />
 
         <div className="zone zone--chat-main">
@@ -130,11 +151,14 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
           </div>
           <div className="zone-content">
             <ArtifactsZone
+              entityId={entity.id}
               artifacts={artifacts}
               isLoading={artifactsLoading}
               chatSelectedIds={chatArtifactIds}
               onToggleChatSelected={toggleChatArtifact}
+              onSetAllChatSelected={setAllChatArtifacts}
               onOpenArtifact={setViewerArtifact}
+              onChanged={() => void mutateArtifacts()}
             />
           </div>
         </div>
@@ -447,6 +471,95 @@ function AddUrlModal({ entityId, onClose, onSuccess }: { entityId: string; onClo
   );
 }
 
+interface CompactSelectableRowProps {
+  label: string;
+  meta: string;
+  logo: ReactNode;
+  checked: boolean;
+  onToggleChecked: () => void;
+  onOpen: () => void;
+  onRename: () => void;
+  onDownload: () => void;
+  onDelete: () => void;
+}
+
+function CompactSelectableRow({
+  label,
+  meta,
+  logo,
+  checked,
+  onToggleChecked,
+  onOpen,
+  onRename,
+  onDownload,
+  onDelete,
+}: CompactSelectableRowProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const rowRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (!rowRef.current?.contains(event.target as Node)) {
+        setMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [menuOpen]);
+
+  return (
+    <div className="compact-row" onClick={onOpen} ref={rowRef}>
+      <div className="compact-row-left">
+        <div className="resource-icon compact-row-logo">{logo}</div>
+        <button
+          type="button"
+          className="compact-row-actions-trigger"
+          aria-label="Open item actions"
+          onClick={(e) => {
+            e.stopPropagation();
+            setMenuOpen((open) => !open);
+          }}
+        >
+          ⋮
+        </button>
+        {menuOpen && (
+          <div className="compact-row-actions-menu" onClick={(e) => e.stopPropagation()}>
+            <button type="button" onClick={() => { setMenuOpen(false); onRename(); }}>
+              Rename
+            </button>
+            <button type="button" onClick={() => { setMenuOpen(false); onDownload(); }}>
+              Download
+            </button>
+            <button
+              type="button"
+              className="compact-row-actions-menu-danger"
+              onClick={() => { setMenuOpen(false); onDelete(); }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
+      <div className="resource-info compact-row-info">
+        <div className="resource-name">{label}</div>
+        <div className="resource-meta">{meta}</div>
+      </div>
+      <label
+        className="resource-chat-toggle"
+        title="Include in chat context"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={onToggleChecked}
+        />
+      </label>
+    </div>
+  );
+}
+
 interface ResourcesZoneWithHeaderProps {
   entityId: string;
   resources?: Resource[];
@@ -454,6 +567,7 @@ interface ResourcesZoneWithHeaderProps {
   onSuccess: () => void;
   chatSelectedIds: Set<string>;
   onToggleChatSelected: (id: string) => void;
+  onSetAllChatSelected: (ids: string[], checked: boolean) => void;
 }
 
 function ResourcesZoneWithHeader({
@@ -463,6 +577,7 @@ function ResourcesZoneWithHeader({
   onSuccess,
   chatSelectedIds,
   onToggleChatSelected,
+  onSetAllChatSelected,
 }: ResourcesZoneWithHeaderProps) {
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
   const [previewContent, setPreviewContent] = useState<string | null>(null);
@@ -473,6 +588,17 @@ function ResourcesZoneWithHeader({
   const [pptxBuffer, setPptxBuffer] = useState<ArrayBuffer | null>(null);
   const [pptxRenderLoading, setPptxRenderLoading] = useState(false);
   const pptxHostRef = useRef<HTMLDivElement | null>(null);
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const resourceIds = resources?.map((r) => r.id) ?? [];
+  const selectedCount = resourceIds.filter((id) => chatSelectedIds.has(id)).length;
+  const allSelected = resourceIds.length > 0 && selectedCount === resourceIds.length;
+  const partiallySelected = selectedCount > 0 && !allSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = partiallySelected;
+    }
+  }, [partiallySelected]);
 
   useEffect(() => {
     if (previewType !== 'pptx' || !pptxBuffer || !pptxHostRef.current) {
@@ -687,58 +813,81 @@ function ResourcesZoneWithHeader({
         ) : (
           // List content
           <div className="resource-list">
-            {resources.map(resource => (
-              <div 
-                key={resource.id} 
-                className="resource-item"
-                onClick={() => handleResourceClick(resource)}
+            <div className="select-all-row">
+              <span className="select-all-label">Select all sources</span>
+              <label
+                className="resource-chat-toggle"
+                title="Select all sources"
+                onClick={(e) => e.stopPropagation()}
               >
-                <div className="resource-icon">
-                  {getResourceIcon(resource.resource_type)}
-                </div>
-                <div className="resource-info">
-              <div className="resource-name">
-                {resource.resource_type === 'url' ? (
-                  (() => {
-                    try {
-                      return new URL(resource.url || '').hostname.replace(/^www\./, '');
-                    } catch {
-                      return resource.url || resource.title;
+                <input
+                  ref={selectAllRef}
+                  type="checkbox"
+                  checked={allSelected}
+                  onChange={(e) => onSetAllChatSelected(resourceIds, e.target.checked)}
+                />
+              </label>
+            </div>
+            {resources.map((resource) => {
+              const label =
+                resource.resource_type === 'url'
+                  ? (() => {
+                      try {
+                        return new URL(resource.url || '').hostname.replace(/^www\./, '');
+                      } catch {
+                        return resource.url || resource.title;
+                      }
+                    })()
+                  : resource.title;
+              const meta = `${resource.resource_type} • ${new Date(resource.created_at).toLocaleDateString()}`;
+              return (
+                <CompactSelectableRow
+                  key={resource.id}
+                  label={label}
+                  meta={meta}
+                  logo={renderResourceLogo(resource)}
+                  checked={chatSelectedIds.has(resource.id)}
+                  onToggleChecked={() => onToggleChatSelected(resource.id)}
+                  onOpen={() => void handleResourceClick(resource)}
+                  onRename={() => {
+                    const nextTitle = window.prompt('Rename resource', resource.title)?.trim();
+                    if (!nextTitle || nextTitle === resource.title) return;
+                    void api.entities
+                      .updateResource(entityId, resource.id, { title: nextTitle })
+                      .then(() => onSuccess())
+                      .catch((err) => alert(`Rename failed: ${err instanceof Error ? err.message : String(err)}`));
+                  }}
+                  onDownload={() => {
+                    if (resource.resource_type === 'url' && resource.url) {
+                      window.open(resource.url, '_blank');
+                      return;
                     }
-                  })()
-                ) : (
-                  resource.title
-                )}
-              </div>
-              <div className="resource-meta">
-                {resource.resource_type} • {new Date(resource.created_at).toLocaleDateString()}
-              </div>
-                </div>
-                {resource.url ? (
-                  <a 
-                    href={resource.url} 
-                    target="_blank" 
-                    rel="noopener noreferrer"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    ↗
-                  </a>
-                ) : (
-                  <span className="view-indicator">👁</span>
-                )}
-                <label
-                  className="resource-chat-toggle"
-                  title="Include in chat context"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <input
-                    type="checkbox"
-                    checked={chatSelectedIds.has(resource.id)}
-                    onChange={() => onToggleChatSelected(resource.id)}
-                  />
-                </label>
-              </div>
-            ))}
+                    void api.entities
+                      .viewResource(entityId, resource.id)
+                      .then(async (response) => {
+                        const blob = await response.blob();
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = resource.original_filename || resource.title;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                      })
+                      .catch(() => alert('Download failed'));
+                  }}
+                  onDelete={() => {
+                    const ok = window.confirm(`Delete resource "${resource.title}"?`);
+                    if (!ok) return;
+                    void api.entities
+                      .deleteResource(entityId, resource.id)
+                      .then(() => onSuccess())
+                      .catch((err) => alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`));
+                  }}
+                />
+              );
+            })}
           </div>
         )}
       </div>
@@ -747,18 +896,36 @@ function ResourcesZoneWithHeader({
 }
 
 function ArtifactsZone({
+  entityId,
   artifacts,
   isLoading,
   chatSelectedIds,
   onToggleChatSelected,
+  onSetAllChatSelected,
   onOpenArtifact,
+  onChanged,
 }: {
+  entityId: string;
   artifacts?: Artifact[];
   isLoading: boolean;
   chatSelectedIds: Set<string>;
   onToggleChatSelected: (id: string) => void;
+  onSetAllChatSelected: (ids: string[], checked: boolean) => void;
   onOpenArtifact: (artifact: Artifact) => void;
+  onChanged: () => void;
 }) {
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  const artifactIds = artifacts?.map((a) => a.id) ?? [];
+  const selectedCount = artifactIds.filter((id) => chatSelectedIds.has(id)).length;
+  const allSelected = artifactIds.length > 0 && selectedCount === artifactIds.length;
+  const partiallySelected = selectedCount > 0 && !allSelected;
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = partiallySelected;
+    }
+  }, [partiallySelected]);
+
   if (isLoading) {
     return <div className="empty-zone">Loading...</div>;
   }
@@ -770,34 +937,64 @@ function ArtifactsZone({
   return (
     <>
       <div className="artifact-list">
-        {artifacts.map(artifact => (
-          <div 
-            key={artifact.id} 
-            className="resource-item"
-            onClick={() => onOpenArtifact(artifact)}
+        <div className="select-all-row">
+          <span className="select-all-label">Select all artifacts</span>
+          <label
+            className="resource-chat-toggle"
+            title="Select all artifacts"
+            onClick={(e) => e.stopPropagation()}
           >
-            <div className="resource-icon">📝</div>
-            <div className="resource-info">
-              <div className="resource-name">
-                {artifactDisplayLabel(artifact)}
-              </div>
-              <div className="resource-meta">
-                {artifact.status} • {new Date(artifact.created_at).toLocaleDateString()}
-              </div>
-            </div>
-            <span className="view-indicator">👁</span>
-            <label
-              className="resource-chat-toggle"
-              title="Include in chat context"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <input
-                type="checkbox"
-                checked={chatSelectedIds.has(artifact.id)}
-                onChange={() => onToggleChatSelected(artifact.id)}
-              />
-            </label>
-          </div>
+            <input
+              ref={selectAllRef}
+              type="checkbox"
+              checked={allSelected}
+              onChange={(e) => onSetAllChatSelected(artifactIds, e.target.checked)}
+            />
+          </label>
+        </div>
+        {artifacts.map((artifact) => (
+          <CompactSelectableRow
+            key={artifact.id}
+            label={artifactDisplayLabel(artifact)}
+            meta={`${artifact.status} • ${new Date(artifact.created_at).toLocaleDateString()}`}
+            logo={<span className="artifact-row-icon">📝</span>}
+            checked={chatSelectedIds.has(artifact.id)}
+            onToggleChecked={() => onToggleChatSelected(artifact.id)}
+            onOpen={() => onOpenArtifact(artifact)}
+            onRename={() => {
+              const currentTitle = artifact.title || '';
+              const nextTitle = window.prompt('Rename artifact', currentTitle)?.trim();
+              if (nextTitle == null || nextTitle === currentTitle) return;
+              void api.entities
+                .updateArtifact(entityId, artifact.id, { title: nextTitle || '' })
+                .then(() => onChanged())
+                .catch((err) => alert(`Rename failed: ${err instanceof Error ? err.message : String(err)}`));
+            }}
+            onDownload={() => {
+              void api.entities
+                .viewArtifact(entityId, artifact.id)
+                .then(async (response) => {
+                  const blob = new Blob([response.content ?? ''], { type: 'text/markdown;charset=utf-8' });
+                  const url = window.URL.createObjectURL(blob);
+                  const a = document.createElement('a');
+                  a.href = url;
+                  a.download = `${artifact.title || artifact.artifact_type}-v${artifact.version}.md`;
+                  document.body.appendChild(a);
+                  a.click();
+                  window.URL.revokeObjectURL(url);
+                  document.body.removeChild(a);
+                })
+                .catch(() => alert('Download failed'));
+            }}
+            onDelete={() => {
+              const ok = window.confirm(`Delete artifact "${artifactDisplayLabel(artifact)}"?`);
+              if (!ok) return;
+              void api.entities
+                .deleteArtifact(entityId, artifact.id)
+                .then(() => onChanged())
+                .catch((err) => alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`));
+            }}
+          />
         ))}
       </div>
     </>
@@ -1058,15 +1255,79 @@ function ArtifactViewerModal({
   );
 }
 
-function getResourceIcon(type: string): string {
-  switch (type) {
-    case 'file':
-      return '📄';
-    case 'text':
-      return '📝';
-    case 'url':
-      return '🔗';
-    default:
-      return '📎';
-  }
+type ResourceLogoKind =
+  | 'pdf'
+  | 'docx'
+  | 'xlsx'
+  | 'pptx'
+  | 'image'
+  | 'video'
+  | 'audio'
+  | 'zip'
+  | 'url'
+  | 'text'
+  | 'file';
+
+function getResourceLogoKind(resource: Resource): ResourceLogoKind {
+  if (resource.resource_type === 'url') return 'url';
+  if (resource.resource_type === 'text') return 'text';
+  if (resource.resource_type !== 'file') return 'file';
+
+  const filename = resource.original_filename || resource.title || '';
+  const mimeType = resolveEffectiveMime(resource.mime_type, filename).toLowerCase();
+
+  if (isPdf(mimeType, filename)) return 'pdf';
+  if (isDocx(mimeType, filename)) return 'docx';
+  if (isXlsx(mimeType, filename)) return 'xlsx';
+  if (isPptx(mimeType, filename)) return 'pptx';
+  if (isImageType(mimeType, filename)) return 'image';
+  if (mimeType.startsWith('video/')) return 'video';
+  if (mimeType.startsWith('audio/')) return 'audio';
+  if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'zip';
+  return 'file';
+}
+
+function renderResourceLogo(resource: Resource) {
+  const kind = getResourceLogoKind(resource);
+
+  const palette: Record<ResourceLogoKind, { bg: string; fg: string; label: string }> = {
+    pdf: { bg: '#B42318', fg: '#FFFFFF', label: 'PDF' },
+    docx: { bg: '#185ABD', fg: '#FFFFFF', label: 'DOC' },
+    xlsx: { bg: '#107C41', fg: '#FFFFFF', label: 'XLS' },
+    pptx: { bg: '#C43E1C', fg: '#FFFFFF', label: 'PPT' },
+    image: { bg: '#7A5AF8', fg: '#FFFFFF', label: 'IMG' },
+    video: { bg: '#0E7490', fg: '#FFFFFF', label: 'VID' },
+    audio: { bg: '#7C3AED', fg: '#FFFFFF', label: 'AUD' },
+    zip: { bg: '#475467', fg: '#FFFFFF', label: 'ZIP' },
+    url: { bg: '#175CD3', fg: '#FFFFFF', label: 'WEB' },
+    text: { bg: '#344054', fg: '#FFFFFF', label: 'TXT' },
+    file: { bg: '#667085', fg: '#FFFFFF', label: 'FILE' },
+  };
+
+  const { bg, fg, label } = palette[kind];
+
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="resource-file-logo"
+      role="img"
+      aria-label={`${label} file`}
+    >
+      <rect x="3" y="2" width="18" height="20" rx="4" fill="#FFFFFF" stroke="#D0D5DD" />
+      <path d="M15 2v6h6" fill="#F2F4F7" />
+      <rect x="5.5" y="11.5" width="13" height="7.5" rx="1.5" fill={bg} />
+      <text
+        x="12"
+        y="16.7"
+        textAnchor="middle"
+        fontSize="4"
+        fontWeight="700"
+        fill={fg}
+        fontFamily="Inter, Segoe UI, Arial, sans-serif"
+        letterSpacing="0.2"
+      >
+        {label}
+      </text>
+    </svg>
+  );
 }

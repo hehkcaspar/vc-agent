@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatModelProfile } from '../context/ChatModelProfileContext';
@@ -15,6 +15,24 @@ function roleLabel(role: string): string {
 
 const CHAT_AGENT_PREF_KEY = 'vc_chat_use_deep_agent';
 
+/**
+ * "dots" spinner from cli-spinners (terminal JSON); same frames/interval as
+ * https://github.com/sindresorhus/cli-spinners — inlined so the browser UI does not depend on Node.
+ */
+const CLI_SPINNER_DOTS_FRAMES = [
+  '⠋',
+  '⠙',
+  '⠹',
+  '⠸',
+  '⠼',
+  '⠴',
+  '⠦',
+  '⠧',
+  '⠇',
+  '⠏',
+] as const;
+const CLI_SPINNER_DOTS_INTERVAL_MS = 80;
+
 function readChatAgentPref(): boolean {
   try {
     const v = localStorage.getItem(CHAT_AGENT_PREF_KEY);
@@ -24,6 +42,32 @@ function readChatAgentPref(): boolean {
     /* ignore */
   }
   return true;
+}
+
+function basename(path: string | undefined): string {
+  if (!path) return '';
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] ?? '';
+}
+
+function resourceDisplayName(resource: Resource): string {
+  const title = resource.title?.trim();
+  if (title) return title;
+  const original = resource.original_filename?.trim();
+  if (original) return original;
+  const file = basename(resource.relative_path);
+  if (file) return file;
+  const url = resource.url?.trim();
+  if (url) return url;
+  return `Resource ${resource.id.slice(0, 8)}...`;
+}
+
+function artifactDisplayName(artifact: Artifact): string {
+  const title = artifact.title?.trim();
+  if (title) return `${title} (v${artifact.version})`;
+  const file = basename(artifact.relative_path);
+  if (file) return file;
+  return `${artifact.artifact_type} (v${artifact.version})`;
 }
 
 interface EntityConversationProps {
@@ -47,6 +91,9 @@ export function EntityConversation({
 }: EntityConversationProps) {
   const { profileId } = useChatModelProfile();
   const sessionIdRef = useRef<string | null>(null);
+  const sessionMenuRef = useRef<HTMLDivElement | null>(null);
+  const onArtifactsChangedRef = useRef(onArtifactsChanged);
+  onArtifactsChangedRef.current = onArtifactsChanged;
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -64,6 +111,11 @@ export function EntityConversation({
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [chatAgentOn, setChatAgentOn] = useState(readChatAgentPref);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
+  const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [spinnerFrame, setSpinnerFrame] = useState(0);
 
   const toggleChatAgent = useCallback(() => {
     setChatAgentOn((on) => {
@@ -124,6 +176,17 @@ export function EntityConversation({
   }, [entityId, sessionId]);
 
   useEffect(() => {
+    if (!sessionMenuOpen) return;
+    const onDocMouseDown = (event: MouseEvent) => {
+      if (!sessionMenuRef.current?.contains(event.target as Node)) {
+        setSessionMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocMouseDown);
+    return () => document.removeEventListener('mousedown', onDocMouseDown);
+  }, [sessionMenuOpen]);
+
+  useEffect(() => {
     setAgentJob(null);
     setAgentStatus('');
   }, [entityId]);
@@ -131,6 +194,8 @@ export function EntityConversation({
   useEffect(() => {
     if (!agentJob) return undefined;
     let cancelled = false;
+    const startedAt = Date.now();
+    const POLL_TIMEOUT_MS = 3 * 60 * 1000;
     const poll = async () => {
       try {
         const st = await api.chat.getMessageJob(
@@ -146,22 +211,58 @@ export function EntityConversation({
               (st.status === 'pending' ? 'Queued…' : st.status)
           );
         }
+        if (
+          (st.status === 'pending' || st.status === 'running') &&
+          Date.now() - startedAt > POLL_TIMEOUT_MS
+        ) {
+          const forSession = agentJob.sessionId;
+          setAgentJob((curr) =>
+            curr && curr.jobId === agentJob.jobId ? null : curr
+          );
+          setAgentStatus('');
+          if (sessionIdRef.current === forSession) {
+            setError(
+              'Agent run timed out in the UI. Please retry, or reopen this chat session to refresh status.'
+            );
+          }
+          return;
+        }
         if (st.status === 'succeeded') {
           setWarnings(st.warnings);
-          setAgentJob(null);
-          setAgentStatus('');
-          const detail = await api.chat.getSession(
-            entityId,
-            agentJob.sessionId
-          );
+          let detail: Awaited<ReturnType<typeof api.chat.getSession>> | null =
+            null;
+          try {
+            detail = await api.chat.getSession(entityId, agentJob.sessionId);
+          } catch {
+            detail = null;
+          }
+          if (cancelled) return;
           if (
-            !cancelled &&
             sessionIdRef.current === agentJob.sessionId
           ) {
-            setMessages(detail.messages);
+            if (detail) {
+              setMessages(detail.messages);
+            } else if (st.assistant_message) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === st.assistant_message!.id)) return prev;
+                return [...prev, st.assistant_message!];
+              });
+            }
           }
+          try {
+            onArtifactsChangedRef.current();
+          } catch {
+            /* non-fatal: parent refresh */
+          }
+          setAgentJob((curr) =>
+            curr && curr.jobId === agentJob.jobId ? null : curr
+          );
+          setAgentStatus('');
         } else if (st.status === 'failed') {
-          setAgentJob(null);
+          setWarnings(st.warnings);
+          setAgentJob((curr) =>
+            curr && curr.jobId === agentJob.jobId ? null : curr
+          );
           setAgentStatus('');
           if (sessionIdRef.current === agentJob.sessionId) {
             setError(st.error_message || 'Agent run failed');
@@ -189,6 +290,56 @@ export function EntityConversation({
   const agentActiveHere = Boolean(
     agentJob && sessionId && agentJob.sessionId === sessionId
   );
+  const sourceNameById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of resources ?? []) m.set(r.id, resourceDisplayName(r));
+    for (const a of artifacts ?? []) m.set(a.id, artifactDisplayName(a));
+    return m;
+  }, [artifacts, resources]);
+
+  const humanizedAgentStatus = useMemo(() => {
+    if (!agentStatus) return '';
+    let out = agentStatus;
+    for (const [id, name] of sourceNameById.entries()) {
+      if (out.includes(id)) out = out.split(id).join(name);
+      const short = id.slice(0, 8);
+      if (short) {
+        const escaped = short.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        out = out.replace(new RegExp(`${escaped}\\.\\.\\.`, 'g'), name);
+        out = out.replace(new RegExp(`\\b${escaped}\\b`, 'g'), name);
+      }
+    }
+    return out;
+  }, [agentStatus, sourceNameById]);
+  const activeAgentStatusText = humanizedAgentStatus?.trim() || 'Agent is working...';
+
+  useEffect(() => {
+    if (!agentActiveHere) {
+      setSpinnerFrame(0);
+      return undefined;
+    }
+    const id = window.setInterval(() => {
+      setSpinnerFrame((f) => (f + 1) % CLI_SPINNER_DOTS_FRAMES.length);
+    }, CLI_SPINNER_DOTS_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [agentActiveHere]);
+
+  const humanizedWarnings = useMemo(() => {
+    if (warnings.length === 0) return warnings;
+    return warnings.map((warning) => {
+      let out = warning;
+      for (const [id, name] of sourceNameById.entries()) {
+        if (out.includes(id)) out = out.split(id).join(name);
+        const short = id.slice(0, 8);
+        if (short) {
+          const escaped = short.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          out = out.replace(new RegExp(`${escaped}\\.\\.\\.`, 'g'), name);
+          out = out.replace(new RegExp(`\\b${escaped}\\b`, 'g'), name);
+        }
+      }
+      return out;
+    });
+  }, [sourceNameById, warnings]);
 
   const handleNewSession = async () => {
     setError(null);
@@ -202,6 +353,42 @@ export function EntityConversation({
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const requestDeleteSession = (target: ChatSession) => {
+    setSessionMenuOpen(false);
+    setDeleteTarget(target);
+    setDeleteStep(1);
+  };
+
+  const closeDeleteModal = () => {
+    if (deletingSessionId) return;
+    setDeleteTarget(null);
+    setDeleteStep(1);
+  };
+
+  const handleDeleteSession = async () => {
+    if (!deleteTarget) return;
+    setError(null);
+    setDeletingSessionId(deleteTarget.id);
+    try {
+      await api.chat.deleteSession(entityId, deleteTarget.id);
+      const list = await refreshSessions();
+      if (list.length === 0) {
+        const created = await api.chat.createSession(entityId, {});
+        setSessions([created]);
+        setSessionId(created.id);
+        setMessages([]);
+      } else if (sessionIdRef.current === deleteTarget.id) {
+        setSessionId(list[0].id);
+      }
+      setDeleteTarget(null);
+      setDeleteStep(1);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeletingSessionId(null);
     }
   };
 
@@ -247,6 +434,8 @@ export function EntityConversation({
         resource_ids: [...selectedResources],
         artifact_ids: [...selectedArtifacts],
         session_id: sessionId ?? undefined,
+        model_profile_id: profileId,
+        use_deep_agent: chatAgentOn,
       });
       setWarnings(res.warnings);
       onArtifactsChanged();
@@ -268,27 +457,68 @@ export function EntityConversation({
       <header className="entity-chat-header">
         <h3 className="entity-chat-header-title">Chat</h3>
         <div className="entity-chat-header-actions">
-          <label className="entity-conversation-label entity-chat-session-label">
-            <span className="visually-hidden">Conversation</span>
-            <select
-              className="entity-conversation-select entity-chat-session-select"
-              value={sessionId ?? ''}
-              onChange={(e) => setSessionId(e.target.value || null)}
+          <div className="entity-chat-session-menu" ref={sessionMenuRef}>
+            <button
+              type="button"
+              className="entity-conversation-select entity-chat-session-select entity-chat-session-trigger"
+              onClick={() => setSessionMenuOpen((open) => !open)}
               disabled={busy || sessions.length === 0}
               aria-label="Select conversation"
+              aria-haspopup="menu"
+              aria-expanded={sessionMenuOpen}
               title={
                 agentActiveHere
                   ? 'You can switch conversations while the agent runs in the background'
                   : undefined
               }
             >
-              {sessions.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.title || `Chat ${s.id.slice(0, 8)}…`}
-                </option>
-              ))}
-            </select>
-          </label>
+              <span className="entity-chat-session-trigger-label">
+                {sessions.find((s) => s.id === sessionId)?.title ||
+                  (sessionId ? `Chat ${sessionId.slice(0, 8)}…` : 'Select chat')}
+              </span>
+              <span aria-hidden="true">▾</span>
+            </button>
+            {sessionMenuOpen && (
+              <div className="entity-chat-session-dropdown" role="menu" aria-label="Chat sessions">
+                {sessions.map((s) => (
+                  <div key={s.id} className="entity-chat-session-row">
+                    <button
+                      type="button"
+                      className={
+                        s.id === sessionId
+                          ? 'entity-chat-session-item entity-chat-session-item--active'
+                          : 'entity-chat-session-item'
+                      }
+                      role="menuitem"
+                      onClick={() => {
+                        setSessionId(s.id);
+                        setSessionMenuOpen(false);
+                      }}
+                    >
+                      {s.title || `Chat ${s.id.slice(0, 8)}…`}
+                    </button>
+                    <button
+                      type="button"
+                      className="entity-chat-session-delete"
+                      onClick={() => requestDeleteSession(s)}
+                      aria-label={`Delete ${s.title || `Chat ${s.id.slice(0, 8)}`}`}
+                      title="Delete chat"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                        <path
+                          d="M4 7h16M10 11v6M14 11v6M9 4h6l1 2H8l1-2Zm-3 3 1 12h10l1-12"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="entity-chat-new-icon"
@@ -312,7 +542,7 @@ export function EntityConversation({
       {error && <div className="entity-conversation-error">{error}</div>}
       {warnings.length > 0 && (
         <ul className="entity-conversation-warnings">
-          {warnings.map((w) => (
+          {humanizedWarnings.map((w) => (
             <li key={w}>{w}</li>
           ))}
         </ul>
@@ -393,7 +623,7 @@ export function EntityConversation({
           <div className="entity-conversation-compose-shell">
             <textarea
               className="entity-conversation-textarea entity-conversation-textarea--shell"
-              value={agentActiveHere ? agentStatus : input}
+              value={input}
               onChange={(e) => {
                 if (!agentActiveHere) setInput(e.target.value);
               }}
@@ -403,7 +633,11 @@ export function EntityConversation({
                   void handleSend();
                 }
               }}
-              placeholder={agentActiveHere ? 'Working…' : 'Message…'}
+              placeholder={
+                agentActiveHere
+                  ? `${CLI_SPINNER_DOTS_FRAMES[spinnerFrame]} ${activeAgentStatusText}`
+                  : 'Message…'
+              }
               rows={2}
               disabled={busy || !sessionId || agentActiveHere}
               title={
@@ -502,10 +736,70 @@ export function EntityConversation({
           <p className="entity-conversation-context-line" role="status">
             {contextCount === 0
               ? 'No sources in context — select resources or artifacts in the side columns.'
-              : `${contextCount} source${contextCount === 1 ? '' : 's'} in context · ${resources?.length ?? 0} resources · ${artifacts?.length ?? 0} artifacts`}
+              : `${contextCount} source${contextCount === 1 ? '' : 's'} in context`}
           </p>
         </div>
       </div>
+      {deleteTarget && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Delete chat session">
+          <div className="modal entity-chat-delete-modal">
+            <div className="modal-header">
+              <h3>{deleteStep === 1 ? 'Delete chat?' : 'Final confirmation'}</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={closeDeleteModal}
+                disabled={Boolean(deletingSessionId)}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              {deleteStep === 1 ? (
+                <p>
+                  Delete <strong>{deleteTarget.title || `Chat ${deleteTarget.id.slice(0, 8)}…`}</strong>?
+                  This will permanently remove all messages in this chat.
+                </p>
+              ) : (
+                <p>
+                  This action cannot be undone. Please confirm again to permanently delete this
+                  conversation.
+                </p>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={closeDeleteModal}
+                disabled={Boolean(deletingSessionId)}
+              >
+                Cancel
+              </button>
+              {deleteStep === 1 ? (
+                <button
+                  type="button"
+                  className="entity-chat-delete-confirm"
+                  onClick={() => setDeleteStep(2)}
+                  disabled={Boolean(deletingSessionId)}
+                >
+                  Continue
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="entity-chat-delete-confirm entity-chat-delete-confirm--danger"
+                  onClick={() => void handleDeleteSession()}
+                  disabled={Boolean(deletingSessionId)}
+                >
+                  {deletingSessionId ? 'Deleting…' : 'Delete forever'}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

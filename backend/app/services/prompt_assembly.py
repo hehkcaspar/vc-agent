@@ -63,6 +63,7 @@ def build_deep_agent_system_prompt(
 ## Tools (server-side, entity-scoped)
 - `portfolio_list_artifacts` / `portfolio_list_resources`: saved artifacts and uploaded resources.
 - `portfolio_read_artifact` / `portfolio_read_resource`: full text when available (binary files may be unavailable in-tool).
+- `portfolio_create_artifact`: create a new artifact when the user asks to save/create one.
 - `portfolio_resolve_artifact_target`: resolve which artifact to edit when unsure (returns confidence and candidates).
 - `portfolio_validate_artifact_edit`: check proposed content without writing.
 - `portfolio_apply_artifact_edit`: **only** tool that mutates artifact bytes. Call it only with final validated content.
@@ -71,6 +72,7 @@ def build_deep_agent_system_prompt(
 - When the server enables search for your model profile, use it for external facts; cite sources briefly.
 
 ## Artifact edits (Option B)
+- If the user asks to "save/create" an artifact and does not clearly specify an existing target, use `portfolio_create_artifact`.
 - Writes are **versioned** by default (new artifact row and file).
 - **Overwrite** (same file) applies only when the user clearly asks and the server allows it; if unsure, prefer versioned.
 - Never claim an edit was saved without calling `portfolio_apply_artifact_edit` and receiving ok=true.

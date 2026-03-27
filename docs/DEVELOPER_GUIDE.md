@@ -61,7 +61,13 @@ $env:GOOGLE_API_KEY = "your-key"
 
 Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info`), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_ARTIFACT_CHARS`, `CHAT_MAX_HISTORY_MESSAGES`.
 
-**Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (server default when the client omits `use_deep_agent`), `CHAT_DEFAULT_MODEL_PROFILE`, per-message `model_profile_id` / **`use_deep_agent`** body field, `CHAT_AGENT_RECURSION_LIMIT`, Moonshot / Kimi Code keys and URLs (`MOONSHOT_*`, `KIMI_CODE_*`, see `config.py`). Edit-policy: `CHAT_ARTIFACT_*`. **LangSmith:** standard LangChain env vars. See `backend/.env_sample`.
+**Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (server default when the client omits `use_deep_agent`), `CHAT_DEFAULT_MODEL_PROFILE`, per-message `model_profile_id` / **`use_deep_agent`** body field, `CHAT_AGENT_RECURSION_LIMIT`, Moonshot / Kimi Code keys and URLs (`MOONSHOT_*`, `KIMI_CODE_*`, see `config.py`).
+
+**Artifact policy:** `CHAT_ARTIFACT_DEFAULT_EDIT_MODE`, `CHAT_ARTIFACT_OVERWRITE_ENABLED`, `CHAT_ARTIFACT_RESOLVE_MIN_SCORE`, and **`CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY`** (`create_new` \| `allow_edit`). See `backend/.env_sample` and `docs/API_REFERENCE.md` (Entity chat env table).
+
+**Optional real-LLM E2E:** set `RUN_E2E_LLM=1` and a valid Gemini key, then from `backend` run `pytest tests/test_chat_e2e_llm.py` (isolated temp DB + `DATA_ROOT`; does not touch `data/vc_portfolio.db`). Documented in `tests/test_chat_e2e_llm.py` module docstring; marker `e2e_llm` registered in `backend/pytest.ini`.
+
+**Tracing (LangSmith):** see `docs/TRACING.md` for the canonical setup, scope, env vars, and verification flow.
 
 **SQLite dev reset:** with the API stopped, from `backend`:  
 `..\venv\Scripts\python.exe scripts\reset_sqlite_db.py --yes`  
@@ -223,9 +229,28 @@ On **Entity detail**, the layout is a three-column **notebook**: Resources | Cha
 
 - **Presets** (`EntityConversation`): labeled **Run preset** — **one-shot** actions (dashed pills); they call `POST .../chat/presets/{id}/run` and create artifacts via the **legacy** Gemini pipeline (`preset_registry.py`).
 - **Agent** pill: **persistent mode** for ordinary messages (`use_deep_agent` in the POST body, preference in `localStorage`). **On** → deep agent path → typically **`202`** + poll `GET .../jobs/{job_id}`; status text can appear in the composer while the user switches sessions elsewhere. **Off** → **`200`** one-shot `generate_with_context`. See `API_REFERENCE.md`.
-- **Context:** side-column selections send `resource_ids` / `artifact_ids` (optional; Agent tools can still list/read entity files).
+- **Context:** side-column selections send `resource_ids` / `artifact_ids` (optional; Agent tools can still list/read entity files). Hint ids also participate in ambiguous **edit vs create** gating (see `ARCHITECTURE.md` → Portfolio chat).
+- **Artifacts list refresh:** when an Agent job finishes successfully, `EntityConversation` calls **`onArtifactsChanged`** so SWR refetches `GET /entities/{id}/artifacts` (new memos appear without reloading the page). Preset runs already invoked the same callback after `runPreset`.
 
 **JSON artifact viewer** (`EntityDetail.tsx` → `ArtifactViewerModal`): Form vs Raw JSON; saves via `PUT .../artifacts/{id}/content`. See existing notes on soft-wrap and `min-width: 0`.
+
+### Entity detail side columns (Resources / Artifacts)
+
+The Resources and Artifacts zones intentionally share the same row interaction model.
+
+- **Compact rows (space-saving):** item cards were replaced by dense rows with divider lines.
+- **Select-all control:** each zone has a top row (`Select all sources` / `Select all artifacts`) with a master checkbox.
+  - Checked: all rows selected for chat context.
+  - Unchecked: none selected.
+  - Indeterminate: partial selection.
+- **Per-row checkbox:** right side checkbox toggles inclusion in chat context.
+- **Hover actions menu:** hover the file/logo area to reveal a menu trigger, then open actions:
+  - `Rename`
+  - `Download`
+  - `Delete`
+- **Row body click behavior:** clicking the row body still opens preview/view exactly as before.
+
+API mapping for those actions is documented in `API_REFERENCE.md` under Entity resource/artifact endpoints.
 
 ### Schema-Driven Forms
 
@@ -326,6 +351,25 @@ On desktop, the app shell is viewport-height-bounded and `main` scrolls only whe
 
 ## Testing
 
+### Automated (backend)
+
+From `backend/` (venv activated or use `..\venv\Scripts\python.exe -m pytest`):
+
+```powershell
+# Default suite: mocked Gemini where applicable (e.g. test_chat_api.py)
+..\venv\Scripts\python.exe -m pytest tests/ -v --tb=short
+```
+
+**Heuristic / gate tests** (no LLM): `tests/test_natural_artifact_intent.py` exercises natural-language create vs edit classification and the `portfolio_apply_artifact_edit` gate. Uses your repo `data/vc_portfolio.db` when present; skipped if the file is missing.
+
+**Real LLM end-to-end** (optional, costs quota): `tests/test_chat_e2e_llm.py` — set `RUN_E2E_LLM=1`, ensure `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set (`backend/.env` loaded by the test module). Uses a **temporary** SQLite file and temp `DATA_ROOT` only.
+
+```powershell
+$env:RUN_E2E_LLM = "1"
+cd backend
+..\venv\Scripts\python.exe -m pytest tests/test_chat_e2e_llm.py -v -s --tb=short
+```
+
 ### Manual Testing Checklist
 
 **Entity CRUD:**
@@ -354,6 +398,9 @@ On desktop, the app shell is viewport-height-bounded and `main` scrolls only whe
 - [ ] View image inline
 - [ ] View text file inline
 - [ ] Download unsupported files
+- [ ] Toggle row checkbox and verify chat-context count changes
+- [ ] Use `Select all sources` and verify full/partial/none states
+- [ ] Hover row logo and run Rename / Download / Delete actions
 
 **Tab State:**
 - [ ] Switch view mode (list/grid)
@@ -364,13 +411,17 @@ On desktop, the app shell is viewport-height-bounded and `main` scrolls only whe
 **Entity chat & artifacts:**
 - [ ] Send with **Agent off**: `200` and immediate assistant reply
 - [ ] Send with **Agent on** (if server supports harness): `202`, progress in composer, final message after poll
+- [ ] **Agent on** + ask to save a note / memo: new artifact appears in the **Artifacts** column when the job finishes (no manual full refresh)
 - [ ] Optional: override server default using Agent toggle vs `CHAT_USE_DEEP_AGENT`
 - [ ] Optional resource/artifact context; Agent without selection still reaches corpus via tools
 - [ ] Run a **preset** (one-shot) and see artifact card / new artifact row
 - [ ] JSON artifact: Form / Raw JSON save
+- [ ] Use `Select all artifacts` and verify full/partial/none states
+- [ ] Hover artifact row logo and run Rename / Download / Delete actions
 
 **UI/UX:**
-- [ ] Hover effects on cards
+- [ ] Header height is compact and consistent across Resources, Chat, and Artifacts
+- [ ] Compact row hover states are clear and non-jumpy
 - [ ] Edit/Archive buttons appear on hover
 - [ ] Modal animations smooth
 - [ ] Archived entities visually distinct

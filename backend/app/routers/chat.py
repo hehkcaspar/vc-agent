@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from datetime import datetime
 from typing import Any, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
-from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal, get_db
@@ -38,11 +39,14 @@ from app.schemas import (
 from app.config import settings
 from app.services.artifact_service import create_artifact_for_entity
 from app.services.gemini_context import (
+    build_deep_agent_multimodal_parts,
     build_context_parts,
     build_harness_user_attachment_text,
 )
 from app.services.gemini_runner import generate_json_with_context, generate_with_context
 from app.services.metadata_extraction import normalize_extraction_result
+from app.services.model_profiles import normalize_profile_id
+from app.services.model_profiles import normalize_profile_id
 from app.services.preset_registry import (
     get_preset,
     list_presets,
@@ -57,6 +61,35 @@ from app.services.portfolio_deep_agent import (
 from app.services.prompt_assembly import EntityBrief, build_portfolio_system_prompt
 
 router = APIRouter(tags=["entity-chat"])
+
+
+def _parse_json_loose(text: str) -> dict:
+    """Parse JSON from raw, fenced, or prose-wrapped model output."""
+    s = (text or "").strip()
+    if not s:
+        raise json.JSONDecodeError("empty response", s, 0)
+    try:
+        obj = json.loads(s)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+
+    fenced = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", s, re.IGNORECASE)
+    if fenced:
+        candidate = fenced.group(1).strip()
+        obj = json.loads(candidate)
+        if isinstance(obj, dict):
+            return obj
+
+    start = s.find("{")
+    end = s.rfind("}")
+    if start >= 0 and end > start:
+        candidate = s[start : end + 1]
+        obj = json.loads(candidate)
+        if isinstance(obj, dict):
+            return obj
+    raise json.JSONDecodeError("no JSON object found", s, 0)
 
 
 async def _get_entity(db: AsyncSession, entity_id: str) -> Entity:
@@ -139,8 +172,10 @@ async def _job_step_update(job_id: str, step_detail: str) -> None:
 
 async def run_chat_agent_job(job_id: str) -> None:
     loop = asyncio.get_event_loop()
+    status_trace: List[str] = []
 
     def on_status(msg: str) -> None:
+        status_trace.append(msg)
         asyncio.run_coroutine_threadsafe(_job_step_update(job_id, msg), loop)
 
     tool_trace: Optional[dict] = None
@@ -197,8 +232,12 @@ async def run_chat_agent_job(job_id: str) -> None:
             artifact_ids = json.loads(job.artifact_ids_json or "[]")
             resources = await _load_resources(db, job.entity_id, resource_ids)
             artifacts = await _load_artifacts(db, job.entity_id, artifact_ids)
+            profile_id = normalize_profile_id(job.model_profile_id)
+            multimodal_parts, used_ids, _ = build_deep_agent_multimodal_parts(
+                resources, profile_id
+            )
             attach_preamble, _ = build_harness_user_attachment_text(
-                resources, artifacts
+                resources, artifacts, skip_resource_ids=used_ids
             )
 
             user_turn = user_row.content.strip()
@@ -232,18 +271,34 @@ async def run_chat_agent_job(job_id: str) -> None:
                 session_artifact_ids=artifact_ids_snap,
                 model_profile_id=model_profile_id_snap,
                 run_id=agent_run_id_snap,
+                initial_user_text=user_row.content,
                 on_status=on_status,
             )
             lc_messages = history_to_lc_messages(history, user_turn)
             return invoke_portfolio_agent(
-                agent, lc_messages, on_status=on_status
+                agent,
+                lc_messages,
+                on_status=on_status,
+                user_multimodal_parts=multimodal_parts,
             )
 
         reply_text, raw = await asyncio.to_thread(_run_deep_agent)
         if isinstance(raw, dict):
-            tool_trace = {"keys": list(raw.keys())}
+            message_count = len(raw.get("messages") or [])
+            tool_trace = {
+                "keys": list(raw.keys()),
+                "message_count": message_count,
+                "status_trace": status_trace[-40:],
+                "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+            }
 
     except ValueError as e:
+        fail_trace = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "status_trace": status_trace[-40:],
+            "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+        }
         async with AsyncSessionLocal() as db:
             res = await db.execute(
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
@@ -252,10 +307,17 @@ async def run_chat_agent_job(job_id: str) -> None:
             if job and job.status not in ("succeeded", "failed"):
                 job.status = "failed"
                 job.error_message = str(e)
+                job.tool_trace_json = json.dumps(fail_trace)
                 job.updated_at = datetime.utcnow()
                 await db.commit()
         return
     except Exception as e:
+        fail_trace = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "status_trace": status_trace[-40:],
+            "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+        }
         async with AsyncSessionLocal() as db:
             res = await db.execute(
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
@@ -264,6 +326,7 @@ async def run_chat_agent_job(job_id: str) -> None:
             if job and job.status not in ("succeeded", "failed"):
                 job.status = "failed"
                 job.error_message = str(e)
+                job.tool_trace_json = json.dumps(fail_trace)
                 job.updated_at = datetime.utcnow()
                 await db.commit()
         return
@@ -286,7 +349,17 @@ async def run_chat_agent_job(job_id: str) -> None:
         job.assistant_message_id = assistant_msg.id
         job.status = "succeeded"
         job.step_detail = "Done"
-        job.tool_trace_json = json.dumps(tool_trace) if tool_trace else None
+        if tool_trace:
+            job.tool_trace_json = json.dumps(tool_trace)
+        elif status_trace:
+            job.tool_trace_json = json.dumps(
+                {
+                    "status_trace": status_trace[-40:],
+                    "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+                }
+            )
+        else:
+            job.tool_trace_json = None
         job.updated_at = datetime.utcnow()
         sess.updated_at = datetime.utcnow()
         await db.commit()
@@ -402,6 +475,22 @@ async def get_chat_session(
     )
 
 
+@router.delete("/entities/{entity_id}/chat/sessions/{session_id}", status_code=204)
+async def delete_chat_session(
+    entity_id: str,
+    session_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_entity(db, entity_id)
+    session = await _get_session(db, entity_id, session_id)
+    await db.execute(
+        delete(ChatCompletionJob).where(ChatCompletionJob.session_id == session_id)
+    )
+    await db.delete(session)
+    await db.commit()
+    return Response(status_code=204)
+
+
 @router.get(
     "/entities/{entity_id}/chat/sessions/{session_id}/jobs/{job_id}",
     response_model=ChatMessageJobStatus,
@@ -489,9 +578,14 @@ async def post_chat_message(
         else settings.CHAT_USE_DEEP_AGENT
     )
     if use_deep_agent:
-        attach_preamble, warnings = build_harness_user_attachment_text(
-            resources, artifacts
+        profile_id = normalize_profile_id(body.model_profile_id)
+        _, used_ids, mm_warnings = build_deep_agent_multimodal_parts(
+            resources, profile_id
         )
+        attach_preamble, warnings = build_harness_user_attachment_text(
+            resources, artifacts, skip_resource_ids=used_ids
+        )
+        warnings.extend(mm_warnings)
         context_parts = None
     else:
         attach_preamble = ""
@@ -629,20 +723,40 @@ async def run_chat_preset(
 
     resources = await _load_resources(db, entity_id, body.resource_ids)
     artifacts = await _load_artifacts(db, entity_id, body.artifact_ids)
-    context_parts, warnings = await build_context_parts(resources, artifacts)
+    use_deep_agent = (
+        body.use_deep_agent
+        if body.use_deep_agent is not None
+        else settings.CHAT_USE_DEEP_AGENT
+    )
+    context_parts = None
+    if use_deep_agent:
+        profile_id = normalize_profile_id(body.model_profile_id)
+        multimodal_parts, used_ids, mm_warnings = build_deep_agent_multimodal_parts(
+            resources, profile_id
+        )
+        attach_preamble, warnings = build_harness_user_attachment_text(
+            resources, artifacts, skip_resource_ids=used_ids
+        )
+        warnings.extend(mm_warnings)
+    else:
+        multimodal_parts = []
+        attach_preamble = ""
+        context_parts, warnings = await build_context_parts(resources, artifacts)
 
     history: List[Tuple[str, str]] = []
     if body.session_id:
         await _get_session(db, entity_id, body.session_id)
-        result = await db.execute(
-            select(ConversationMessage)
-            .where(ConversationMessage.session_id == body.session_id)
-            .order_by(ConversationMessage.created_at.asc())
-        )
-        history = _history_from_messages(
-            result.scalars().all(),
-            settings.CHAT_MAX_HISTORY_MESSAGES // 2,
-        )
+        # Keep preset extraction deterministic: use attachments as source of truth.
+        if preset_id != "extract_info":
+            result = await db.execute(
+                select(ConversationMessage)
+                .where(ConversationMessage.session_id == body.session_id)
+                .order_by(ConversationMessage.created_at.asc())
+            )
+            history = _history_from_messages(
+                result.scalars().all(),
+                settings.CHAT_MAX_HISTORY_MESSAGES // 2,
+            )
 
     if preset_id == "red_team":
         task_body = render_red_team(
@@ -679,17 +793,41 @@ async def run_chat_preset(
 
     try:
         if preset.output_kind == "json":
-            raw_json = generate_json_with_context(
-                system_instruction=system_prompt,
-                history=history,
-                user_message_text=(
-                    "Using only the attached materials (and Google Search when enabled), "
-                    "output a single JSON object exactly as specified in the system instructions."
-                ),
-                context_parts=context_parts,
-            )
+            if use_deep_agent:
+                run_id = str(uuid.uuid4())
+                extras = f"## Preset\n{preset.label} ({preset.id})\n\n## Task\n{task_body}"
+                agent = create_portfolio_agent(
+                    entity=brief,
+                    system_prompt_extras=extras,
+                    session_id=body.session_id or f"preset-{preset.id}",
+                    session_artifact_ids=body.artifact_ids,
+                    model_profile_id=body.model_profile_id,
+                    run_id=run_id,
+                    initial_user_text=task_body,
+                )
+                user_turn = (
+                    "Using only the attached materials, output one JSON object exactly as requested."
+                )
+                if attach_preamble:
+                    user_turn = (
+                        f"{attach_preamble}\n\n--- User instruction ---\n{user_turn}"
+                    )
+                lc_messages = history_to_lc_messages(history, user_turn)
+                raw_json, _ = invoke_portfolio_agent(
+                    agent, lc_messages, user_multimodal_parts=multimodal_parts
+                )
+            else:
+                raw_json = generate_json_with_context(
+                    system_instruction=system_prompt,
+                    history=history,
+                    user_message_text=(
+                        "Using only the attached materials (and Google Search when enabled), "
+                        "output a single JSON object exactly as specified in the system instructions."
+                    ),
+                    context_parts=context_parts,
+                )
             try:
-                parsed = json.loads(raw_json)
+                parsed = _parse_json_loose(raw_json)
             except json.JSONDecodeError as e:
                 raise HTTPException(
                     status_code=502,
@@ -698,14 +836,38 @@ async def run_chat_preset(
             normalized = normalize_extraction_result(parsed)
             artifact_body = json.dumps(normalized, indent=2, ensure_ascii=False)
         else:
-            artifact_body = generate_with_context(
-                system_instruction=system_prompt,
-                history=history,
-                user_message_text=(
+            if use_deep_agent:
+                run_id = str(uuid.uuid4())
+                extras = f"## Preset\n{preset.label} ({preset.id})\n\n## Task\n{task_body}"
+                agent = create_portfolio_agent(
+                    entity=brief,
+                    system_prompt_extras=extras,
+                    session_id=body.session_id or f"preset-{preset.id}",
+                    session_artifact_ids=body.artifact_ids,
+                    model_profile_id=body.model_profile_id,
+                    run_id=run_id,
+                    initial_user_text=task_body,
+                )
+                user_turn = (
                     "Execute the instructions above and output the full markdown report now."
-                ),
-                context_parts=context_parts,
-            )
+                )
+                if attach_preamble:
+                    user_turn = (
+                        f"{attach_preamble}\n\n--- User instruction ---\n{user_turn}"
+                    )
+                lc_messages = history_to_lc_messages(history, user_turn)
+                artifact_body, _ = invoke_portfolio_agent(
+                    agent, lc_messages, user_multimodal_parts=multimodal_parts
+                )
+            else:
+                artifact_body = generate_with_context(
+                    system_instruction=system_prompt,
+                    history=history,
+                    user_message_text=(
+                        "Execute the instructions above and output the full markdown report now."
+                    ),
+                    context_parts=context_parts,
+                )
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except RuntimeError as e:

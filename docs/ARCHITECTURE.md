@@ -108,15 +108,19 @@ class StorageAdapter(ABC):
     async def exists(self, relative_path: str) -> bool
 ```
 
-#### Portfolio chat (legacy + optional Deep Agent)
+#### Portfolio chat (one-shot + optional Deep Agent)
 
 - **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings (`schemas.ChatMessageCreate`).
-- **Legacy path:** synchronous `google-genai` (`generate_with_context`); response **`200`** with `ChatMessageResult`. Presets (`POST .../presets/.../run`) always use this Gemini pipeline, not Deep Agents.
-- **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → `portfolio_deep_agent.on_status`). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages. This keeps long runs from blocking other HTTP traffic.
-- **Tools:** `portfolio_deep_agent.build_portfolio_tools` — list/read artifacts and resources, resolve target, validate/apply edits. Agent can **discover** corpus via tools; optional **`resource_ids` / `artifact_ids`** seed the turn and help edit resolution (`session_artifact_ids`).
-- **Option B edits:** `artifact_editing.py` (resolve → validate → apply); audit **`artifact_edit_events`**; versioning via `artifact_service.create_artifact_for_entity` / overwrite policy.
-- **Profiles:** `model_profiles.py` — `gemini_google`, `kimi_moonshot` (Moonshot vs Kimi Code base URLs per env). **`CHAT_DEFAULT_MODEL_PROFILE`** when `model_profile_id` omitted.
-- **Storage:** `artifact_service` uses `app.services.storage.storage` for testability.
+- **One-shot path:** synchronous model call (`generate_with_context`); response **`200`** with `ChatMessageResult` (no tools; no artifact writes from chat in this path).
+- **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → `portfolio_deep_agent.on_status`). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages.
+- **Presets follow the same mode switch:** `PresetRunRequest.use_deep_agent` (falling back to `CHAT_USE_DEEP_AGENT`). The UI sends Agent On/Off into preset runs. For `extract_info`, the preset prioritizes attached materials and avoids prior session history contamination.
+- **Tools** (`portfolio_deep_agent.build_portfolio_tools`): list/read artifacts and resources; resolve artifact target; validate / **`portfolio_apply_artifact_edit`** (Option B); **`portfolio_create_artifact`** for new lineage (markdown / JSON / text). Optional **`resource_ids` / `artifact_ids`** seed the turn and populate **`session_artifact_ids`** hints for edit resolution.
+- **Create vs edit (guardrail):** When **`CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY=create_new`** (default), user turns that heuristically sound like “save / take a note / 记下来 …” **without** an artifact selected for that turn cannot call **`portfolio_apply_artifact_edit`** alone; the tool returns `create_intent_requires_create_tool` so the model should use **`portfolio_create_artifact`**. Explicit update wording or a selected artifact clears the block. See `portfolio_deep_agent._looks_like_create_intent` / `_looks_like_explicit_edit_intent` (covered by `tests/test_natural_artifact_intent.py` when `data/vc_portfolio.db` exists).
+- **Option B edits:** `artifact_editing.py` (resolve → validate → apply); audit **`artifact_edit_events`**; versioning vs overwrite via `CHAT_ARTIFACT_*` settings.
+- **Profiles:** `model_profiles.py` — `gemini_google`, `kimi_moonshot`. **`CHAT_DEFAULT_MODEL_PROFILE`** when `model_profile_id` omitted.
+- **Attachment materialization:** `gemini_context.py` + `deep_agent_office_extractors.py`. PDFs and Office formats become text for preamble / one-shot; multimodal parts where the profile supports it.
+- **Frontend:** `EntityDetail` passes **`onArtifactsChanged`** (`mutate` from `useEntityArtifacts`) into `EntityConversation`. After a **successful** deep-agent job, the chat panel calls **`onArtifactsChanged()`** so new or updated artifacts appear without a full page reload (presets already called this after `runPreset`).
+- **Storage:** `artifact_service` + `app.services.storage.storage`.
 
 ## Data Flow
 
@@ -332,7 +336,7 @@ App
                 │   └── .zone-content (scrolls)
                 │       ├── ResourceList
                 │       └── ResourcePreview (PDF/Image/Text/HTML viewer)
-                ├── EntityConversation (.zone--chat-main): sessions, transcript, **Run preset** dashed shortcuts (one-shot) vs **Agent** pill (persistent mode, On/Off + `use_deep_agent`), composer shell (+ / send), **async polling** on `202` + status line in textarea; optional `ChatModelProfileContext` / sidebar model selector (Layout)
+                ├── EntityConversation (.zone--chat-main): sessions, transcript, **Run preset** dashed shortcuts (mode follows Agent On/Off), **Agent** pill (persistent mode, On/Off + `use_deep_agent`), composer shell (+ / send), **async polling** on `202` + status line in textarea; optional `ChatModelProfileContext` / sidebar model selector (Layout)
                 ├── Artifacts .zone
                 │   ├── ZoneHeader
                 │   └── .zone-content (scrolls)
