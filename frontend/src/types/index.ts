@@ -18,6 +18,7 @@ export interface Resource {
   relative_path: string;
   url?: string;
   origin_ingest_id?: string;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,8 +31,15 @@ export interface Artifact {
   version: number;
   status: 'draft' | 'final';
   relative_path: string;
+  metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface MetadataPreprocessJobStatus {
+  job_id: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  error_message?: string | null;
 }
 
 /** Stored as assistant message `content` JSON when a chat preset saves an artifact. */

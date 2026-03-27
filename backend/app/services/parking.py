@@ -1,10 +1,10 @@
 import json
 import uuid
-from datetime import datetime
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models import IngestItem
+from app.datetime_support import utc_now, utc_now_iso
 from app.services.storage import StorageAdapter
 
 
@@ -73,7 +73,7 @@ class ParkingLotManager:
                 "entity_hint_domain": entity_hint_domain
             },
             "timestamps": {
-                "created": datetime.utcnow().isoformat()
+                "created": utc_now_iso()
             },
             "files": [
                 {
@@ -137,7 +137,7 @@ class ParkingLotManager:
             ingest_item.status = status
             if error:
                 ingest_item.error = error
-            ingest_item.updated_at = datetime.utcnow()
+            ingest_item.updated_at = utc_now()
             await db.commit()
             await db.refresh(ingest_item)
         return ingest_item

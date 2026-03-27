@@ -108,6 +108,17 @@ class StorageAdapter(ABC):
     async def exists(self, relative_path: str) -> bool
 ```
 
+#### Resource and artifact `metadata_json` (plus async pre-process)
+
+- **`resources.metadata_json`** and **`artifacts.metadata_json`** store one JSON object as SQLite **TEXT** (nullable). Migrations / `create_all` add the column on older DBs (`database.py`).
+- **API surface:** Responses use a parsed **`metadata`** field (`dict` or `null`). Invalid or non-object JSON in the DB is exposed as `null` (`schemas.metadata_json_to_dict`).
+- **Row pre-process:** `POST /entities/{id}/metadata-preprocess` enqueues a FastAPI **`BackgroundTasks`** job registered in **`metadata_preprocess_jobs.py`** (in-memory **`_jobs` / `_inflight`**). Successful runs **merge** into existing JSON:
+  - **`native_file_metadata`** — size/MIME-oriented hints from **`native_file_metadata.py`**
+  - **`gemini_preprocessed`** — Gemini JSON output for a single attached file, using **`file_lookup_preprocess.md`** (via **`preset_registry.load_file_lookup_preprocess_instruction`**), tolerant parsing **`json_loose.parse_json_loose`**, normalization **`file_lookup_normalize.normalize_file_lookup_result`**, model id from **`GEMINI_METADATA_EXTRACTION_MODEL`** (fallback `generate_json_with_context` wiring in **`metadata_preprocess_jobs`**).
+- **Caveats (MVP):** No SQL-backed job table — status is **lost on API restart**; scaling to multiple workers would need a shared queue. Idempotency: starting pre-process for the same entity + resource/artifact while **pending/running** returns the existing **`job_id`**.
+- **Preset `extract_info`:** Separate path — **`metadata_extraction.py`** + **`extract_info.md`** produce VC-shaped JSON artifacts; not the same as file-lookup pre-process (though both may share **`GEMINI_METADATA_EXTRACTION_MODEL`**).
+- **Deep Agent:** **`artifact_editing.resolve_snapshot`** includes **`metadata`** for resolved artifact rows so tool payloads stay JSON-safe.
+
 #### Portfolio chat (one-shot + optional Deep Agent)
 
 - **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings (`schemas.ChatMessageCreate`).
@@ -263,6 +274,7 @@ resources (
     relative_path TEXT NOT NULL,
     url TEXT,
     origin_ingest_id TEXT,
+    metadata_json TEXT,             -- single JSON object; API exposes as "metadata"
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     FOREIGN KEY (entity_id) REFERENCES entities(id),
@@ -278,6 +290,7 @@ artifacts (
     version INTEGER DEFAULT 1,
     status TEXT DEFAULT 'draft',
     relative_path TEXT NOT NULL,  -- vN.md or vN.json under artifact folder
+    metadata_json TEXT,             -- single JSON object; API exposes as "metadata"
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     FOREIGN KEY (entity_id) REFERENCES entities(id)
@@ -312,7 +325,7 @@ artifacts (
 ### Component Hierarchy
 
 ```
-App
+App (ToastHost for global toasts, e.g. metadata pre-process)
 └── TabProvider
     └── Layout
         ├── Sidebar (Portfolio tab)

@@ -10,6 +10,7 @@ import {
   ChatMessage,
   ChatMessageResult,
   ChatMessageJobStatus,
+  MetadataPreprocessJobStatus,
   PostChatMessageResult,
   PresetInfo,
   PresetRunResponse,
@@ -70,7 +71,11 @@ export const api = {
       fetchJson<Resource[]>(`/entities/${id}/resources`),
     getArtifacts: (id: string) =>
       fetchJson<Artifact[]>(`/entities/${id}/artifacts`),
-    updateResource: (entityId: string, resourceId: string, data: { title: string }) =>
+    updateResource: (
+      entityId: string,
+      resourceId: string,
+      data: { title?: string; metadata?: Record<string, unknown> | null },
+    ) =>
       fetchJson<Resource>(`/entities/${entityId}/resources/${resourceId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -85,7 +90,11 @@ export const api = {
         throw new Error(error || `HTTP ${response.status}`);
       }
     },
-    updateArtifact: (entityId: string, artifactId: string, data: { title: string }) =>
+    updateArtifact: (
+      entityId: string,
+      artifactId: string,
+      data: { title?: string; metadata?: Record<string, unknown> | null },
+    ) =>
       fetchJson<Artifact>(`/entities/${entityId}/artifacts/${artifactId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -103,7 +112,15 @@ export const api = {
     viewResource: (entityId: string, resourceId: string) =>
       fetch(apiUrl(`/entities/${entityId}/resources/${resourceId}/view`)),
     viewArtifact: (entityId: string, artifactId: string) =>
-      fetchJson<{ content: string }>(`/entities/${entityId}/artifacts/${artifactId}/view`),
+      fetchJson<{
+        content: string;
+        metadata?: Record<string, unknown> | null;
+        id?: string;
+        type?: string;
+        version?: number;
+        status?: string;
+        created_at?: string;
+      }>(`/entities/${entityId}/artifacts/${artifactId}/view`),
     createArtifact: (entityId: string, data: FormData) =>
       fetchJson<Artifact>(`/entities/${entityId}/artifacts`, {
         method: 'POST',
@@ -115,6 +132,19 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       }),
+    startMetadataPreprocess: (
+      entityId: string,
+      body: { target: 'resource' | 'artifact'; id: string },
+    ) =>
+      fetchJson<{ job_id: string }>(`/entities/${entityId}/metadata-preprocess`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    getMetadataPreprocessJob: (entityId: string, jobId: string) =>
+      fetchJson<MetadataPreprocessJobStatus>(
+        `/entities/${entityId}/metadata-preprocess-jobs/${jobId}`,
+      ),
   },
 
   // Ingestion

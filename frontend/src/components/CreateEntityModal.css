@@ -199,6 +199,13 @@
   color: var(--color-text-primary);
 }
 
+.file-input.file-input--drag-over {
+  border-color: var(--color-brand-primary);
+  border-style: solid;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+}
+
 .file-input input {
   display: none;
 }

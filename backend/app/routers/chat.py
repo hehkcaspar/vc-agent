@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-import re
 import uuid
-from datetime import datetime
 from typing import Any, List, Optional, Sequence, Tuple
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -15,6 +13,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal, get_db
+from app.datetime_support import utc_now
 from app.models import (
     Artifact,
     ChatCompletionJob,
@@ -44,6 +43,7 @@ from app.services.gemini_context import (
     build_harness_user_attachment_text,
 )
 from app.services.gemini_runner import generate_json_with_context, generate_with_context
+from app.services.json_loose import parse_json_loose
 from app.services.metadata_extraction import normalize_extraction_result
 from app.services.model_profiles import normalize_profile_id
 from app.services.model_profiles import normalize_profile_id
@@ -61,35 +61,6 @@ from app.services.portfolio_deep_agent import (
 from app.services.prompt_assembly import EntityBrief, build_portfolio_system_prompt
 
 router = APIRouter(tags=["entity-chat"])
-
-
-def _parse_json_loose(text: str) -> dict:
-    """Parse JSON from raw, fenced, or prose-wrapped model output."""
-    s = (text or "").strip()
-    if not s:
-        raise json.JSONDecodeError("empty response", s, 0)
-    try:
-        obj = json.loads(s)
-        if isinstance(obj, dict):
-            return obj
-    except json.JSONDecodeError:
-        pass
-
-    fenced = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", s, re.IGNORECASE)
-    if fenced:
-        candidate = fenced.group(1).strip()
-        obj = json.loads(candidate)
-        if isinstance(obj, dict):
-            return obj
-
-    start = s.find("{")
-    end = s.rfind("}")
-    if start >= 0 and end > start:
-        candidate = s[start : end + 1]
-        obj = json.loads(candidate)
-        if isinstance(obj, dict):
-            return obj
-    raise json.JSONDecodeError("no JSON object found", s, 0)
 
 
 async def _get_entity(db: AsyncSession, entity_id: str) -> Entity:
@@ -166,7 +137,7 @@ async def _job_step_update(job_id: str, step_detail: str) -> None:
         if not job or job.status in ("succeeded", "failed"):
             return
         job.step_detail = (step_detail or "")[:4000]
-        job.updated_at = datetime.utcnow()
+        job.updated_at = utc_now()
         await db.commit()
 
 
@@ -203,7 +174,7 @@ async def run_chat_agent_job(job_id: str) -> None:
             if not user_row:
                 job.status = "failed"
                 job.error_message = "user_message_missing"
-                job.updated_at = datetime.utcnow()
+                job.updated_at = utc_now()
                 await db.commit()
                 return
 
@@ -220,7 +191,7 @@ async def run_chat_agent_job(job_id: str) -> None:
             if idx is None:
                 job.status = "failed"
                 job.error_message = "user_message_not_in_session"
-                job.updated_at = datetime.utcnow()
+                job.updated_at = utc_now()
                 await db.commit()
                 return
             prior = all_msgs[:idx]
@@ -260,7 +231,7 @@ async def run_chat_agent_job(job_id: str) -> None:
             job.agent_run_id = agent_run_id_snap
             job.status = "running"
             job.step_detail = "Starting agent…"
-            job.updated_at = datetime.utcnow()
+            job.updated_at = utc_now()
             await db.commit()
 
         def _run_deep_agent() -> Tuple[str, Any]:
@@ -308,7 +279,7 @@ async def run_chat_agent_job(job_id: str) -> None:
                 job.status = "failed"
                 job.error_message = str(e)
                 job.tool_trace_json = json.dumps(fail_trace)
-                job.updated_at = datetime.utcnow()
+                job.updated_at = utc_now()
                 await db.commit()
         return
     except Exception as e:
@@ -327,7 +298,7 @@ async def run_chat_agent_job(job_id: str) -> None:
                 job.status = "failed"
                 job.error_message = str(e)
                 job.tool_trace_json = json.dumps(fail_trace)
-                job.updated_at = datetime.utcnow()
+                job.updated_at = utc_now()
                 await db.commit()
         return
 
@@ -360,8 +331,8 @@ async def run_chat_agent_job(job_id: str) -> None:
             )
         else:
             job.tool_trace_json = None
-        job.updated_at = datetime.utcnow()
-        sess.updated_at = datetime.utcnow()
+        job.updated_at = utc_now()
+        sess.updated_at = utc_now()
         await db.commit()
 
 
@@ -655,7 +626,7 @@ async def post_chat_message(
             warnings_json=json.dumps(warnings),
         )
         db.add(job)
-        session.updated_at = datetime.utcnow()
+        session.updated_at = utc_now()
         await db.commit()
         await db.refresh(user_msg)
         background_tasks.add_task(run_chat_agent_job, job.id)
@@ -694,7 +665,7 @@ async def post_chat_message(
     )
     db.add(user_msg)
     db.add(assistant_msg)
-    session.updated_at = datetime.utcnow()
+    session.updated_at = utc_now()
     await db.commit()
     await db.refresh(assistant_msg)
 
@@ -827,7 +798,7 @@ async def run_chat_preset(
                     context_parts=context_parts,
                 )
             try:
-                parsed = _parse_json_loose(raw_json)
+                parsed = parse_json_loose(raw_json)
             except json.JSONDecodeError as e:
                 raise HTTPException(
                     status_code=502,
@@ -911,7 +882,7 @@ async def run_chat_preset(
             content=json.dumps(artifact_card),
         )
         db.add(note)
-        sess.updated_at = datetime.utcnow()
+        sess.updated_at = utc_now()
         await db.commit()
 
     return PresetRunResponse(

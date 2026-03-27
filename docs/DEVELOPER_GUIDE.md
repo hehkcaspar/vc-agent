@@ -59,7 +59,7 @@ $env:GEMINI_API_KEY = "your-key"
 $env:GOOGLE_API_KEY = "your-key"
 ```
 
-Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info`), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_ARTIFACT_CHARS`, `CHAT_MAX_HISTORY_MESSAGES`.
+Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info` and for **per-row metadata pre-process** / file-lookup enrichment), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_ARTIFACT_CHARS`, `CHAT_MAX_HISTORY_MESSAGES`.
 
 **Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (server default when the client omits `use_deep_agent`), `CHAT_DEFAULT_MODEL_PROFILE`, per-message `model_profile_id` / **`use_deep_agent`** body field, `CHAT_AGENT_RECURSION_LIMIT`, Moonshot / Kimi Code keys and URLs (`MOONSHOT_*`, `KIMI_CODE_*`, see `config.py`).
 
@@ -113,10 +113,11 @@ vc-agent/
 │   │   ├── schemas.py               # Pydantic schemas
 │   │   ├── database.py              # DB connection
 │   │   ├── routers/
-│   │   │   ├── entities.py          # Entity CRUD + resources/artifacts + artifact view/update
+│   │   │   ├── entities.py          # Entity CRUD + resources/artifacts + metadata-preprocess jobs
 │   │   │   ├── chat.py              # Gemini chat sessions, messages, presets
 │   │   │   ├── ingest.py            # Ingestion endpoint
 │   │   │   └── parkinglot.py        # Parking lot management
+│   │   ├── prompts/                 # Markdown prompts (extract_info, file_lookup_preprocess, …)
 │   │   └── services/
 │   │       ├── storage.py             # Storage adapter
 │   │       ├── parking.py             # Parking lot manager
@@ -124,11 +125,15 @@ vc-agent/
 │   │       ├── materializer.py        # Resource materializer
 │   │       ├── gemini_runner.py       # Legacy Gemini generate + JSON extraction
 │   │       ├── gemini_context.py      # Multimodal parts + harness attachment text
-│   │       ├── preset_registry.py     # Chat presets (red_team, extract_info)
+│   │       ├── preset_registry.py     # Chat presets (red_team, extract_info); loads file_lookup_preprocess text
 │   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent)
 │   │       ├── artifact_service.py    # Artifact create/version/overwrite helpers
-│   │       ├── artifact_editing.py    # Option B resolve/validate/apply + edit events
-│   │       ├── metadata_extraction.py # Normalized JSON for extract_info
+│   │       ├── artifact_editing.py    # Option B resolve/validate/apply + edit events (+ resolve_snapshot metadata)
+│   │       ├── metadata_extraction.py # VC-normalized JSON for extract_info preset
+│   │       ├── file_lookup_normalize.py  # Normalize Gemini file-lookup JSON (pre-process)
+│   │       ├── metadata_preprocess_jobs.py # In-memory async jobs; merge into metadata_json
+│   │       ├── native_file_metadata.py    # Programmatic hints (mime, size, etc.)
+│   │       ├── json_loose.py          # Tolerant JSON decode for model output
 │   │       ├── model_profiles.py      # Gemini / Kimi ChatModel wiring for harness
 │   │       └── portfolio_deep_agent.py # Deep Agents tools + invoke wrapper
 │   ├── requirements.txt
@@ -136,6 +141,7 @@ vc-agent/
 │
 ├── frontend/
 │   ├── src/
+│   │   ├── App.tsx                  # Root shell; mounts ToastHost for global toasts
 │   │   ├── components/
 │   │   │   ├── Layout.tsx           # App layout; sidebar may include chat model selector
 │   │   │   ├── PortfolioTab.tsx     # Main portfolio view (list/grid segmented toggle)
@@ -151,6 +157,9 @@ vc-agent/
 │   │   ├── hooks/
 │   │   │   ├── useEntities.ts       # Entity data hooks
 │   │   │   └── useParkingLot.ts     # Parking lot hooks
+│   │   ├── lib/
+│   │   │   ├── appToast.ts          # showToast helper (used by EntityDetail, pre-process)
+│   │   │   └── metadataPreprocess.ts # POST + poll metadata-preprocess jobs
 │   │   ├── services/
 │   │   │   └── api.ts               # API client
 │   │   ├── store/
@@ -245,6 +254,7 @@ The Resources and Artifacts zones intentionally share the same row interaction m
   - Indeterminate: partial selection.
 - **Per-row checkbox:** right side checkbox toggles inclusion in chat context.
 - **Hover actions menu:** hover the file/logo area to reveal a menu trigger, then open actions:
+  - `Pre-process` (metadata enrichment: async job + toast + list refresh; row may show a check when **`metadata`** is non-empty)
   - `Rename`
   - `Download`
   - `Delete`
@@ -362,6 +372,8 @@ From `backend/` (venv activated or use `..\venv\Scripts\python.exe -m pytest`):
 
 **Heuristic / gate tests** (no LLM): `tests/test_natural_artifact_intent.py` exercises natural-language create vs edit classification and the `portfolio_apply_artifact_edit` gate. Uses your repo `data/vc_portfolio.db` when present; skipped if the file is missing.
 
+**Metadata pipeline** (mocked Gemini where needed): `tests/test_metadata_preprocess.py`, `tests/test_json_loose.py`, `tests/test_native_file_metadata.py`, `tests/test_entity_metadata.py`.
+
 **Real LLM end-to-end** (optional, costs quota): `tests/test_chat_e2e_llm.py` — set `RUN_E2E_LLM=1`, ensure `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set (`backend/.env` loaded by the test module). Uses a **temporary** SQLite file and temp `DATA_ROOT` only.
 
 ```powershell
@@ -400,6 +412,7 @@ cd backend
 - [ ] Download unsupported files
 - [ ] Toggle row checkbox and verify chat-context count changes
 - [ ] Use `Select all sources` and verify full/partial/none states
+- [ ] Hover row logo and run Pre-process (poll to completion), confirm **`metadata`** / UI indicator updates
 - [ ] Hover row logo and run Rename / Download / Delete actions
 
 **Tab State:**
@@ -417,7 +430,7 @@ cd backend
 - [ ] Run a **preset** (one-shot) and see artifact card / new artifact row
 - [ ] JSON artifact: Form / Raw JSON save
 - [ ] Use `Select all artifacts` and verify full/partial/none states
-- [ ] Hover artifact row logo and run Rename / Download / Delete actions
+- [ ] Hover artifact row logo and run Pre-process / Rename / Download / Delete actions
 
 **UI/UX:**
 - [ ] Header height is compact and consistent across Resources, Chat, and Artifacts
@@ -426,6 +439,7 @@ cd backend
 - [ ] Modal animations smooth
 - [ ] Archived entities visually distinct
 - [ ] Responsive on different screen sizes
+- [ ] Toast notifications for pre-process (and similar flows) are visible and non-blocking
 
 ### API Testing with curl
 

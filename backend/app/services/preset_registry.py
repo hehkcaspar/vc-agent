@@ -60,6 +60,14 @@ def load_preset_body(preset: PresetDefinition) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def load_file_lookup_preprocess_instruction() -> str:
+    """System instruction for row-level metadata pre-process (file lookup index, not VC extract)."""
+    path = _PROMPTS_DIR / "file_lookup_preprocess.md"
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt template missing: {path}")
+    return path.read_text(encoding="utf-8")
+
+
 def render_extract_info(entity_name: str, entity_website: Optional[str]) -> str:
     preset = PRESETS["extract_info"]
     body = load_preset_body(preset)

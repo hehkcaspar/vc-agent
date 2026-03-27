@@ -1,20 +1,29 @@
 import json
-from datetime import datetime
 from typing import Any, List, Literal
 
-from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
 from app.database import get_db
+from app.datetime_support import utc_now
 from app.models import ChatCompletionJob, Entity, Resource, Artifact
 from app.schemas import (
-    EntityCreate, 
-    EntityUpdate, 
-    EntityResponse,
-    ResourceResponse,
+    ArtifactCreate,
     ArtifactResponse,
-    ArtifactCreate
+    EntityCreate,
+    EntityResponse,
+    EntityUpdate,
+    MetadataPreprocessAccepted,
+    MetadataPreprocessJobStatus,
+    MetadataPreprocessStart,
+    ResourceResponse,
+    metadata_json_to_dict,
+)
+from app.services.metadata_preprocess_jobs import (
+    create_or_reuse_job,
+    get_job_status,
+    run_metadata_preprocess_job,
 )
 from app.services.storage import storage
 from app.services.artifact_service import create_artifact_for_entity
@@ -171,6 +180,64 @@ async def get_entity_artifacts(
     return artifacts
 
 
+@router.post(
+    "/{entity_id}/metadata-preprocess",
+    response_model=MetadataPreprocessAccepted,
+)
+async def start_metadata_preprocess(
+    entity_id: str,
+    body: MetadataPreprocessStart,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Enqueue Gemini metadata extraction into resource/artifact metadata_json (async)."""
+    result = await db.execute(select(Entity).where(Entity.id == entity_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Entity not found")
+
+    if body.target == "resource":
+        res = await db.execute(
+            select(Resource).where(
+                Resource.id == body.id,
+                Resource.entity_id == entity_id,
+            )
+        )
+        if not res.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Resource not found")
+    else:
+        art = await db.execute(
+            select(Artifact).where(
+                Artifact.id == body.id,
+                Artifact.entity_id == entity_id,
+            )
+        )
+        if not art.scalar_one_or_none():
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+    job_id, schedule = await create_or_reuse_job(entity_id, body.target, body.id)
+    if schedule:
+        background_tasks.add_task(run_metadata_preprocess_job, job_id)
+    return MetadataPreprocessAccepted(job_id=job_id)
+
+
+@router.get(
+    "/{entity_id}/metadata-preprocess-jobs/{job_id}",
+    response_model=MetadataPreprocessJobStatus,
+)
+async def get_metadata_preprocess_job(
+    entity_id: str,
+    job_id: str,
+):
+    row = await get_job_status(entity_id, job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return MetadataPreprocessJobStatus(
+        job_id=row["job_id"],
+        status=row["status"],
+        error_message=row.get("error_message"),
+    )
+
+
 @router.post("/{entity_id}/artifacts", response_model=ArtifactResponse)
 async def create_artifact(
     entity_id: str,
@@ -208,7 +275,7 @@ async def update_resource(
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update mutable resource fields (currently title only)."""
+    """Update mutable resource fields (title, metadata)."""
     result = await db.execute(select(Entity).where(Entity.id == entity_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Entity not found")
@@ -230,7 +297,19 @@ async def update_resource(
             raise HTTPException(status_code=400, detail="title cannot be empty")
         resource.title = t
 
-    resource.updated_at = datetime.utcnow()
+    if "metadata" in payload:
+        meta = payload["metadata"]
+        if meta is None:
+            resource.metadata_json = None
+        elif not isinstance(meta, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="metadata must be a JSON object or null",
+            )
+        else:
+            resource.metadata_json = json.dumps(meta, ensure_ascii=False)
+
+    resource.updated_at = utc_now()
     await db.commit()
     await db.refresh(resource)
     return resource
@@ -273,7 +352,7 @@ async def update_artifact(
     payload: dict[str, Any] = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
-    """Update mutable artifact fields (currently title only)."""
+    """Update mutable artifact fields (title, metadata)."""
     result = await db.execute(select(Entity).where(Entity.id == entity_id))
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Entity not found")
@@ -293,7 +372,19 @@ async def update_artifact(
         t = str(title).strip()
         artifact.title = t or None
 
-    artifact.updated_at = datetime.utcnow()
+    if "metadata" in payload:
+        meta = payload["metadata"]
+        if meta is None:
+            artifact.metadata_json = None
+        elif not isinstance(meta, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="metadata must be a JSON object or null",
+            )
+        else:
+            artifact.metadata_json = json.dumps(meta, ensure_ascii=False)
+
+    artifact.updated_at = utc_now()
     await db.commit()
     await db.refresh(artifact)
     return artifact
@@ -357,7 +448,13 @@ async def view_resource(
     
     # For URL resources, return the URL
     if resource.resource_type == "url":
-        return {"url": resource.url, "type": "url"}
+        return {
+            "url": resource.url,
+            "type": "url",
+            "metadata": metadata_json_to_dict(
+                getattr(resource, "metadata_json", None)
+            ),
+        }
     
     # For file/text resources, serve the file
     if not resource.relative_path:
@@ -413,7 +510,10 @@ async def view_artifact(
             "version": artifact.version,
             "status": artifact.status,
             "content": content.decode('utf-8'),
-            "created_at": artifact.created_at
+            "created_at": artifact.created_at,
+            "metadata": metadata_json_to_dict(
+                getattr(artifact, "metadata_json", None)
+            ),
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to read artifact: {str(e)}")
@@ -463,7 +563,7 @@ async def update_artifact_content(
             status_code=500, detail=f"Failed to write artifact: {e}"
         ) from e
 
-    artifact.updated_at = datetime.utcnow()
+    artifact.updated_at = utc_now()
     await db.commit()
     await db.refresh(artifact)
     return artifact

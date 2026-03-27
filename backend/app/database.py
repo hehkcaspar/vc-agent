@@ -40,6 +40,42 @@ def _ensure_sqlite_artifact_title(connection) -> None:
         connection.execute(text("ALTER TABLE artifacts ADD COLUMN title VARCHAR"))
 
 
+def _ensure_sqlite_resource_metadata_json(connection) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    result = connection.execute(
+        text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='resources'"
+        )
+    )
+    if result.fetchone() is None:
+        return
+    result = connection.execute(text("PRAGMA table_info(resources)"))
+    columns = {row[1] for row in result.fetchall()}
+    if "metadata_json" not in columns:
+        connection.execute(
+            text("ALTER TABLE resources ADD COLUMN metadata_json TEXT")
+        )
+
+
+def _ensure_sqlite_artifact_metadata_json(connection) -> None:
+    if connection.dialect.name != "sqlite":
+        return
+    result = connection.execute(
+        text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='artifacts'"
+        )
+    )
+    if result.fetchone() is None:
+        return
+    result = connection.execute(text("PRAGMA table_info(artifacts)"))
+    columns = {row[1] for row in result.fetchall()}
+    if "metadata_json" not in columns:
+        connection.execute(
+            text("ALTER TABLE artifacts ADD COLUMN metadata_json TEXT")
+        )
+
+
 # SQLite `create_all` does not ALTER existing tables — add any missing columns here.
 _SQLITE_ARTIFACT_EDIT_EVENTS_ADDS: tuple[tuple[str, str], ...] = (
     ("correlation_id", "VARCHAR"),
@@ -111,6 +147,8 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.run_sync(_ensure_sqlite_artifact_title)
+        await conn.run_sync(_ensure_sqlite_resource_metadata_json)
+        await conn.run_sync(_ensure_sqlite_artifact_metadata_json)
         await conn.run_sync(_ensure_sqlite_artifact_edit_events)
 
 

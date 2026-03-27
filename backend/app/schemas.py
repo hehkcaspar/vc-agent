@@ -1,6 +1,45 @@
+import json
 from datetime import datetime
-from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+from typing import Any, List, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from sqlalchemy.orm import class_mapper
+
+
+def metadata_json_to_dict(raw: Optional[str]) -> Optional[dict[str, Any]]:
+    """Parse DB metadata_json TEXT into a single JSON object; invalid or non-object → None."""
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        obj = json.loads(raw)
+        if isinstance(obj, dict):
+            return obj
+    except json.JSONDecodeError:
+        pass
+    return None
+
+
+def orm_row_with_metadata_dict(row: Any) -> dict[str, Any]:
+    m = class_mapper(row.__class__)
+    d = {col.key: getattr(row, col.key) for col in m.columns}
+    mj = d.pop("metadata_json", None)
+    d["metadata"] = metadata_json_to_dict(mj if isinstance(mj, str) else None)
+    return d
+
+
+def coerce_orm_metadata_before_model(data: Any) -> Any:
+    if isinstance(data, dict):
+        if "metadata_json" in data:
+            out = {k: v for k, v in data.items() if k != "metadata_json"}
+            mj = data.get("metadata_json")
+            out["metadata"] = metadata_json_to_dict(
+                mj if isinstance(mj, str) else None
+            )
+            return out
+        return data
+    if getattr(data, "__table__", None) is not None:
+        return orm_row_with_metadata_dict(data)
+    return data
 
 
 # ============== Entity Schemas ==============
@@ -55,11 +94,16 @@ class ResourceResponse(ResourceBase):
     relative_path: str
     url: Optional[str]
     origin_ingest_id: Optional[str]
+    metadata: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_metadata(cls, data: Any) -> Any:
+        return coerce_orm_metadata_before_model(data)
 
 
 # ============== Artifact Schemas ==============
@@ -82,11 +126,34 @@ class ArtifactResponse(ArtifactBase):
     version: int
     status: str
     relative_path: str
+    metadata: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_metadata(cls, data: Any) -> Any:
+        return coerce_orm_metadata_before_model(data)
+
+
+# ============== Metadata pre-process (in-memory jobs) ==============
+
+
+class MetadataPreprocessStart(BaseModel):
+    target: Literal["resource", "artifact"]
+    id: str
+
+
+class MetadataPreprocessAccepted(BaseModel):
+    job_id: str
+
+
+class MetadataPreprocessJobStatus(BaseModel):
+    job_id: str
+    status: Literal["pending", "running", "succeeded", "failed"]
+    error_message: Optional[str] = None
 
 
 # ============== IngestItem Schemas ==============

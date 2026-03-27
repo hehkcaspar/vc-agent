@@ -31,6 +31,7 @@ This folder is the canonical source for technical documentation.
 ## Update Checklist
 
 - If **REST / chat contracts** change, update `API_REFERENCE.md` (`202` vs `200`, `use_deep_agent`, job polling, tool names, env vars).
+- If **`metadata_json` / pre-process** behavior or response shapes change, update `API_REFERENCE.md` and the **metadata** subsection in `ARCHITECTURE.md` (and the services tree or test list in `DEVELOPER_GUIDE.md` when files move).
 - If **runtime behavior or data flow** change, update `ARCHITECTURE.md` (chat tools, artifact policy, frontend refresh).
 - If **setup, tests, or dev workflow** change, update `DEVELOPER_GUIDE.md`.
 - If **LangSmith** changes, update `TRACING.md`.
@@ -42,5 +43,6 @@ This folder is the canonical source for technical documentation.
 | Topic | Where |
 |--------|--------|
 | Endpoints, bodies, env summary | `API_REFERENCE.md` → Entity chat |
+| `metadata` on resources/artifacts, pre-process POST/GET | `API_REFERENCE.md` → Entities; `ARCHITECTURE.md` → Resource and artifact `metadata_json` |
 | Deep agent, tools, Option B edits, create-vs-edit policy | `ARCHITECTURE.md` → Portfolio chat |
 | Local env, pytest (unit + optional real LLM E2E), manual checklist | `DEVELOPER_GUIDE.md` → Configuration, Testing |

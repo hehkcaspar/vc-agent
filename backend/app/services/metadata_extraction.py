@@ -1,4 +1,4 @@
-"""Normalize Gemini JSON extraction output to a stable VC metadata shape."""
+"""Normalize Gemini JSON extraction output to a stable VC metadata shape (extract_info)."""
 
 from __future__ import annotations
 

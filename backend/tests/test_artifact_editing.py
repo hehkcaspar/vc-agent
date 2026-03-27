@@ -239,6 +239,8 @@ def test_read_resource_payload_text_file(db_session):
         out = read_resource_payload_sync(db, "ent-1", "r1")
         assert out["ok"] is True
         assert out["text"] == "hello resource"
+        assert "metadata" in out
+        assert out["metadata"] is None
 
 
 def test_normalize_profile_uses_settings_default(monkeypatch):

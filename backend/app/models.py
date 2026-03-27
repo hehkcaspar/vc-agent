@@ -1,7 +1,8 @@
 import uuid
-from datetime import datetime
 from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import declarative_base, relationship
+
+from app.datetime_support import utc_now
 
 Base = declarative_base()
 
@@ -18,8 +19,8 @@ class Entity(Base):
     name = Column(String, nullable=False)
     website = Column(String, nullable=True)
     status = Column(String, default="active")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     resources = relationship("Resource", back_populates="entity", cascade="all, delete-orphan")
     artifacts = relationship("Artifact", back_populates="entity", cascade="all, delete-orphan")
@@ -38,8 +39,8 @@ class IngestItem(Base):
     entity_hint_name = Column(String, nullable=True)
     entity_hint_domain = Column(String, nullable=True)
     error = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class Resource(Base):
@@ -54,8 +55,9 @@ class Resource(Base):
     relative_path = Column(String, nullable=False)
     url = Column(String, nullable=True)
     origin_ingest_id = Column(String, ForeignKey("ingest_items.ingest_id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     entity = relationship("Entity", back_populates="resources")
 
@@ -70,8 +72,9 @@ class Artifact(Base):
     version = Column(Integer, default=1)
     status = Column(String, default="draft")  # draft, final
     relative_path = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     entity = relationship("Entity", back_populates="artifacts")
 
@@ -82,8 +85,8 @@ class ConversationSession(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
     title = Column(String, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     entity = relationship("Entity", back_populates="chat_sessions")
     messages = relationship(
@@ -100,7 +103,7 @@ class ConversationMessage(Base):
     session_id = Column(String, ForeignKey("conversation_sessions.id"), nullable=False)
     role = Column(String, nullable=False)  # user, assistant, system
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     session = relationship("ConversationSession", back_populates="messages")
 
@@ -129,8 +132,8 @@ class ChatCompletionJob(Base):
     model_profile_id = Column(String, nullable=True)
     harness_extras = Column(Text, nullable=False)
 
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
 class ArtifactEditEvent(Base):
@@ -156,4 +159,4 @@ class ArtifactEditEvent(Base):
     run_id = Column(String, nullable=True)
     pipeline_version = Column(String, default="option_b")
 
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)

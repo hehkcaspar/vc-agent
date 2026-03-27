@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from app.models import Artifact, Entity
+from app.datetime_support import utc_now
 import app.services.storage as storage_module
 
 
@@ -136,9 +137,8 @@ def overwrite_artifact_content_sync(
         raise ValueError("Artifact not found")
 
     storage_module.storage.write_file_sync(row.relative_path, content.encode("utf-8"))
-    from datetime import datetime
 
-    row.updated_at = datetime.utcnow()
+    row.updated_at = utc_now()
     db.commit()
     db.refresh(row)
     return row

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import Artifact, ArtifactEditEvent, Resource
+from app.schemas import metadata_json_to_dict
 import app.services.storage as storage_module
 from app.services.artifact_service import (
     artifact_file_suffix,
@@ -77,12 +78,18 @@ def record_edit_event(
 def resolve_snapshot(res: dict[str, Any]) -> dict[str, Any]:
     """JSON-safe resolve result (strip SQLAlchemy artifact ORM)."""
     art = res.get("artifact")
+    row_metadata = (
+        metadata_json_to_dict(getattr(art, "metadata_json", None))
+        if art is not None
+        else None
+    )
     return {
         "ok": res["ok"],
         "confidence": res["confidence"],
         "candidates": res.get("candidates") or [],
         "reason": res.get("reason"),
         "resolved_artifact_id": art.id if art is not None else None,
+        "metadata": row_metadata,
     }
 
 
@@ -115,6 +122,7 @@ def read_resource_payload_sync(
     ).scalar_one_or_none()
     if not row:
         return {"ok": False, "error": "not_found"}
+    row_metadata = metadata_json_to_dict(getattr(row, "metadata_json", None))
     if row.resource_type == "url":
         return {
             "ok": True,
@@ -122,19 +130,21 @@ def read_resource_payload_sync(
             "title": row.title,
             "resource_type": "url",
             "url": row.url or "",
+            "metadata": row_metadata,
         }
     if not row.relative_path:
-        return {"ok": False, "error": "no_path"}
+        return {"ok": False, "error": "no_path", "metadata": row_metadata}
     try:
         raw = storage_module.storage.read_file_sync(row.relative_path)
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "metadata": row_metadata}
     cap = settings.CHAT_MAX_ATTACHMENT_BYTES
     if len(raw) > cap:
         return {
             "ok": False,
             "error": "file_too_large",
             "max_bytes": cap,
+            "metadata": row_metadata,
         }
     mime = (row.mime_type or "").strip() or mimetypes.guess_type(
         row.original_filename or row.title or ""
@@ -148,12 +158,14 @@ def read_resource_payload_sync(
                 "error": "pdf_text_extraction_failed",
                 "mime_type": mime,
                 "details": str(e),
+                "metadata": row_metadata,
             }
         if not text.strip():
             return {
                 "ok": False,
                 "error": "pdf_has_no_extractable_text",
                 "mime_type": mime,
+                "metadata": row_metadata,
             }
         return {
             "ok": True,
@@ -162,6 +174,7 @@ def read_resource_payload_sync(
             "resource_type": row.resource_type,
             "mime_type": mime,
             "text": text,
+            "metadata": row_metadata,
         }
     if mime.startswith("image/"):
         return {
@@ -169,6 +182,7 @@ def read_resource_payload_sync(
             "error": "binary_not_supported_in_tool",
             "mime_type": mime,
             "hint": "Image binary cannot be read as plain text in this tool.",
+            "metadata": row_metadata,
         }
     if mime.startswith("text/") or mime in ("application/json", "application/xml"):
         try:
@@ -185,6 +199,7 @@ def read_resource_payload_sync(
                     "ok": False,
                     "error": "office_has_no_extractable_text",
                     "mime_type": mime,
+                    "metadata": row_metadata,
                 }
             return {
                 "ok": True,
@@ -193,6 +208,7 @@ def read_resource_payload_sync(
                 "resource_type": row.resource_type,
                 "mime_type": mime,
                 "text": office_text,
+                "metadata": row_metadata,
             }
         try:
             text = raw.decode("utf-8")
@@ -201,6 +217,7 @@ def read_resource_payload_sync(
                 "ok": False,
                 "error": "binary_not_supported_in_tool",
                 "mime_type": mime,
+                "metadata": row_metadata,
             }
     max_c = settings.CHAT_MAX_ARTIFACT_CHARS
     if len(text) > max_c:
@@ -212,6 +229,7 @@ def read_resource_payload_sync(
         "resource_type": row.resource_type,
         "mime_type": mime,
         "text": text,
+        "metadata": row_metadata,
     }
 
 
@@ -586,11 +604,12 @@ def read_artifact_text_sync(db: Session, entity_id: str, artifact_id: str) -> di
     ).scalar_one_or_none()
     if not row:
         return {"ok": False, "error": "not_found"}
+    row_metadata = metadata_json_to_dict(getattr(row, "metadata_json", None))
     try:
         raw = storage_module.storage.read_file_sync(row.relative_path)
         text = raw.decode("utf-8", errors="replace")
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        return {"ok": False, "error": str(e), "metadata": row_metadata}
     return {
         "ok": True,
         "artifact_id": row.id,
@@ -600,4 +619,5 @@ def read_artifact_text_sync(db: Session, entity_id: str, artifact_id: str) -> di
         "relative_path": row.relative_path,
         "content": text,
         "checksum": content_checksum(text),
+        "metadata": row_metadata,
     }

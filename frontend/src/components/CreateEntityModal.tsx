@@ -1,4 +1,4 @@
-import { useState, useRef, FormEvent } from 'react';
+import { useState, useRef, FormEvent, DragEvent } from 'react';
 import { api } from '../services/api';
 import { Entity, EntityUpdateData } from '../types';
 import { EntityMetadataForm } from './EntityMetadataForm';
@@ -35,6 +35,10 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileDropDepthRef = useRef(0);
+  const [fileDragActive, setFileDragActive] = useState(false);
+
+  const fileMergeKey = (f: File) => `${f.name}\0${f.size}\0${f.lastModified}`;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -44,6 +48,50 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
 
   const removeFile = (index: number) => {
     setFiles(files.filter((_, i) => i !== index));
+  };
+
+  const handleFileDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDropDepthRef.current += 1;
+    setFileDragActive(true);
+  };
+
+  const handleFileDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDropDepthRef.current -= 1;
+    if (fileDropDepthRef.current <= 0) {
+      fileDropDepthRef.current = 0;
+      setFileDragActive(false);
+    }
+  };
+
+  const handleFileDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleFileDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDropDepthRef.current = 0;
+    setFileDragActive(false);
+    const incoming = e.dataTransfer.files;
+    if (!incoming?.length) return;
+    setFiles((prev) => {
+      const seen = new Set(prev.map(fileMergeKey));
+      const next = [...prev];
+      for (const f of Array.from(incoming)) {
+        const k = fileMergeKey(f);
+        if (!seen.has(k)) {
+          seen.add(k);
+          next.push(f);
+        }
+      }
+      return next;
+    });
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -132,9 +180,13 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
               
               <div className="form-group">
                 <label>Files</label>
-                <div 
-                  className="file-input"
+                <div
+                  className={`file-input${fileDragActive ? ' file-input--drag-over' : ''}`}
                   onClick={() => fileInputRef.current?.click()}
+                  onDragEnter={handleFileDragEnter}
+                  onDragLeave={handleFileDragLeave}
+                  onDragOver={handleFileDragOver}
+                  onDrop={handleFileDrop}
                 >
                   <input
                     ref={fileInputRef}
@@ -142,7 +194,7 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
                     multiple
                     onChange={handleFileSelect}
                   />
-                  <div>📁 Click to select files</div>
+                  <div>📁 Click to select or drag and drop files</div>
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
                     PDF, images, text files
                   </div>

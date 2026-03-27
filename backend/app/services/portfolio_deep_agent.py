@@ -26,6 +26,7 @@ from app.services.artifact_editing import (
 )
 from app.services.model_profiles import build_deep_agent_base_chat_model
 from app.services.prompt_assembly import EntityBrief, build_deep_agent_system_prompt
+from app.schemas import metadata_json_to_dict
 
 
 def _json(obj: Any) -> str:
@@ -167,6 +168,9 @@ def build_portfolio_tools(
                     "version": a.version,
                     "status": a.status,
                     "relative_path": a.relative_path,
+                    "metadata": metadata_json_to_dict(
+                        getattr(a, "metadata_json", None)
+                    ),
                 }
                 for a in rows
             ]
@@ -206,6 +210,9 @@ def build_portfolio_tools(
                     "mime_type": r.mime_type,
                     "url": r.url,
                     "relative_path": r.relative_path,
+                    "metadata": metadata_json_to_dict(
+                        getattr(r, "metadata_json", None)
+                    ),
                 }
                 for r in rows
             ]

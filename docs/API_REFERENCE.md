@@ -116,7 +116,8 @@ Delete entity and all associated resources/artifacts.
 #### GET /entities/{id}/resources
 Get all resources for an entity (sorted by created_at desc).
 
-**Response:**
+**Response:** Each item is a `ResourceResponse`. Listings include a parsed **`metadata`** object (or `null` if unset/invalid in DB — stored column is `metadata_json`).
+
 ```json
 [
   {
@@ -129,6 +130,7 @@ Get all resources for an entity (sorted by created_at desc).
     "relative_path": "{entity_id}/resources/{resource_id}/document.pdf",
     "url": null,
     "origin_ingest_id": "uuid",
+    "metadata": null,
     "created_at": "2024-01-01T00:00:00",
     "updated_at": "2024-01-01T00:00:00"
   }
@@ -136,14 +138,17 @@ Get all resources for an entity (sorted by created_at desc).
 ```
 
 #### PATCH /entities/{id}/resources/{resource_id}
-Update mutable resource fields.
+Update mutable resource fields (`title`, optional `metadata`).
 
 **Request Body:**
 ```json
 {
-  "title": "Renamed file title"
+  "title": "Renamed file title",
+  "metadata": { "custom_key": "value" }
 }
 ```
+
+`metadata` may be set to `null` to clear stored JSON.
 
 **Response:** `ResourceResponse` for the updated row.
 
@@ -161,19 +166,21 @@ Delete a resource row and best-effort remove its backing file from storage.
 View or download a resource payload.
 
 - For `file` / `text` resources: returns a file stream (`FileResponse`) with inferred/declared MIME type.
-- For `url` resources: returns JSON with the URL target:
+- For `url` resources: returns JSON with the URL target and parsed row **`metadata`** (same as list/detail responses):
 
 ```json
 {
   "url": "https://example.com",
-  "type": "url"
+  "type": "url",
+  "metadata": null
 }
 ```
 
 #### GET /entities/{id}/artifacts
 Get all artifacts for an entity (sorted by created_at desc).
 
-**Response:**
+**Response:** Each item is an `ArtifactResponse` with optional **`metadata`** (parsed from `metadata_json`).
+
 ```json
 [
   {
@@ -184,6 +191,7 @@ Get all artifacts for an entity (sorted by created_at desc).
     "version": 1,
     "status": "draft|final",
     "relative_path": "{entity_id}/artifacts/{artifact_id}/v1.md",
+    "metadata": null,
     "created_at": "2024-01-01T00:00:00",
     "updated_at": "2024-01-01T00:00:00"
   }
@@ -193,16 +201,17 @@ Get all artifacts for an entity (sorted by created_at desc).
 `title` is optional and may be `null`. JSON artifacts (for example from the `extract_info` preset) use a `.json` file suffix in `relative_path`; markdown reports use `.md`.
 
 #### PATCH /entities/{id}/artifacts/{artifact_id}
-Update mutable artifact fields.
+Update mutable artifact fields (`title`, optional `metadata`).
 
 **Request Body:**
 ```json
 {
-  "title": "extract_info"
+  "title": "extract_info",
+  "metadata": { "custom_key": "value" }
 }
 ```
 
-`title` may also be an empty string to clear it (`null` persisted in DB).
+`title` may also be an empty string to clear it (`null` persisted in DB). `metadata` may be `null` to clear.
 
 **Response:** `ArtifactResponse` for the updated row.
 
@@ -228,7 +237,42 @@ Return the artifact body as UTF-8 text for display in the UI.
   "version": 1,
   "status": "draft",
   "content": "…markdown or JSON string…",
-  "created_at": "2024-01-01T00:00:00"
+  "created_at": "2024-01-01T00:00:00",
+  "metadata": null
+}
+```
+
+#### POST /entities/{entity_id}/metadata-preprocess
+
+Start an **async** metadata enrichment job for a single resource or artifact. Merges programmatic file hints and Gemini “file lookup” JSON into the row’s `metadata_json` (see `ARCHITECTURE.md`).
+
+**Request body:**
+```json
+{
+  "target": "resource",
+  "id": "uuid-of-resource-or-artifact"
+}
+```
+
+`target` is `"resource"` or `"artifact"`. `id` must belong to `{entity_id}`.
+
+**Response:** `200 OK`
+```json
+{ "job_id": "uuid" }
+```
+
+If a job for the same entity + target + id is already **pending** or **running**, the same `job_id` is returned and no duplicate work is scheduled.
+
+#### GET /entities/{entity_id}/metadata-preprocess-jobs/{job_id}
+
+Poll job status (no `step_detail`; unlike chat deep-agent jobs).
+
+**Response:**
+```json
+{
+  "job_id": "uuid",
+  "status": "pending|running|succeeded|failed",
+  "error_message": "optional when failed"
 }
 ```
 
@@ -244,6 +288,7 @@ Replace the artifact file on disk with **pretty-printed JSON** derived from the 
 
 The Entity detail side columns use a compact row model with these API mappings:
 
+- **Pre-process metadata** -> `POST /entities/{id}/metadata-preprocess` then poll `GET .../metadata-preprocess-jobs/{job_id}`; on success, refresh lists so **`metadata`** updates. UI uses toasts (`ToastHost` / `showToast`) instead of blocking alerts.
 - **Rename resource** -> `PATCH /entities/{id}/resources/{resource_id}`
 - **Delete resource** -> `DELETE /entities/{id}/resources/{resource_id}`
 - **Download/open resource** -> `GET /entities/{id}/resources/{resource_id}/view`
@@ -312,7 +357,7 @@ The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `
 |----------|---------|
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Legacy chat + presets |
 | `GEMINI_MODEL` | Main chat model id (default `gemini-3.1-pro-preview`) |
-| `GEMINI_METADATA_EXTRACTION_MODEL` | Presets such as `extract_info` (default `gemini-3.1-flash-lite-preview`) |
+| `GEMINI_METADATA_EXTRACTION_MODEL` | Presets such as `extract_info` and **row metadata pre-process** (file lookup JSON); default `gemini-3.1-flash-lite-preview` |
 | `CHAT_USE_DEEP_AGENT` | Server default for deep agent when request omits `use_deep_agent` |
 | `CHAT_DEFAULT_MODEL_PROFILE` | Default profile id if client omits `model_profile_id` |
 | `CHAT_AGENT_RECURSION_LIMIT` | LangGraph recursion limit (default 50) |
@@ -326,7 +371,7 @@ Other: `CHAT_ENABLE_GOOGLE_SEARCH`, attachment/history limits. Deep-agent steps 
 
 - **`portfolio_list_artifacts` / `portfolio_list_resources`** — discover corpus.
 - **`portfolio_read_artifact` / `portfolio_read_resource`** — text payloads (policies in `artifact_editing.read_*`).
-- **`portfolio_resolve_artifact_target`**, **`portfolio_validate_artifact_edit`**, **`portfolio_apply_artifact_edit`** — Option B pipeline; **`apply`** is the only tool that mutates existing artifact bytes / versions.
+- **`portfolio_resolve_artifact_target`**, **`portfolio_validate_artifact_edit`**, **`portfolio_apply_artifact_edit`** — Option B pipeline; **`apply`** is the only tool that mutates existing artifact bytes / versions. Resolve results exposed to the model include a JSON-safe **`metadata`** field when an artifact row is resolved.
 - **`portfolio_create_artifact`** — new canonical artifact row + file (`.md` / `.json` / `.txt`), independent lineage.
 
 If policy is `create_new` and the user message looks like “persist this” but no artifact id was attached for the turn, **`portfolio_apply_artifact_edit`** may return **`create_intent_requires_create_tool`** in the tool JSON instead of writing.
@@ -446,6 +491,7 @@ Notes:
 | relative_path | string | Path relative to DATA_ROOT |
 | url | string | URL for url-type resources |
 | origin_ingest_id | UUID | Traceability to parking lot |
+| metadata | object \| null | Parsed from `metadata_json`; API never returns raw `metadata_json` text |
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
 
@@ -459,8 +505,11 @@ Notes:
 | version | int | Version number |
 | status | string | "draft" or "final" |
 | relative_path | string | Path under `DATA_ROOT` to file (typically `v{n}.md` or `v{n}.json`) |
+| metadata | object \| null | Parsed from `metadata_json` |
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
+
+After **metadata pre-process** succeeds, `metadata` often includes top-level keys such as **`native_file_metadata`** and **`gemini_preprocessed`** (merged with any existing object).
 
 ### Chat completion job (Deep Agent only)
 

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, ReactNode } from 'react';
+import { useState, useRef, useEffect, useCallback, ReactNode, DragEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { init as initPptxPreview } from 'pptx-preview';
@@ -20,7 +20,38 @@ import {
 } from '../lib/resourcePreview';
 import { EntityConversation } from './EntityConversation';
 import { JsonArtifactFormEditor } from './JsonArtifactFormEditor';
+import {
+  CLI_SPINNER_DOTS_FRAMES,
+  CLI_SPINNER_DOTS_INTERVAL_MS,
+} from '../lib/cliSpinnerDots';
+import { pollMetadataPreprocessJob } from '../lib/metadataPreprocess';
+import { showToast } from '../lib/appToast';
 import './EntityDetail.css';
+
+function rowHasFileMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+): boolean {
+  if (metadata == null || typeof metadata !== 'object') return false;
+  return Object.keys(metadata).length > 0;
+}
+
+function PreprocessMetadataBadgeIcon() {
+  return (
+    <span
+      className="compact-row-preprocess-meta-icon"
+      title="Metadata on file"
+      aria-hidden
+    >
+      <svg viewBox="0 0 20 20" fill="currentColor" focusable="false">
+        <path
+          fillRule="evenodd"
+          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
+          clipRule="evenodd"
+        />
+      </svg>
+    </span>
+  );
+}
 
 // Resource types that can be added
 const RESOURCE_TYPES = [
@@ -264,6 +295,10 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileDropDepthRef = useRef(0);
+  const [fileDragActive, setFileDragActive] = useState(false);
+
+  const fileMergeKey = (f: File) => `${f.name}\0${f.size}\0${f.lastModified}`;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
@@ -273,6 +308,50 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
 
   const removeFile = (index: number) => {
     setFiles(files.filter((_, i) => i !== index));
+  };
+
+  const handleFileDragEnter = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDropDepthRef.current += 1;
+    setFileDragActive(true);
+  };
+
+  const handleFileDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDropDepthRef.current -= 1;
+    if (fileDropDepthRef.current <= 0) {
+      fileDropDepthRef.current = 0;
+      setFileDragActive(false);
+    }
+  };
+
+  const handleFileDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleFileDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileDropDepthRef.current = 0;
+    setFileDragActive(false);
+    const incoming = e.dataTransfer.files;
+    if (!incoming?.length) return;
+    setFiles((prev) => {
+      const seen = new Set(prev.map(fileMergeKey));
+      const next = [...prev];
+      for (const f of Array.from(incoming)) {
+        const k = fileMergeKey(f);
+        if (!seen.has(k)) {
+          seen.add(k);
+          next.push(f);
+        }
+      }
+      return next;
+    });
   };
 
   const handleSubmit = async () => {
@@ -292,10 +371,10 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
         await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
         onSuccess();
       } else {
-        alert('Upload failed: ' + result.error);
+        showToast('Upload failed: ' + result.error, 'error');
       }
     } catch (err) {
-      alert('Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      showToast('Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
     } finally {
       setIsUploading(false);
     }
@@ -310,9 +389,16 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
         </div>
         <div className="modal-body">
           <div className="form-group">
-            <div className="file-input" onClick={() => fileInputRef.current?.click()}>
+            <div
+              className={`file-input${fileDragActive ? ' file-input--drag-over' : ''}`}
+              onClick={() => fileInputRef.current?.click()}
+              onDragEnter={handleFileDragEnter}
+              onDragLeave={handleFileDragLeave}
+              onDragOver={handleFileDragOver}
+              onDrop={handleFileDrop}
+            >
               <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} />
-              <div>📁 Click to select files</div>
+              <div>📁 Click to select or drag and drop files</div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
                 PDF, images, text files
               </div>
@@ -362,10 +448,10 @@ function AddTextModal({ entityId, onClose, onSuccess }: { entityId: string; onCl
         await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
         onSuccess();
       } else {
-        alert('Failed: ' + result.error);
+        showToast('Failed: ' + result.error, 'error');
       }
     } catch (err) {
-      alert('Error: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      showToast('Error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -428,10 +514,10 @@ function AddUrlModal({ entityId, onClose, onSuccess }: { entityId: string; onClo
         await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
         onSuccess();
       } else {
-        alert('Failed: ' + result.error);
+        showToast('Failed: ' + result.error, 'error');
       }
     } catch (err) {
-      alert('Error: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      showToast('Error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -480,6 +566,10 @@ interface CompactSelectableRowProps {
   onOpen: () => void;
   onRename: () => void;
   onDownload: () => void;
+  onPreprocess?: () => void;
+  preprocessBusy?: boolean;
+  /** Show trailing icon when this row already has saved metadata (e.g. pre-process). */
+  hasFileMetadata?: boolean;
   onDelete: () => void;
 }
 
@@ -492,10 +582,14 @@ function CompactSelectableRow({
   onOpen,
   onRename,
   onDownload,
+  onPreprocess,
+  preprocessBusy = false,
+  hasFileMetadata = false,
   onDelete,
 }: CompactSelectableRowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement | null>(null);
+  const [spinnerFrame, setSpinnerFrame] = useState(0);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -507,6 +601,14 @@ function CompactSelectableRow({
     document.addEventListener('mousedown', onDocMouseDown);
     return () => document.removeEventListener('mousedown', onDocMouseDown);
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!preprocessBusy) return;
+    const id = window.setInterval(() => {
+      setSpinnerFrame((f) => (f + 1) % CLI_SPINNER_DOTS_FRAMES.length);
+    }, CLI_SPINNER_DOTS_INTERVAL_MS);
+    return () => window.clearInterval(id);
+  }, [preprocessBusy]);
 
   return (
     <div className="compact-row" onClick={onOpen} ref={rowRef}>
@@ -531,6 +633,31 @@ function CompactSelectableRow({
             <button type="button" onClick={() => { setMenuOpen(false); onDownload(); }}>
               Download
             </button>
+            {onPreprocess && (
+              <button
+                type="button"
+                disabled={preprocessBusy}
+                className={`compact-row-actions-menu-preprocess${preprocessBusy ? ' is-busy' : ''}`}
+                onClick={() => {
+                  if (preprocessBusy) return;
+                  void onPreprocess();
+                }}
+              >
+                {preprocessBusy ? (
+                  <>
+                    <span className="compact-row-preprocess-spinner" aria-hidden>
+                      {CLI_SPINNER_DOTS_FRAMES[spinnerFrame]}
+                    </span>
+                    <span className="compact-row-preprocess-busy-label">Processing…</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="compact-row-preprocess-label">Pre-process</span>
+                    {hasFileMetadata ? <PreprocessMetadataBadgeIcon /> : null}
+                  </>
+                )}
+              </button>
+            )}
             <button
               type="button"
               className="compact-row-actions-menu-danger"
@@ -593,6 +720,37 @@ function ResourcesZoneWithHeader({
   const selectedCount = resourceIds.filter((id) => chatSelectedIds.has(id)).length;
   const allSelected = resourceIds.length > 0 && selectedCount === resourceIds.length;
   const partiallySelected = selectedCount > 0 && !allSelected;
+  const [preprocessBusyKey, setPreprocessBusyKey] = useState<string | null>(null);
+
+  const runResourcePreprocess = useCallback(
+    async (resourceId: string) => {
+      const key = `resource:${resourceId}`;
+      try {
+        const { job_id } = await api.entities.startMetadataPreprocess(entityId, {
+          target: 'resource',
+          id: resourceId,
+        });
+        setPreprocessBusyKey(key);
+        const result = await pollMetadataPreprocessJob(entityId, job_id);
+        if (result.outcome === 'timeout') {
+          showToast('Pre-process timed out. You can try again.', 'error');
+        } else if (result.outcome === 'failed' && result.status.error_message) {
+          showToast(`Pre-process failed: ${result.status.error_message}`, 'error');
+        } else if (result.outcome === 'succeeded') {
+          showToast('Metadata saved.', 'success');
+        }
+      } catch (e) {
+        showToast(
+          `Pre-process failed: ${e instanceof Error ? e.message : String(e)}`,
+          'error',
+        );
+      } finally {
+        setPreprocessBusyKey(null);
+        onSuccess();
+      }
+    },
+    [entityId, onSuccess],
+  );
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -728,7 +886,7 @@ function ResourcesZoneWithHeader({
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
     } catch (err) {
-      alert('Download failed');
+      showToast('Download failed', 'error');
     }
   };
 
@@ -855,7 +1013,12 @@ function ResourcesZoneWithHeader({
                     void api.entities
                       .updateResource(entityId, resource.id, { title: nextTitle })
                       .then(() => onSuccess())
-                      .catch((err) => alert(`Rename failed: ${err instanceof Error ? err.message : String(err)}`));
+                      .catch((err) =>
+                        showToast(
+                          `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
+                          'error',
+                        ),
+                      );
                   }}
                   onDownload={() => {
                     if (resource.resource_type === 'url' && resource.url) {
@@ -875,15 +1038,23 @@ function ResourcesZoneWithHeader({
                         window.URL.revokeObjectURL(url);
                         document.body.removeChild(a);
                       })
-                      .catch(() => alert('Download failed'));
+                      .catch(() => showToast('Download failed', 'error'));
                   }}
+                  preprocessBusy={preprocessBusyKey === `resource:${resource.id}`}
+                  hasFileMetadata={rowHasFileMetadata(resource.metadata)}
+                  onPreprocess={() => void runResourcePreprocess(resource.id)}
                   onDelete={() => {
                     const ok = window.confirm(`Delete resource "${resource.title}"?`);
                     if (!ok) return;
                     void api.entities
                       .deleteResource(entityId, resource.id)
                       .then(() => onSuccess())
-                      .catch((err) => alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`));
+                      .catch((err) =>
+                        showToast(
+                          `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
+                          'error',
+                        ),
+                      );
                   }}
                 />
               );
@@ -919,6 +1090,37 @@ function ArtifactsZone({
   const selectedCount = artifactIds.filter((id) => chatSelectedIds.has(id)).length;
   const allSelected = artifactIds.length > 0 && selectedCount === artifactIds.length;
   const partiallySelected = selectedCount > 0 && !allSelected;
+  const [preprocessBusyKey, setPreprocessBusyKey] = useState<string | null>(null);
+
+  const runArtifactPreprocess = useCallback(
+    async (artifactId: string) => {
+      const key = `artifact:${artifactId}`;
+      try {
+        const { job_id } = await api.entities.startMetadataPreprocess(entityId, {
+          target: 'artifact',
+          id: artifactId,
+        });
+        setPreprocessBusyKey(key);
+        const result = await pollMetadataPreprocessJob(entityId, job_id);
+        if (result.outcome === 'timeout') {
+          showToast('Pre-process timed out. You can try again.', 'error');
+        } else if (result.outcome === 'failed' && result.status.error_message) {
+          showToast(`Pre-process failed: ${result.status.error_message}`, 'error');
+        } else if (result.outcome === 'succeeded') {
+          showToast('Metadata saved.', 'success');
+        }
+      } catch (e) {
+        showToast(
+          `Pre-process failed: ${e instanceof Error ? e.message : String(e)}`,
+          'error',
+        );
+      } finally {
+        setPreprocessBusyKey(null);
+        onChanged();
+      }
+    },
+    [entityId, onChanged],
+  );
 
   useEffect(() => {
     if (selectAllRef.current) {
@@ -968,7 +1170,12 @@ function ArtifactsZone({
               void api.entities
                 .updateArtifact(entityId, artifact.id, { title: nextTitle || '' })
                 .then(() => onChanged())
-                .catch((err) => alert(`Rename failed: ${err instanceof Error ? err.message : String(err)}`));
+                .catch((err) =>
+                  showToast(
+                    `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
+                    'error',
+                  ),
+                );
             }}
             onDownload={() => {
               void api.entities
@@ -984,15 +1191,23 @@ function ArtifactsZone({
                   window.URL.revokeObjectURL(url);
                   document.body.removeChild(a);
                 })
-                .catch(() => alert('Download failed'));
+                .catch(() => showToast('Download failed', 'error'));
             }}
+            preprocessBusy={preprocessBusyKey === `artifact:${artifact.id}`}
+            hasFileMetadata={rowHasFileMetadata(artifact.metadata)}
+            onPreprocess={() => void runArtifactPreprocess(artifact.id)}
             onDelete={() => {
               const ok = window.confirm(`Delete artifact "${artifactDisplayLabel(artifact)}"?`);
               if (!ok) return;
               void api.entities
                 .deleteArtifact(entityId, artifact.id)
                 .then(() => onChanged())
-                .catch((err) => alert(`Delete failed: ${err instanceof Error ? err.message : String(err)}`));
+                .catch((err) =>
+                  showToast(
+                    `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
+                    'error',
+                  ),
+                );
             }}
           />
         ))}

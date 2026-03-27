@@ -1,9 +1,9 @@
 import json
 import uuid
-from datetime import datetime
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import Entity, Resource, IngestItem
+from app.datetime_support import utc_now
 from app.services.storage import StorageAdapter
 from app.services.parking import ParkingLotManager
 
@@ -197,7 +197,7 @@ class ResourceMaterializer:
         
         # Mark ingest item as materialized
         ingest_item.status = "materialized"
-        ingest_item.updated_at = datetime.utcnow()
+        ingest_item.updated_at = utc_now()
         
         # Commit all changes
         await db.commit()

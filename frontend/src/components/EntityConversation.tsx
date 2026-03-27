@@ -3,6 +3,10 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatModelProfile } from '../context/ChatModelProfileContext';
 import { parseArtifactCardMessage, resolveArtifactForViewer } from '../lib/chatArtifactCard';
+import {
+  CLI_SPINNER_DOTS_FRAMES,
+  CLI_SPINNER_DOTS_INTERVAL_MS,
+} from '../lib/cliSpinnerDots';
 import { api } from '../services/api';
 import type { Artifact, ChatMessage, ChatSession, PresetInfo, Resource } from '../types';
 
@@ -14,24 +18,6 @@ function roleLabel(role: string): string {
 }
 
 const CHAT_AGENT_PREF_KEY = 'vc_chat_use_deep_agent';
-
-/**
- * "dots" spinner from cli-spinners (terminal JSON); same frames/interval as
- * https://github.com/sindresorhus/cli-spinners — inlined so the browser UI does not depend on Node.
- */
-const CLI_SPINNER_DOTS_FRAMES = [
-  '⠋',
-  '⠙',
-  '⠹',
-  '⠸',
-  '⠼',
-  '⠴',
-  '⠦',
-  '⠧',
-  '⠇',
-  '⠏',
-] as const;
-const CLI_SPINNER_DOTS_INTERVAL_MS = 80;
 
 function readChatAgentPref(): boolean {
   try {

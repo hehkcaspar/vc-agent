@@ -5,6 +5,8 @@ Usage examples (from `backend/`, with venv):
   ..\\venv\\Scripts\\python.exe scripts\\delete_entities_and_chats.py --chat-entity-id <entity_id> --chat-id <session_id>
   ..\\venv\\Scripts\\python.exe scripts\\delete_entities_and_chats.py --entity-id <entity_id_1> --entity-id <entity_id_2> --yes
   ..\\venv\\Scripts\\python.exe scripts\\delete_entities_and_chats.py --entity-id <entity_id> --dry-run
+  ..\\venv\\Scripts\\python.exe scripts\\delete_entities_and_chats.py --test-entities --dry-run
+  ..\\venv\\Scripts\\python.exe scripts\\delete_entities_and_chats.py --test-entities --yes
 """
 
 from __future__ import annotations
@@ -21,6 +23,9 @@ from typing import Iterable
 _BACKEND_ROOT = Path(__file__).resolve().parent.parent
 if str(_BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(_BACKEND_ROOT))
+_TESTS_SUPPORT = _BACKEND_ROOT / "tests" / "support"
+if str(_TESTS_SUPPORT) not in sys.path:
+    sys.path.insert(0, str(_TESTS_SUPPORT))
 os.chdir(_BACKEND_ROOT)
 
 
@@ -215,6 +220,14 @@ def main() -> None:
         help="Delete entities where website contains this text (case-insensitive). Repeatable.",
     )
     ap.add_argument(
+        "--test-entities",
+        action="store_true",
+        help=(
+            "Delete entities matched by tests/support/entity_test_catalog.py "
+            "(exact test names, 'E2E LLM ' prefix, or website containing '.test')."
+        ),
+    )
+    ap.add_argument(
         "--chat-entity-id",
         help="Entity ID that owns chat sessions passed via --chat-id.",
     )
@@ -242,10 +255,17 @@ def main() -> None:
 
     name_filters = _iter_unique(args.entity_name)
     website_filters = [v.strip().lower() for v in _iter_unique(args.website_contains) if v.strip()]
+    test_entities_mode = bool(args.test_entities)
 
-    if not entity_ids and not chat_ids and not name_filters and not website_filters:
+    if (
+        not entity_ids
+        and not chat_ids
+        and not name_filters
+        and not website_filters
+        and not test_entities_mode
+    ):
         ap.error(
-            "Provide --entity-id and/or --chat-id, or use --entity-name/--website-contains filters."
+            "Provide --entity-id and/or --chat-id, or use --entity-name/--website-contains/--test-entities."
         )
     if chat_ids and not chat_entity_id:
         ap.error("--chat-entity-id is required when using --chat-id.")
@@ -256,11 +276,16 @@ def main() -> None:
         print(f"Database not found: {db_path}", file=sys.stderr)
         sys.exit(1)
 
+    if test_entities_mode:
+        from entity_test_catalog import is_test_entity
+
     print("Delete plan:")
     print(f"  DB: {db_path}")
     print(f"  Data root: {data_root}")
     print(f"  Entities to delete: {len(entity_ids)}")
     print(f"  Chat sessions to delete: {len(chat_ids)}")
+    if test_entities_mode:
+        print("  Mode: --test-entities (catalog + .test websites)")
     if args.dry_run:
         print("  Mode: DRY-RUN (no changes)")
 
@@ -273,7 +298,7 @@ def main() -> None:
     con = sqlite3.connect(db_path)
     summary = DeleteSummary()
     try:
-        if name_filters or website_filters:
+        if name_filters or website_filters or test_entities_mode:
             cur = con.cursor()
             rows = cur.execute(
                 "select id, name, coalesce(website, '') from entities"
@@ -284,7 +309,10 @@ def main() -> None:
                     website_filters
                     and any(frag in website.lower() for frag in website_filters)
                 )
-                if by_name or by_site:
+                by_catalog = bool(
+                    test_entities_mode and is_test_entity(name, website or None)
+                )
+                if by_name or by_site or by_catalog:
                     entity_ids.append(entity_id)
             entity_ids = _iter_unique(entity_ids)
 
