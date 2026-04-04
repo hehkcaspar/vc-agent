@@ -54,10 +54,13 @@ async def _run(*, yes: bool) -> None:
             return
 
     # Import after path is OK (run from backend/)
+    from app.academic_database import academic_engine, academic_sync_engine, init_academic_db
     from app.database import engine, sync_engine, init_db
 
     await engine.dispose()
     sync_engine.dispose()
+    await academic_engine.dispose()
+    academic_sync_engine.dispose()
 
     if db_path.exists() or Path(str(db_path) + "-wal").is_file():
         try:
@@ -71,8 +74,17 @@ async def _run(*, yes: bool) -> None:
     else:
         print(f"No existing file at {db_path} (will create fresh).")
 
+    # Also reset academic DB
+    from app.config import settings as _s
+    academic_db_path = Path(_s.academic_database_url_sync.removeprefix("sqlite:///")).resolve()
+    if academic_db_path.exists() or Path(str(academic_db_path) + "-wal").is_file():
+        _remove_sqlite_files(academic_db_path)
+    print(f"Creating fresh academic schema: {academic_db_path}")
+
     await init_db()
-    print(f"Created fresh schema: {db_path}")
+    print(f"Created fresh portfolio schema: {db_path}")
+    await init_academic_db()
+    print(f"Created fresh academic schema: {academic_db_path}")
 
 
 def main() -> None:

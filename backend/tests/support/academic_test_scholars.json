@@ -1,0 +1,328 @@
+{
+  "_description": "Test dataset of 20 scholars for Academic Tracking test-driven development. Covers US/EU, early/mid/established career stages, and diverse disciplines.",
+  "scholars": [
+    {
+      "name": "Yoshua Bengio",
+      "career_stage": "established",
+      "field": "CS/AI (Deep Learning)",
+      "university": "Universite de Montreal",
+      "country": "Canada",
+      "urls": [
+        "https://yoshuabengio.org/en",
+        "https://scholar.google.com/citations?user=kukA0LcAAAAJ",
+        "https://mila.quebec/en/directory/yoshua-bengio"
+      ],
+      "expected": {
+        "google_scholar_id": "kukA0LcAAAAJ",
+        "min_h_index": 150,
+        "min_papers": 500
+      }
+    },
+    {
+      "name": "Terence Tao",
+      "career_stage": "established",
+      "field": "Mathematics (Analysis, Combinatorics)",
+      "university": "UCLA",
+      "country": "US",
+      "urls": [
+        "https://www.math.ucla.edu/~tao/",
+        "https://scholar.google.com/citations?user=TFx_gLQAAAAJ",
+        "https://terrytao.wordpress.com/"
+      ],
+      "expected": {
+        "google_scholar_id": "TFx_gLQAAAAJ",
+        "min_h_index": 80,
+        "min_papers": 200
+      }
+    },
+    {
+      "name": "Karl Deisseroth",
+      "career_stage": "established",
+      "field": "Neuroscience (Optogenetics)",
+      "university": "Stanford",
+      "country": "US",
+      "urls": [
+        "https://profiles.stanford.edu/karl-deisseroth",
+        "https://scholar.google.com/citations?user=WhhC4LwAAAAJ",
+        "https://med.stanford.edu/profiles/karl-deisseroth"
+      ],
+      "expected": {
+        "google_scholar_id": "WhhC4LwAAAAJ",
+        "min_h_index": 100,
+        "min_papers": 200
+      }
+    },
+    {
+      "name": "Bernhard Scholkopf",
+      "career_stage": "established",
+      "field": "CS/AI (Machine Learning, Causality)",
+      "university": "MPI Tubingen",
+      "country": "Germany",
+      "urls": [
+        "https://is.mpg.de/~bs",
+        "https://scholar.google.com/citations?user=DZ-fHPgAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "DZ-fHPgAAAAJ",
+        "min_h_index": 100,
+        "min_papers": 300
+      }
+    },
+    {
+      "name": "Lisa Randall",
+      "career_stage": "established",
+      "field": "Physics (Theoretical Particle Physics)",
+      "university": "Harvard",
+      "country": "US",
+      "urls": [
+        "https://bhi.fas.harvard.edu/people/lisa-randall/",
+        "https://scholar.google.com/citations?user=kwjnjeAAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "kwjnjeAAAAAJ",
+        "min_h_index": 50,
+        "min_papers": 100
+      }
+    },
+    {
+      "name": "Pieter Abbeel",
+      "career_stage": "mid",
+      "field": "CS (Robotics, Reinforcement Learning)",
+      "university": "UC Berkeley",
+      "country": "US",
+      "urls": [
+        "https://www2.eecs.berkeley.edu/Faculty/Homepages/abbeel.html",
+        "https://scholar.google.com/citations?user=vtwH6GkAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "vtwH6GkAAAAJ",
+        "min_h_index": 80,
+        "min_papers": 200
+      }
+    },
+    {
+      "name": "Jure Leskovec",
+      "career_stage": "mid",
+      "field": "CS (Graph Neural Networks, Data Mining)",
+      "university": "Stanford",
+      "country": "US",
+      "urls": [
+        "https://cs.stanford.edu/people/jure/",
+        "https://scholar.google.com/citations?user=Q_kKkIUAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "Q_kKkIUAAAAJ",
+        "min_h_index": 80,
+        "min_papers": 200
+      }
+    },
+    {
+      "name": "Sara Seager",
+      "career_stage": "mid",
+      "field": "Astrophysics (Exoplanets)",
+      "university": "MIT",
+      "country": "US",
+      "urls": [
+        "https://www.saraseager.com/",
+        "https://scholar.google.com/citations?user=ImeW8YwAAAAJ",
+        "https://physics.mit.edu/faculty/sara-seager/"
+      ],
+      "expected": {
+        "google_scholar_id": "ImeW8YwAAAAJ",
+        "min_h_index": 50,
+        "min_papers": 100
+      }
+    },
+    {
+      "name": "Nicola Spaldin",
+      "career_stage": "mid",
+      "field": "Materials Science (Multiferroics)",
+      "university": "ETH Zurich",
+      "country": "Switzerland",
+      "urls": [
+        "https://scholar.google.com/citations?user=eUfdZowAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "eUfdZowAAAAJ",
+        "min_h_index": 50,
+        "min_papers": 100
+      }
+    },
+    {
+      "name": "Mariana Mazzucato",
+      "career_stage": "mid",
+      "field": "Economics (Innovation Policy)",
+      "university": "UCL",
+      "country": "UK",
+      "urls": [
+        "https://marianamazzucato.com/",
+        "https://scholar.google.com/citations?user=rnceqMsAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "rnceqMsAAAAJ",
+        "min_h_index": 30,
+        "min_papers": 50
+      }
+    },
+    {
+      "name": "Aleksander Madry",
+      "career_stage": "mid",
+      "field": "CS (ML Robustness, Theory)",
+      "university": "MIT",
+      "country": "US",
+      "urls": [
+        "https://madry.mit.edu/",
+        "https://scholar.google.com/citations?user=SupjsEUAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "SupjsEUAAAAJ",
+        "min_h_index": 40,
+        "min_papers": 50
+      }
+    },
+    {
+      "name": "Michael Bronstein",
+      "career_stage": "mid",
+      "field": "CS/AI (Geometric Deep Learning)",
+      "university": "Oxford",
+      "country": "UK",
+      "urls": [
+        "https://www.cs.ox.ac.uk/people/michael.bronstein/",
+        "https://scholar.google.com/citations?user=UU3N6-UAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "UU3N6-UAAAAJ",
+        "min_h_index": 50,
+        "min_papers": 100
+      }
+    },
+    {
+      "name": "Claudia de Rham",
+      "career_stage": "mid",
+      "field": "Physics (Theoretical Cosmology, Massive Gravity)",
+      "university": "Imperial College London",
+      "country": "UK",
+      "urls": [
+        "https://www.imperial.ac.uk/people/c.de-rham",
+        "https://scholar.google.com/citations?user=7DombgUAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "7DombgUAAAAJ",
+        "min_h_index": 30,
+        "min_papers": 50
+      }
+    },
+    {
+      "name": "Prineha Narang",
+      "career_stage": "early",
+      "field": "Physics/Materials (Quantum Materials)",
+      "university": "UCLA",
+      "country": "US",
+      "urls": [
+        "https://naranglab.ucla.edu/people/prineha-narang/",
+        "https://scholar.google.com/citations?user=yGmN1GEAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "yGmN1GEAAAAJ",
+        "min_h_index": 20,
+        "min_papers": 50
+      }
+    },
+    {
+      "name": "Katie Bouman",
+      "career_stage": "early",
+      "field": "CS (Computational Imaging)",
+      "university": "Caltech",
+      "country": "US",
+      "urls": [
+        "https://www.cms.caltech.edu/people/klbouman",
+        "https://scholar.google.com/citations?user=7lhbMtgAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "7lhbMtgAAAAJ",
+        "min_h_index": 10,
+        "min_papers": 20
+      }
+    },
+    {
+      "name": "Melanie Weber",
+      "career_stage": "early",
+      "field": "Mathematics/CS (Geometric ML)",
+      "university": "Harvard",
+      "country": "US",
+      "urls": [
+        "https://melanie-weber.com/",
+        "https://scholar.google.com/citations?user=Bo7Y1j0AAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "Bo7Y1j0AAAAJ",
+        "min_h_index": 5,
+        "min_papers": 10
+      }
+    },
+    {
+      "name": "Hannah Ritchie",
+      "career_stage": "early",
+      "field": "Environmental Science / Data Science",
+      "university": "Oxford",
+      "country": "UK",
+      "urls": [
+        "https://hannahritchie.com/",
+        "https://scholar.google.com/citations?user=Jqv8-O4AAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "Jqv8-O4AAAAJ",
+        "min_h_index": 5,
+        "min_papers": 10
+      }
+    },
+    {
+      "name": "Flora Vincent",
+      "career_stage": "early",
+      "field": "Marine Biology / Ecology",
+      "university": "EMBL Heidelberg",
+      "country": "Germany",
+      "urls": [
+        "https://www.embl.org/people/person/flora-vincent/",
+        "https://scholar.google.fr/citations?user=7YHu8bcAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "7YHu8bcAAAAJ",
+        "min_h_index": 5,
+        "min_papers": 10
+      }
+    },
+    {
+      "name": "Fabian Theis",
+      "career_stage": "early",
+      "field": "Computational Biology (Single-cell)",
+      "university": "Helmholtz Munich",
+      "country": "Germany",
+      "urls": [
+        "https://www.helmholtz-munich.de/en/icb/fabian-theis",
+        "https://scholar.google.com/citations?user=sqWpn2AAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "sqWpn2AAAAAJ",
+        "min_h_index": 50,
+        "min_papers": 200
+      }
+    },
+    {
+      "name": "Elisa Fadda",
+      "career_stage": "early",
+      "field": "Computational Chemistry (Glycoscience)",
+      "university": "University of Southampton",
+      "country": "UK",
+      "urls": [
+        "https://www.southampton.ac.uk/people/65b759/doctor-elisa-fadda",
+        "https://scholar.google.com/citations?user=2-4V8AgAAAAJ"
+      ],
+      "expected": {
+        "google_scholar_id": "2-4V8AgAAAAJ",
+        "min_h_index": 10,
+        "min_papers": 20
+      }
+    }
+  ]
+}

@@ -63,6 +63,14 @@ class Settings(BaseSettings):
     # requires reasoning_content on prior tool messages; LangChain agent history omits it → HTTP 400.
     KIMI_DISABLE_THINKING_FOR_SEARCH: bool = True
 
+    # Academic Tracking v2 — separate DB + document-oriented storage
+    ACADEMIC_DATABASE_URL: str = f"sqlite+aiosqlite:///{PROJECT_ROOT / 'data' / 'academic.db'}"
+    ACADEMIC_SCHOLARS_DIR: Path = PROJECT_ROOT / "data" / "scholars"
+    ACADEMIC_CONFIG_DIR: Path = PROJECT_ROOT / "data" / "config"
+    SERPAPI_KEY: str = ""
+    SEMANTIC_SCHOLAR_API_KEY: str = ""  # optional; free tier works without key
+    ACADEMIC_GEMINI_MODEL: str = "gemini-3-flash-preview"
+
     # LangSmith tracing (project-level runtime config).
     LANGSMITH_TRACING: bool = False
     LANGSMITH_API_KEY: str = ""
@@ -73,6 +81,14 @@ class Settings(BaseSettings):
     def database_url_sync(self) -> str:
         """SQLAlchemy sync URL for the same SQLite file (agent tools / sync session)."""
         u = self.DATABASE_URL
+        if u.startswith("sqlite+aiosqlite:///"):
+            return "sqlite:///" + u.removeprefix("sqlite+aiosqlite:///")
+        return u
+
+    @property
+    def academic_database_url_sync(self) -> str:
+        """Sync URL for the academic SQLite file."""
+        u = self.ACADEMIC_DATABASE_URL
         if u.startswith("sqlite+aiosqlite:///"):
             return "sqlite:///" + u.removeprefix("sqlite+aiosqlite:///")
         return u

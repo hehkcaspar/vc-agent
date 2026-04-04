@@ -1,0 +1,446 @@
+import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { useScholars, useSignalFeed, useDigests, useRanking, useCustomDimensions } from '../../hooks/useAcademic';
+import { showToast } from '../../lib/appToast';
+import { academicApi } from '../../services/academicApi';
+import { AddScholarModal } from './AddScholarModal';
+import { RankingView } from './RankingView';
+import { ScholarDetail } from './ScholarDetail';
+import type { Scholar } from '../../types/academic';
+import { SCHOLAR_STATUS_LABELS, PRIORITY_LABELS } from '../../types/academic';
+import './AcademicTab.css';
+
+const FEED_EVENT_ICONS: Record<string, string> = {
+  new_paper: '\u{1F4C4}',
+  patent_filed: '\u{1F512}',
+  news_mention: '\u{1F4F0}',
+  metric_snapshot: '\u{1F4CA}',
+  website_updated: '\u{1F310}',
+  career_change: '\u{1F3AF}',
+  evaluation_completed: '\u{2705}',
+};
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+export function AcademicTab() {
+  const [selectedScholar, setSelectedScholar] = useState<Scholar | null>(null);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [editingScholar, setEditingScholar] = useState<Scholar | null>(null);
+  const [feedOpen, setFeedOpen] = useState(false);
+  const [viewMode, setViewMode] = useState<'list' | 'ranking'>('list');
+  const [digestOpen, setDigestOpen] = useState(false);
+  const [digestContent, setDigestContent] = useState<string | null>(null);
+
+  const [showDimModal, setShowDimModal] = useState(false);
+  const [newDimName, setNewDimName] = useState('');
+  const [newDimKey, setNewDimKey] = useState('');
+  const [newDimPrompt, setNewDimPrompt] = useState('');
+
+  const { scholars, isLoading, mutate } = useScholars();
+  const { events: feedEvents, mutate: mutateFeed } = useSignalFeed();
+  const { digests, mutate: mutateDigests } = useDigests();
+  const { scholars: rankingScholars } = useRanking();
+  const { dimensions: customDims, mutate: mutateDims } = useCustomDimensions();
+
+  // Stale scholars: no evaluation in >30 days
+  const staleScholars = rankingScholars.filter((s) => {
+    if (!s.eval_date) return s.status === 'active'; // never evaluated
+    const evalDate = new Date(s.eval_date);
+    const daysSince = (Date.now() - evalDate.getTime()) / (1000 * 60 * 60 * 24);
+    return daysSince > 30 && s.status === 'active';
+  });
+
+  const handleEvaluate = async (e: React.MouseEvent, scholar: Scholar) => {
+    e.stopPropagation();
+    try {
+      await academicApi.scholars.evaluate(scholar.id);
+      showToast(`Evaluation started for ${scholar.name}`, 'success');
+      mutate();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      showToast(`Evaluate failed: ${msg}`, 'error');
+      console.error('Evaluate failed:', err);
+    }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, scholar: Scholar) => {
+    e.stopPropagation();
+    if (!confirm(`Delete "${scholar.name}"? This will remove all data.`)) return;
+    try {
+      await academicApi.scholars.delete(scholar.id);
+      mutate();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
+    }
+  };
+
+  const handleAddDimension = async () => {
+    if (!newDimName.trim() || !newDimKey.trim() || !newDimPrompt.trim()) return;
+    try {
+      await academicApi.customDimensions.create({
+        name: newDimName.trim(),
+        key: newDimKey.trim(),
+        prompt: newDimPrompt.trim(),
+      });
+      mutateDims();
+      setNewDimName('');
+      setNewDimKey('');
+      setNewDimPrompt('');
+      showToast('Custom dimension added', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to add dimension', 'error');
+    }
+  };
+
+  const handleDeleteDimension = async (key: string) => {
+    try {
+      await academicApi.customDimensions.delete(key);
+      mutateDims();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
+    }
+  };
+
+  const handleGenerateDigest = async () => {
+    try {
+      await academicApi.digests.generate();
+      showToast('Digest generation started', 'success');
+      // Poll for new digest after a delay
+      setTimeout(() => mutateDigests(), 10000);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Digest generation failed', 'error');
+    }
+  };
+
+  const handleViewDigest = async (id: string) => {
+    try {
+      const d = await academicApi.digests.get(id);
+      setDigestContent(d.content || 'No content');
+      setDigestOpen(true);
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Failed to load digest', 'error');
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    try {
+      await academicApi.markFeedRead();
+      mutateFeed();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Mark read failed', 'error');
+    }
+  };
+
+  const handleFeedEventClick = (scholarId: string) => {
+    const s = scholars.find((sc) => sc.id === scholarId);
+    if (s) {
+      setSelectedScholar(s);
+    }
+  };
+
+  const handleStop = async (e: React.MouseEvent, scholar: Scholar) => {
+    e.stopPropagation();
+    try {
+      await academicApi.scholars.stop(scholar.id);
+      mutate();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Stop failed', 'error');
+    }
+  };
+
+  // Detail view
+  if (selectedScholar) {
+    return (
+      <ScholarDetail
+        scholar={selectedScholar}
+        onBack={() => { setSelectedScholar(null); mutate(); }}
+      />
+    );
+  }
+
+  // List view
+  return (
+    <div className="academic-tab">
+      <div className="academic-header">
+        <h2>Academic Tracking</h2>
+        <div className="header-actions">
+          <div className="view-toggle">
+            <button
+              className={`view-toggle-btn ${viewMode === 'list' ? 'active' : ''}`}
+              onClick={() => setViewMode('list')}
+            >
+              List
+            </button>
+            <button
+              className={`view-toggle-btn ${viewMode === 'ranking' ? 'active' : ''}`}
+              onClick={() => setViewMode('ranking')}
+            >
+              Ranking
+            </button>
+          </div>
+          <button className="btn-secondary" onClick={() => setShowDimModal(true)}>
+            Dimensions
+          </button>
+          <button className="btn-secondary" onClick={handleGenerateDigest}>
+            Digest
+          </button>
+          <button className="btn-primary" onClick={() => setIsCreateOpen(true)}>
+            + Add Scholar
+          </button>
+        </div>
+      </div>
+
+      {/* Signal Feed */}
+      {feedEvents.length > 0 && (
+        <div className="signal-feed-section">
+          <div
+            className="signal-feed-header"
+            onClick={() => setFeedOpen((o) => !o)}
+          >
+            <span className="signal-feed-title">
+              Signal Feed
+              <span className="signal-feed-badge">{feedEvents.length}</span>
+            </span>
+            <span className="signal-feed-actions">
+              <button
+                className="btn-text"
+                onClick={(e) => { e.stopPropagation(); handleMarkAllRead(); }}
+              >
+                Mark all read
+              </button>
+              <span style={{ fontSize: '0.7em' }}>{feedOpen ? '\u25B2' : '\u25BC'}</span>
+            </span>
+          </div>
+          {feedOpen && (
+            <div className="signal-feed-list">
+              {feedEvents.map((evt) => (
+                <div
+                  key={evt.id}
+                  className="signal-feed-item"
+                  onClick={() => handleFeedEventClick(evt.scholar_id)}
+                >
+                  <span className="signal-feed-icon">
+                    {FEED_EVENT_ICONS[evt.event_type] || '\u{1F514}'}
+                  </span>
+                  <span className="signal-feed-body">
+                    <span className="signal-feed-scholar">{evt.scholar_name}</span>
+                    <span className="signal-feed-event-title">{evt.title || evt.event_type}</span>
+                  </span>
+                  <span className={`signal-feed-sig sig-${evt.significance}`}>
+                    {evt.significance}
+                  </span>
+                  <span className="signal-feed-time">{timeAgo(evt.created_at)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Digest viewer */}
+      {digestOpen && digestContent && (
+        <div className="digest-section">
+          <div className="digest-header">
+            <span className="digest-title">Portfolio Digest</span>
+            <button className="btn-text" onClick={() => setDigestOpen(false)}>Close</button>
+          </div>
+          <div className="digest-content">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{digestContent}</ReactMarkdown>
+          </div>
+        </div>
+      )}
+
+      {/* Digest list (collapsed) */}
+      {!digestOpen && digests.length > 0 && viewMode === 'list' && (
+        <div className="digest-bar">
+          <span className="text-muted" style={{ fontSize: '0.85em' }}>
+            Latest digest: {digests[0].created_at}
+          </span>
+          <button className="btn-text" onClick={() => handleViewDigest(digests[0].id)}>
+            View
+          </button>
+        </div>
+      )}
+
+      {/* Stale alerts */}
+      {staleScholars.length > 0 && viewMode === 'list' && (
+        <div className="stale-alerts-bar">
+          <span className="stale-alerts-icon">{'\u26A0'}</span>
+          <span className="stale-alerts-text">
+            {staleScholars.length} scholar{staleScholars.length > 1 ? 's' : ''} overdue for refresh:{' '}
+            {staleScholars.slice(0, 3).map((s) => s.name).join(', ')}
+            {staleScholars.length > 3 && ` +${staleScholars.length - 3} more`}
+          </span>
+        </div>
+      )}
+
+      {/* Ranking view */}
+      {viewMode === 'ranking' && (
+        <RankingView onSelectScholar={(s) => setSelectedScholar(s as Scholar)} />
+      )}
+
+      {/* List view */}
+      {viewMode === 'list' && isLoading && <p className="text-muted">Loading...</p>}
+
+      {viewMode === 'list' && !isLoading && scholars.length === 0 && (
+        <div className="empty-state">
+          <p>No scholars tracked yet.</p>
+          <p className="text-muted">Add a scholar to start tracking their research and impact.</p>
+        </div>
+      )}
+
+      {viewMode === 'list' && scholars.length > 0 && (
+        <div className="task-table">
+          <div className="task-table-header">
+            <span className="col-name">Name</span>
+            <span className="col-type">Priority</span>
+            <span className="col-status">Status</span>
+            <span className="col-reports">H-index</span>
+            <span className="col-date">Updated</span>
+            <span className="col-actions">Actions</span>
+          </div>
+          {scholars.map((scholar) => (
+            <div
+              key={scholar.id}
+              className="task-row"
+              onClick={() => setSelectedScholar(scholar)}
+            >
+              <span className="col-name">
+                <span className="task-name">{scholar.name}</span>
+                {scholar.affiliation && (
+                  <span className="text-muted" style={{ fontSize: '0.85em', display: 'block' }}>
+                    {scholar.affiliation}
+                  </span>
+                )}
+              </span>
+              <span className="col-type">
+                <span className={`meta-tag priority-${scholar.tracking_priority}`}>
+                  {PRIORITY_LABELS[scholar.tracking_priority] ?? scholar.tracking_priority}
+                </span>
+              </span>
+              <span className="col-status">
+                <span className={`status-badge status-${scholar.status}`}>
+                  {scholar.status === 'evaluating' && <span className="pulse-dot" />}
+                  {SCHOLAR_STATUS_LABELS[scholar.status] ?? scholar.status}
+                </span>
+              </span>
+              <span className="col-reports">
+                {scholar.h_index ?? '—'}
+              </span>
+              <span className="col-date">
+                {new Date(scholar.updated_at).toLocaleDateString()}
+              </span>
+              <span className="col-actions" onClick={(e) => e.stopPropagation()}>
+                {scholar.status === 'evaluating' ? (
+                  <button className="btn-icon" onClick={(e) => handleStop(e, scholar)} title="Stop">
+                    &#9632;
+                  </button>
+                ) : (
+                  <button className="btn-icon" onClick={(e) => handleEvaluate(e, scholar)} title="Evaluate">
+                    &#9654;
+                  </button>
+                )}
+                <button
+                  className="btn-icon"
+                  onClick={(e) => { e.stopPropagation(); setEditingScholar(scholar); }}
+                  title="Edit"
+                >
+                  &#9998;
+                </button>
+                <button className="btn-icon btn-icon-danger" onClick={(e) => handleDelete(e, scholar)} title="Delete">
+                  &#128465;
+                </button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isCreateOpen && (
+        <AddScholarModal
+          onClose={() => setIsCreateOpen(false)}
+          onCreated={() => mutate()}
+        />
+      )}
+
+      {editingScholar && (
+        <AddScholarModal
+          initialData={editingScholar}
+          onClose={() => setEditingScholar(null)}
+          onCreated={() => mutate()}
+        />
+      )}
+
+      {/* Custom dimensions modal */}
+      {showDimModal && (
+        <div className="modal-overlay" onClick={() => setShowDimModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Custom Dimensions</h3>
+              <button className="btn-text" onClick={() => setShowDimModal(false)}>Close</button>
+            </div>
+            <div className="modal-body">
+              {customDims.length > 0 && (
+                <div className="custom-dims-list">
+                  {customDims.map((d) => (
+                    <div key={d.key} className="custom-dim-item">
+                      <div className="custom-dim-info">
+                        <span className="custom-dim-name">{d.name}</span>
+                        <span className="custom-dim-key">{d.key}</span>
+                        <span className="custom-dim-prompt">{d.prompt}</span>
+                      </div>
+                      <button
+                        className="btn-icon btn-icon-danger"
+                        onClick={() => handleDeleteDimension(d.key)}
+                        title="Delete"
+                      >
+                        &#128465;
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="custom-dim-form">
+                <h4>Add New Dimension</h4>
+                <input
+                  type="text"
+                  placeholder="Display name (e.g. Teaching Impact)"
+                  value={newDimName}
+                  onChange={(e) => setNewDimName(e.target.value)}
+                />
+                <input
+                  type="text"
+                  placeholder="Key (e.g. teaching_impact)"
+                  value={newDimKey}
+                  onChange={(e) => setNewDimKey(e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''))}
+                />
+                <textarea
+                  placeholder="Guiding prompt for the agent (e.g. Assess the scholar's teaching impact based on...)"
+                  value={newDimPrompt}
+                  onChange={(e) => setNewDimPrompt(e.target.value)}
+                  rows={3}
+                />
+                <button
+                  className="btn-primary"
+                  onClick={handleAddDimension}
+                  disabled={!newDimName.trim() || !newDimKey.trim() || !newDimPrompt.trim()}
+                >
+                  Add Dimension
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

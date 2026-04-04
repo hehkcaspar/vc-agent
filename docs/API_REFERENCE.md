@@ -527,3 +527,202 @@ Persisted in **`chat_completion_jobs`** for async turns. Not exposed as a full C
 | error | string | Error message if failed |
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
+
+---
+
+## Academic Tracking (v2)
+
+Scholar-centric module with goal-driven agent. All endpoints prefixed `/academic/`.
+
+### Scholar CRUD
+
+#### POST /academic/scholars
+Create a new scholar and initialise dossier directory.
+
+**Request body (JSON):**
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| name | string | yes | Scholar name |
+| urls | string[] | no | Homepage, Google Scholar, lab page URLs |
+| tracking_priority | string | no | "high", "medium" (default), or "low" |
+| tags | string[] | no | Freeform tags |
+| entity_id | string | no | Link to portfolio entity |
+| user_notes | string | no | Analyst notes |
+
+URLs are pre-classified deterministically — GS/SS/LinkedIn IDs extracted without LLM. **Response:** `ScholarResponse`.
+
+#### GET /academic/scholars?page=1&page_size=20&status=active&priority=high&search=name
+List scholars (paginated, enriched from profile.json).
+
+#### GET /academic/scholars/{scholar_id}
+Get single scholar (SQL + profile.json merge).
+
+#### PUT /academic/scholars/{scholar_id}
+Update scholar fields. `user_notes` writes to profile.json, other fields to SQL.
+
+#### DELETE /academic/scholars/{scholar_id}
+Hard-delete. Removes dossier directory and cascades to all SQL rows. Allows deletion while evaluating (stops agent first).
+
+### Agent — Evaluate / Stop / Refresh
+
+#### POST /academic/scholars/{scholar_id}/evaluate
+Run initial evaluation (background). Sets status to "evaluating". Returns `409` if already evaluating.
+
+#### POST /academic/scholars/{scholar_id}/stop
+Stop a running evaluation. Resets status to "active".
+
+#### POST /academic/scholars/{scholar_id}/refresh
+Re-evaluate an existing scholar (background). Fetches new papers, updates metrics, rescores, computes delta.
+
+### Papers
+
+#### GET /academic/scholars/{scholar_id}/papers?limit=50&sort_by=citations&author_position=first
+Papers from dossier `papers.json`. Supports sort by `citations` or `year`, filter by author position (`first`, `last`, `middle`, `sole`).
+
+### Evaluations
+
+#### GET /academic/scholars/{scholar_id}/evaluations
+List all evaluations (from `evaluations/*.json`), normalised and sorted newest-first. Includes delta vs previous evaluation when available.
+
+### Reports
+
+#### GET /academic/scholars/{scholar_id}/reports
+List reports (from `reports/*.md`), sorted newest-first. Content not included in list view.
+
+#### GET /academic/scholars/{scholar_id}/reports/{report_id}
+Get single report with markdown content.
+
+#### DELETE /academic/scholars/{scholar_id}/reports/{report_id}
+Delete a report file.
+
+### Events
+
+#### GET /academic/scholars/{scholar_id}/events?limit=50&event_type=new_paper&significance=high
+Scholar event timeline from SQL (event_type, significance filters). Each event has two temporal fields: `event_date` (when the event actually occurred — may be historical, e.g., a company founding in 2017) and `created_at` (when the system discovered/recorded it). The frontend timeline shows both dates when they differ.
+
+#### PUT /academic/scholars/{scholar_id}/events/{event_id}
+Update event fields (e.g., mark as read).
+
+### Channels
+
+#### GET /academic/scholars/{scholar_id}/channels
+List monitoring channels for a scholar.
+
+#### PUT /academic/scholars/{scholar_id}/channels/{channel_id}
+Update channel (pause/resume via `is_active`, change `polling_interval_hours`).
+
+### Signal Feed
+
+#### GET /academic/signal-feed?limit=50
+Cross-scholar unread events (high + medium significance), enriched with scholar names.
+
+#### POST /academic/signal-feed/mark-read
+Bulk mark events as read. `{ "event_ids": ["id1", "id2"] }` or `{ "event_ids": [] }` to mark all.
+
+### Chat (per-scholar)
+
+#### GET /academic/scholars/{scholar_id}/chat/sessions
+List chat sessions for a scholar.
+
+#### POST /academic/scholars/{scholar_id}/chat/sessions
+Create a new chat session. `{ "title": "Discussion about recent papers" }`
+
+#### GET /academic/scholars/{scholar_id}/chat/sessions/{session_id}
+Get session with full message history.
+
+#### DELETE /academic/scholars/{scholar_id}/chat/sessions/{session_id}
+Delete session and all messages/jobs.
+
+#### POST /academic/scholars/{scholar_id}/chat/sessions/{session_id}/messages
+Send a message. Always async — returns `202` with `{ job_id, user_message, status: "pending" }`.
+
+#### GET /academic/scholars/{scholar_id}/chat/sessions/{session_id}/jobs/{job_id}
+Poll chat job status. Returns `{ status, assistant_message, error_message }`.
+
+### Ranking
+
+#### GET /academic/ranking?status=active&priority=high
+All scholars with latest evaluation dimension scores for ranking.
+
+#### GET /academic/ranking/presets
+List weight presets (seeded with "Balanced", "Impact Focused", "VC Commercialization").
+
+#### POST /academic/ranking/presets
+Create custom weight preset. `{ "name": "My Preset", "weights": { "research_impact": 0.3, ... } }`
+
+#### DELETE /academic/ranking/presets/{name}
+Delete a weight preset.
+
+### Comparative Evaluation
+
+#### POST /academic/scholars/{scholar_id}/compare/{other_id}
+Run comparative evaluation between two scholars (background). Sets scholar A to "evaluating".
+
+### Digest
+
+#### POST /academic/digest/generate
+Generate a weekly portfolio digest (background Gemini call).
+
+#### GET /academic/digests
+List generated digests.
+
+#### GET /academic/digests/{digest_id}
+Get digest with markdown content.
+
+### Uploads
+
+#### POST /academic/scholars/{scholar_id}/uploads
+Upload files to scholar's dossier. Triggers agent processing in background.
+
+#### GET /academic/scholars/{scholar_id}/uploads
+List uploaded files with size and modification time.
+
+### Custom Dimensions
+
+#### GET /academic/custom-dimensions
+List custom evaluation dimensions.
+
+#### POST /academic/custom-dimensions
+Create custom dimension. `{ "name": "Patent Quality", "key": "patent_quality", "prompt": "Evaluate..." }`
+
+#### DELETE /academic/custom-dimensions/{key}
+Delete a custom dimension.
+
+### Academic Data Models
+
+#### Scholar (SQL + profile.json)
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | Primary key |
+| name | string | Scholar name |
+| status | string | active, evaluating, paused, archived |
+| tracking_priority | string | high, medium, low |
+| tags | JSON | Freeform tags |
+| entity_id | UUID | FK to portfolio entity (nullable) |
+| dossier_path | string | Path to scholar's dossier directory |
+| affiliation | string | From profile.json |
+| h_index | integer | From profile.json metrics |
+| identity | object | From profile.json (google_scholar, semantic_scholar, linkedin, homepage) |
+
+#### Evaluation (from evaluations/*.json)
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Filename stem |
+| type | string | full, comparative, refresh |
+| dimensions | object | 7 dimension scores (research_impact, commercialization, career_trajectory, collaboration_strength, field_position, founder_potential, public_profile) |
+| computed_metrics | object | Bibliometric data |
+| commercialization_signals | object | Patents, startups |
+| delta | object | Changes vs previous evaluation |
+| trigger | string | manual, scheduled, signal |
+
+#### Paper (from papers.json)
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Paper ID |
+| title | string | Paper title |
+| authors | array | Author objects with name, id, position |
+| year | integer | Publication year |
+| citations | integer | Citation count |
+| venue | string | Journal/conference |
+| author_position | string | first, last, middle, sole |
+| fields_of_study | string[] | Research areas |

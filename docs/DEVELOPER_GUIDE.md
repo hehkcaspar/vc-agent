@@ -382,6 +382,17 @@ cd backend
 ..\venv\Scripts\python.exe -m pytest tests/test_chat_e2e_llm.py -v -s --tb=short
 ```
 
+**Academic Tracking v2 e2e** (real Gemini + Semantic Scholar API):
+
+```bash
+cd backend
+pytest tests/test_academic_e2e.py -v      # 16 tests: CRUD, eval, papers, reports, chat, ranking, digests, uploads, custom dims
+pytest tests/test_academic_feifei.py -v   # focused test for Fei-Fei Li (hard case)
+pytest tests/test_academic_randomized.py -v  # randomized scholar tests
+```
+
+These tests start a standalone server on port 8877/8878 (no portfolio dependencies needed), create scholars, run evaluations, and verify the full agent pipeline.
+
 ### Manual Testing Checklist
 
 **Entity CRUD:**
@@ -470,6 +481,31 @@ curl -X POST http://localhost:8000/parkinglot/{ingest_id}/resolve \
   -H "Content-Type: application/json" \
   -d '{"entity_id": "uuid"}'
 ```
+
+**Academic Tracking (v2):**
+- [ ] Create scholar (name + homepage URL)
+- [ ] Create scholar with Google Scholar URL directly (verify pre-classification extracts GS ID)
+- [ ] Edit scholar name/priority/tags/notes
+- [ ] Delete scholar (hard delete — dossier + SQL cascade)
+- [ ] Delete scholar while evaluating (should stop agent, then delete)
+- [ ] Run evaluation → status changes to "evaluating", auto-refresh in UI (5s polling)
+- [ ] Evaluation completes → status "active", report appears in sidebar, first report auto-selected
+- [ ] Evaluation tab: radar chart, dimension scores, delta indicators (if 2+ evals)
+- [ ] Publications tab: papers sorted by citations, filter by author position
+- [ ] Timeline tab: events with significance filter, mark-as-read, event date vs discovery date shown when different
+- [ ] Profiles tab: discovered links as cards, channel controls (pause/resume)
+- [ ] Chat tab: create session, send message, async response with polling
+- [ ] Signal feed: unread events across all scholars
+- [ ] Mark signal feed items as read (individual + bulk)
+- [ ] Ranking view: toggle from list view, weight preset selector, sortable columns
+- [ ] Comparative evaluation: select 2 scholars in ranking, run comparison
+- [ ] Generate digest: weekly summary via Gemini
+- [ ] Custom dimensions: add/delete custom evaluation dimensions
+- [ ] Upload files to scholar dossier
+- [ ] Multiple reports in sidebar, switch between them, delete a report
+- [ ] Stale alerts bar: scholars needing refresh
+- [ ] Failed evaluation shows error via toast (not alert)
+- [ ] Server restart resets stuck "evaluating" scholars to "active"
 
 ---
 

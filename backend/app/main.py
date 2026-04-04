@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
@@ -5,8 +6,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
+from app.academic_database import init_academic_db
 from app.database import init_db
-from app.routers import entities, parkinglot, ingest, chat
+from app.routers import entities, parkinglot, ingest, chat, academic
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +51,38 @@ async def lifespan(app: FastAPI):
     # Startup
     _guard_langsmith_tracing()
     await init_db()
+    await init_academic_db()
+
+    # Reset any scholars stuck in "evaluating" (no background tasks survive restart)
+    try:
+        from sqlalchemy import update
+        from app.academic_database import AcademicAsyncSessionLocal
+        from app.academic_models import Scholar
+        async with AcademicAsyncSessionLocal() as db:
+            result = await db.execute(
+                update(Scholar)
+                .where(Scholar.status == "evaluating")
+                .values(status="active")
+            )
+            if result.rowcount:
+                await db.commit()
+                logger.info("Reset %d stuck 'evaluating' scholars to 'active'", result.rowcount)
+    except Exception:
+        logger.warning("Could not reset stuck scholar statuses", exc_info=True)
+
+    # Start academic heartbeat scheduler
+    from app.services.academic.heartbeat import HeartbeatScheduler
+    scheduler = HeartbeatScheduler()
+    scheduler_task = asyncio.create_task(scheduler.run())
+
     yield
+
     # Shutdown
+    scheduler_task.cancel()
+    try:
+        await scheduler_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(
@@ -74,6 +106,7 @@ app.include_router(entities.router)
 app.include_router(chat.router)
 app.include_router(parkinglot.router)
 app.include_router(ingest.router)
+app.include_router(academic.router)
 
 
 @app.get("/")

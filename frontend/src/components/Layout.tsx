@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { ChatModelProfileProvider } from '../context/ChatModelProfileContext';
 import { PortfolioTab } from './PortfolioTab';
+import { AcademicTab } from './academic/AcademicTab';
 import { SidebarModelSelect } from './SidebarModelSelect';
 import './Layout.css';
 
-type TabId = 'portfolio';
+type TabId = 'portfolio' | 'academic';
 type Theme = 'light' | 'dark';
 
 function LayoutShell() {
@@ -55,6 +56,8 @@ function LayoutShell() {
     switch (activeTab) {
       case 'portfolio':
         return <PortfolioTab />;
+      case 'academic':
+        return <AcademicTab />;
       default:
         return <PortfolioTab />;
     }
@@ -104,6 +107,16 @@ function LayoutShell() {
           >
             <span className="nav-icon">📁</span>
             <span className="nav-text">Portfolio</span>
+          </button>
+          <button
+            className={`nav-item ${activeTab === 'academic' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('academic');
+              setIsMobileMenuOpen(false);
+            }}
+          >
+            <span className="nav-icon">🎓</span>
+            <span className="nav-text">Academic</span>
           </button>
         </nav>
         <div className="sidebar-footer">

@@ -11,6 +11,7 @@ VC Portfolio Manager is a web application for managing portfolio companies as ca
 - **Entity workspace:** Chat sessions with optional **Agent** mode (LangChain Deep Agents: tools, async **`202`** + job polling, per-request `use_deep_agent` vs server default). **Agent off** = one-shot **`200`** Gemini reply (no tools). **Presets** use the same Agent on/off switch. Context from selected resources/artifacts is optional; in Agent mode the model can list/read entity files via tools. Casual “save / 记下来 / take a note” turns prefer **`portfolio_create_artifact`** so new memos do not silently version an existing `extract_info` lineage (see `CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY` in `backend/.env_sample`). The **Artifacts** column refreshes automatically when an Agent job completes (SWR `mutate`); presets already triggered a refresh on run.
 - **Artifact viewer:** Markdown preview or JSON editors with **Form** vs **Raw JSON** modes (shared segmented-toggle styling with list/grid).
 - Support light/dark themes and adaptive layout for desktop/laptop/mobile.
+- **Academic Tracking:** Track scholars and research labs with automated pipelines — identity resolution via Google Scholar (Gemini + Google Search), paper collection via Semantic Scholar API, and AI-generated analysis reports. Includes scholar profile cards with h-index/i10-index/citations, sortable publications table, and report history.
 
 ## Tech Stack
 

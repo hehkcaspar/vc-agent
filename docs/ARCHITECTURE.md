@@ -478,3 +478,111 @@ The architecture supports these future extensions:
    - Add `tenant_id` to all tables
    - Filter all queries by tenant
    - Add row-level security
+
+## Academic Tracking Module (v2)
+
+Scholar-centric tracking with goal-driven Deep Agents. Separate from portfolio — own SQLite DB (`data/academic.db`), own models/schemas/router/services. Full design spec: `doc/ACADEMIC_TRACKING_V2_DESIGN.md`.
+
+### Architecture
+
+```
+┌──────────────────────┐     ┌───────────────────────────────────┐     ┌─────────────────┐
+│  Frontend             │     │  Scholar Agent (BackgroundTask)   │     │  External APIs  │
+│  AcademicTab          │     │  invoke_scholar_agent(id, goal)   │     │                 │
+│   ├─ List / Ranking   │────▶│                                   │────▶│  Google Scholar  │
+│   ├─ Signal Feed      │     │  12 closure-bound tools:          │     │  (via SerpAPI)  │
+│   └─ Digest           │     │    compute_bibliometrics          │     │                 │
+│  ScholarDetail        │◄────│    fetch_gs_metrics (SerpAPI)     │     │  Semantic       │
+│   ├─ Report           │     │    crawl_url                      │     │  Scholar API    │
+│   ├─ Timeline         │     │    search_semantic_scholar         │     │                 │
+│   ├─ Evaluation       │     │    fetch_ss_papers                │     │  Gemini API     │
+│   ├─ Publications     │     │    search_web / search_patents    │     │  (+ Google      │
+│   ├─ Profiles         │     │    append_event / sync_sql_index  │     │   Search)       │
+│   └─ Chat             │     │    read_file / write_file (vfs)   │     │                 │
+│  RankingView          │     │                                   │     │                 │
+└──────────────────────┘     └───────────────────────────────────┘     └─────────────────┘
+         │                                    │
+         │  REST API (38 endpoints)           │  Documents + SQL
+         ▼                                    ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Storage                                                      │
+│  ┌─────────────────────────┐  ┌────────────────────────────┐ │
+│  │  Document Store          │  │  SQL Index (academic.db)   │ │
+│  │  data/scholars/{id}/     │  │  scholars                  │ │
+│  │    profile.json          │  │  scholar_events            │ │
+│  │    papers.json           │  │  channels                  │ │
+│  │    events.jsonl          │  │  chat_sessions/messages    │ │
+│  │    channels.json         │  │  chat_jobs                 │ │
+│  │    evaluations/*.json    │  └────────────────────────────┘ │
+│  │    reports/*.md          │                                  │
+│  │  data/config/            │                                  │
+│  │    ranking_presets/      │                                  │
+│  │    digests/              │                                  │
+│  └─────────────────────────┘                                  │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Two-Layer Storage
+
+| Layer | Purpose | Technology | Source of Truth |
+|-------|---------|------------|-----------------|
+| **Document Store** | Full scholar state — everything the agent reads/writes | JSON/JSONL/markdown files per scholar dossier | Yes |
+| **SQL Index** | Cross-scholar queries, scheduling, signal feed | SQLite tables (scholars, scholar_events, channels) | No — rebuildable via `sync_sql_index` tool |
+
+### Agent Goals
+
+All goals use the same agent factory and toolkit. The goal prompt determines behaviour:
+
+| Goal | Trigger | What It Does |
+|------|---------|--------------|
+| Initial evaluation | POST /scholars/{id}/evaluate | Identity extraction, paper fetch, bibliometrics, 7-dimension scoring, report |
+| Refresh | POST /scholars/{id}/refresh | Re-fetch papers, update metrics, rescore, compute delta |
+| Chat | POST /scholars/{id}/chat/sessions/{sid}/messages | Multi-turn conversation with scholar context |
+| Comparative | POST /scholars/{id}/compare/{other_id} | Side-by-side evaluation of two scholars |
+| Upload processing | POST /scholars/{id}/uploads | Analyse user-uploaded documents |
+| Digest | POST /digest/generate | Weekly portfolio summary (direct Gemini, no agent) |
+
+### Backend Service Modules
+
+| Module | Responsibility |
+|--------|---------------|
+| `routers/academic.py` | 38 REST endpoints — thin handlers delegating to services |
+| `services/academic/file_utils.py` | Shared `dossier_path()`, `read_json()`, `write_json()`, `append_jsonl()` |
+| `services/academic/evaluation_service.py` | Eval normalisation, delta computation, score extraction, background eval/refresh/comparative tasks |
+| `services/academic/chat_service.py` | Background chat job execution |
+| `services/academic/digest_service.py` | Weekly digest generation |
+| `services/academic/scholar_agent.py` | Deep Agents harness — `invoke_scholar_agent()`, `invoke_scholar_chat()`, `_extract_text()` for Gemini content normalisation |
+| `services/academic/domain_tools.py` | 12 tools built via `build_scholar_tools(scholar_id)` closure |
+| `services/academic/heartbeat.py` | Background scheduler (stale refresh, channel polling, scheduled digest) |
+| `services/academic/channel_pollers.py` | Google Scholar / Semantic Scholar change detection |
+
+### Key Design Decisions
+
+1. **Minimal SQL, rich documents**: SQL for cross-scholar queries and scheduling only. All agent-readable state lives in JSON/JSONL/markdown files per scholar dossier. No migrations for new fields.
+
+2. **URL-first identity extraction**: Input URLs are pre-classified deterministically (`classify_urls`) before the agent runs. Google Scholar `user=` parameter, SS author ID, LinkedIn URL etc. are extracted without LLM involvement. Agent output is overridden with pre-extracted IDs to prevent hallucination.
+
+3. **Google Scholar stats are authoritative**: h-index, i10-index, and citations from GS are never overridden by Semantic Scholar.
+
+4. **Closure-bound tools**: `build_scholar_tools(scholar_id)` returns 12 `@tool`-decorated functions with the scholar's dossier path pre-bound. The agent never sees or passes UUIDs.
+
+5. **`@tool` docstring rule**: The `@tool` decorator requires the docstring as the FIRST statement in the function body. Logger calls or any other code before the docstring breaks the decorator.
+
+6. **Stuck-evaluating recovery**: Server startup resets all scholars with status "evaluating" back to "active" (handles server restart mid-background-task).
+
+7. **Hard delete**: Deleting a scholar removes its dossier directory and cascades to all SQL rows (events, channels, chat sessions/messages/jobs).
+
+8. **Event date vs discovery date**: The `append_event` tool accepts an optional `event_date` parameter (ISO date string) for when the event actually occurred (e.g., `"2017-06-01"` for a company founding). If omitted, defaults to current time. Events in the document store record both `date` (when it happened) and `discovered_at` (when the agent found it). The Timeline UI shows both dates when they differ.
+
+9. **Gemini content block handling**: Gemini models may return `.content` as a list of content blocks (`[{"type": "text", "text": "..."}]`) rather than a plain string. `_extract_text()` in `scholar_agent.py` normalises this before the reply is stored in the DB or dossier trace files.
+
+### SQL Tables (academic.db)
+
+| Table | Purpose |
+|-------|---------|
+| `scholars` | id, name, status, tracking_priority, tags, entity_id, dossier_path |
+| `scholar_events` | id, scholar_id, event_type, significance, title, is_read, event_date (when it happened), created_at (when discovered) |
+| `channels` | id, scholar_id, channel_type, url, is_active, polling_interval_hours, last_polled_at, poll_error_count |
+| `academic_chat_sessions` | id, scholar_id, title, created_at, updated_at |
+| `academic_chat_messages` | id, session_id, role, content, created_at |
+| `academic_chat_jobs` | id, scholar_id, session_id, status, user_message_id, assistant_message_id, agent_run_id, step_detail, error_message |

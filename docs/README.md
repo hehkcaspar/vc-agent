@@ -36,6 +36,7 @@ This folder is the canonical source for technical documentation.
 - If **setup, tests, or dev workflow** change, update `DEVELOPER_GUIDE.md`.
 - If **LangSmith** changes, update `TRACING.md`.
 - If **product-level** capabilities change, update `../README.md`.
+- If **Academic Tracking v2** agent, API, storage, or models change, update `API_REFERENCE.md` (Academic section), `ARCHITECTURE.md` (Academic module section), and `../CLAUDE.md` (Academic Tracking Module). Design spec lives in `../doc/ACADEMIC_TRACKING_V2_DESIGN.md` — do not modify.
 - **Design history** lives in `docs/plans/`; **`API_REFERENCE.md` + `ARCHITECTURE.md`** are the source of truth for *current* shipped behavior.
 
 ## Chat & artifacts (quick map)
@@ -46,3 +47,14 @@ This folder is the canonical source for technical documentation.
 | `metadata` on resources/artifacts, pre-process POST/GET | `API_REFERENCE.md` → Entities; `ARCHITECTURE.md` → Resource and artifact `metadata_json` |
 | Deep agent, tools, Option B edits, create-vs-edit policy | `ARCHITECTURE.md` → Portfolio chat |
 | Local env, pytest (unit + optional real LLM E2E), manual checklist | `DEVELOPER_GUIDE.md` → Configuration, Testing |
+
+## Academic Tracking v2 (quick map)
+
+| Topic | Where |
+|--------|--------|
+| Full design spec (storage, agent, tools, frontend, migration) | `../doc/ACADEMIC_TRACKING_V2_DESIGN.md` |
+| Architecture, two-layer storage, agent goals, service modules, SQL tables | `ARCHITECTURE.md` → Academic Tracking Module (v2) |
+| 38 API endpoints, request/response schemas, data models | `API_REFERENCE.md` → Academic Tracking (v2) |
+| E2E tests, manual testing checklist | `DEVELOPER_GUIDE.md` → Testing |
+| Config vars (ACADEMIC_GEMINI_MODEL, etc.) | `backend/.env_sample` |
+| Module overview, code structure, design decisions | `../CLAUDE.md` → Academic Tracking Module (v2) |
