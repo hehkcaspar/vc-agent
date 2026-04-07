@@ -28,23 +28,19 @@ class Settings(BaseSettings):
     GEMINI_METADATA_EXTRACTION_MODEL: str = _DEFAULT_GEMINI_METADATA_EXTRACTION_MODEL
     CHAT_MAX_HISTORY_MESSAGES: int = 40
     CHAT_MAX_ATTACHMENT_BYTES: int = 20 * 1024 * 1024
-    CHAT_MAX_ARTIFACT_CHARS: int = 120_000
     CHAT_ENABLE_GOOGLE_SEARCH: bool = True
 
-    # Deep Agents harness (LangChain). When False, chat uses legacy google-genai one-shot path.
+    # Deep Agents harness (LangChain). When False, chat uses direct google-genai / Kimi path.
     CHAT_USE_DEEP_AGENT: bool = False
     CHAT_AGENT_RECURSION_LIMIT: int = 50
     CHAT_DEFAULT_MODEL_PROFILE: str = "gemini_google"
 
-    # Artifact edits (Option B): versioned by default; overwrite gated
-    CHAT_ARTIFACT_DEFAULT_EDIT_MODE: Literal["versioned", "overwrite"] = "versioned"
-    CHAT_ARTIFACT_OVERWRITE_ENABLED: bool = False
-    CHAT_ARTIFACT_RESOLVE_MIN_SCORE: float = 0.65
-    # When user intent sounds like "save/create artifact" but no explicit target is provided,
-    # prefer creating a new artifact instead of editing an existing lineage.
-    CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY: Literal[
-        "create_new", "allow_edit"
-    ] = "create_new"
+    # Gemini Interactions API: TTL in days (paid tier retains 55 days; 0 = free tier / disabled)
+    GEMINI_INTERACTION_TTL_DAYS: int = 50
+
+    # Workspace
+    WORKSPACE_MAX_FILE_BYTES: int = 50 * 1024 * 1024        # 50 MB per file
+    WORKSPACE_VERSION_RETENTION_DAYS: int = 30
     # Kimi / Moonshot OpenAI-compatible API (/v1/chat/completions).
     # - Open Platform (console API keys): https://api.moonshot.ai/v1 or https://api.moonshot.cn/v1
     # - Kimi Code platform (/login "Kimi Code" in kimi-cli): https://api.kimi.com/coding/v1

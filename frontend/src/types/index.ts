@@ -8,32 +8,50 @@ export interface Entity {
   updated_at: string;
 }
 
-export interface Resource {
+// ---------------------------------------------------------------------------
+// Workspace (replaces Resource + Artifact)
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceNode {
   id: string;
   entity_id: string;
-  resource_type: 'file' | 'text' | 'url';
-  title: string;
-  mime_type?: string;
-  original_filename?: string;
-  relative_path: string;
-  url?: string;
-  origin_ingest_id?: string;
+  node_type: 'file' | 'folder' | 'bookmark';
+  name: string;
+  path: string;
+  parent_id?: string | null;
+  mime_type?: string | null;
+  size_bytes?: number | null;
+  checksum?: string | null;
+  url?: string | null;
+  version: number;
+  origin_type?: string | null;
   metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
 }
 
-export interface Artifact {
+export interface WorkspaceTreeNode {
   id: string;
-  entity_id: string;
-  artifact_type: 'memo' | 'factsheet' | 'report' | 'other';
-  title?: string | null;
-  version: number;
-  status: 'draft' | 'final';
-  relative_path: string;
-  metadata?: Record<string, unknown> | null;
+  name: string;
+  node_type: string;
+  path: string;
+  size_bytes?: number | null;
+  mime_type?: string | null;
+  description?: string | null;
+  version?: number | null;
+  children: WorkspaceTreeNode[];
+}
+
+export interface WorkspaceOpEntry {
+  id: string;
+  op_type: string;
+  actor_type: string;
+  actor_ref?: string | null;
+  node_id?: string | null;
+  payload?: Record<string, unknown> | null;
   created_at: string;
-  updated_at: string;
+  undone_at?: string | null;
 }
 
 export interface MetadataPreprocessJobStatus {
@@ -42,26 +60,18 @@ export interface MetadataPreprocessJobStatus {
   error_message?: string | null;
 }
 
-/** Stored as assistant message `content` JSON when a chat preset saves an artifact. */
-export interface ChatArtifactCardPayload {
+/** Stored as assistant message content JSON when a preset or agent creates a deliverable. */
+export interface DeliverableCardPayload {
   _vc_chat: 'artifact_card';
-  artifact_id: string;
+  node_id: string;
   entity_id: string;
-  preset_label: string;
-  artifact_type: Artifact['artifact_type'];
-  artifact_title: string | null;
+  preset_label?: string;
+  deliverable_type?: string;
+  artifact_title?: string | null;
   version: number;
-  status: 'draft' | 'final';
+  status?: string;
   summary: string;
-}
-
-export interface ArtifactView {
-  id: string;
-  type: string;
-  version: number;
-  status: string;
-  content: string;
-  created_at: string;
+  path?: string;
 }
 
 export interface IngestItem {
@@ -79,7 +89,7 @@ export interface IngestItem {
 export interface IngestSuccessResponse {
   status: 'resolved';
   entity_id: string;
-  resources: Resource[];
+  nodes: WorkspaceNode[];
 }
 
 export interface IngestResolutionRequiredResponse {
@@ -96,7 +106,6 @@ export interface IngestFailedResponse {
 
 export type IngestResponse = IngestSuccessResponse | IngestResolutionRequiredResponse | IngestFailedResponse;
 
-/** Backend harness profile for POST .../chat/sessions/.../messages (`model_profile_id`). */
 export type ChatModelProfileId = 'gemini_google' | 'kimi_moonshot';
 
 export interface ChatSession {
@@ -105,6 +114,7 @@ export interface ChatSession {
   title: string | null;
   created_at: string;
   updated_at: string;
+  has_gemini_chain?: boolean;
 }
 
 export interface ChatMessage {
@@ -112,6 +122,8 @@ export interface ChatMessage {
   session_id: string;
   role: string;
   content: string;
+  model_profile_id?: string | null;
+  node_ids_json?: string | null;
   created_at: string;
 }
 
@@ -123,13 +135,10 @@ export interface ChatSessionDetail {
 export interface ChatMessageResult {
   assistant_message: ChatMessage;
   warnings: string[];
-  /** Present when `CHAT_USE_DEEP_AGENT` is enabled on the server (legacy sync response only). */
   run_id?: string | null;
-  /** Optional coarse trace (e.g. result keys); may expand with streaming later. */
   tool_trace?: Record<string, unknown> | null;
 }
 
-/** Poll `GET .../jobs/{job_id}` after `POST .../messages` returns 202 (deep agent). */
 export interface ChatMessageJobStatus {
   job_id: string;
   status: 'pending' | 'running' | 'succeeded' | 'failed';
@@ -158,7 +167,7 @@ export interface PresetInfo {
 }
 
 export interface PresetRunResponse {
-  artifact_id: string;
+  node_id: string;
   assistant_summary: string;
   warnings: string[];
 }
@@ -171,9 +180,6 @@ export interface TabState {
 }
 
 // ============== Entity Metadata Form Configuration ==============
-// This defines all editable entity metadata fields.
-// BOTH CreateEntityModal and EditEntityModal use this configuration.
-// When backend EntityUpdate schema changes, update this config to automatically sync both modals.
 
 export interface EntityMetadataField {
   name: keyof EntityUpdateData;
@@ -181,7 +187,7 @@ export interface EntityMetadataField {
   type: 'text' | 'url' | 'select' | 'textarea';
   required: boolean;
   placeholder?: string;
-  options?: { value: string; label: string }[];  // For select type
+  options?: { value: string; label: string }[];
 }
 
 export interface EntityUpdateData {
@@ -190,8 +196,6 @@ export interface EntityUpdateData {
   status?: 'active' | 'archived';
 }
 
-// Single source of truth for entity metadata form fields
-// Modify this array when backend EntityUpdate schema changes
 export const ENTITY_METADATA_FIELDS: EntityMetadataField[] = [
   {
     name: 'name',
@@ -203,7 +207,7 @@ export const ENTITY_METADATA_FIELDS: EntityMetadataField[] = [
   {
     name: 'website',
     label: 'Website',
-    type: 'text',  // Changed from 'url' to allow flexible input
+    type: 'text',
     required: false,
     placeholder: 'example.com or https://example.com',
   },

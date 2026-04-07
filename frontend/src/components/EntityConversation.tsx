@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useChatModelProfile } from '../context/ChatModelProfileContext';
-import { parseArtifactCardMessage, resolveArtifactForViewer } from '../lib/chatArtifactCard';
+import { parseDeliverableCardMessage } from '../lib/chatArtifactCard';
 import {
   CLI_SPINNER_DOTS_FRAMES,
   CLI_SPINNER_DOTS_INTERVAL_MS,
 } from '../lib/cliSpinnerDots';
 import { api } from '../services/api';
-import type { Artifact, ChatMessage, ChatSession, PresetInfo, Resource } from '../types';
+import type { ChatMessage, ChatSession, DeliverableCardPayload, PresetInfo } from '../types';
 
 function roleLabel(role: string): string {
   const r = role.toLowerCase();
@@ -30,50 +30,18 @@ function readChatAgentPref(): boolean {
   return true;
 }
 
-function basename(path: string | undefined): string {
-  if (!path) return '';
-  const parts = path.split(/[\\/]/);
-  return parts[parts.length - 1] ?? '';
-}
-
-function resourceDisplayName(resource: Resource): string {
-  const title = resource.title?.trim();
-  if (title) return title;
-  const original = resource.original_filename?.trim();
-  if (original) return original;
-  const file = basename(resource.relative_path);
-  if (file) return file;
-  const url = resource.url?.trim();
-  if (url) return url;
-  return `Resource ${resource.id.slice(0, 8)}...`;
-}
-
-function artifactDisplayName(artifact: Artifact): string {
-  const title = artifact.title?.trim();
-  if (title) return `${title} (v${artifact.version})`;
-  const file = basename(artifact.relative_path);
-  if (file) return file;
-  return `${artifact.artifact_type} (v${artifact.version})`;
-}
-
 interface EntityConversationProps {
   entityId: string;
-  resources: Resource[] | undefined;
-  artifacts: Artifact[] | undefined;
-  selectedResources: Set<string>;
-  selectedArtifacts: Set<string>;
+  selectedNodeIds: Set<string>;
   onArtifactsChanged: () => void;
-  onViewArtifact: (artifact: Artifact) => void;
+  onViewDeliverable: (card: DeliverableCardPayload) => void;
 }
 
 export function EntityConversation({
   entityId,
-  resources,
-  artifacts,
-  selectedResources,
-  selectedArtifacts,
+  selectedNodeIds,
   onArtifactsChanged,
-  onViewArtifact,
+  onViewDeliverable,
 }: EntityConversationProps) {
   const { profileId } = useChatModelProfile();
   const sessionIdRef = useRef<string | null>(null);
@@ -102,6 +70,8 @@ export function EntityConversation({
   const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [spinnerFrame, setSpinnerFrame] = useState(0);
+  const [showModelSwapConfirm, setShowModelSwapConfirm] = useState(false);
+  const pendingSendRef = useRef<(() => void) | null>(null);
 
   const toggleChatAgent = useCallback(() => {
     setChatAgentOn((on) => {
@@ -277,11 +247,8 @@ export function EntityConversation({
     agentJob && sessionId && agentJob.sessionId === sessionId
   );
   const sourceNameById = useMemo(() => {
-    const m = new Map<string, string>();
-    for (const r of resources ?? []) m.set(r.id, resourceDisplayName(r));
-    for (const a of artifacts ?? []) m.set(a.id, artifactDisplayName(a));
-    return m;
-  }, [artifacts, resources]);
+    return new Map<string, string>();
+  }, []);
 
   const humanizedAgentStatus = useMemo(() => {
     if (!agentStatus) return '';
@@ -378,7 +345,7 @@ export function EntityConversation({
     }
   };
 
-  const handleSend = async () => {
+  const doSend = async () => {
     const text = input.trim();
     if (!text || !sessionId) return;
     setError(null);
@@ -387,8 +354,7 @@ export function EntityConversation({
     try {
       const out = await api.chat.postMessage(entityId, sessionId, {
         text,
-        resource_ids: [...selectedResources],
-        artifact_ids: [...selectedArtifacts],
+        node_ids: Array.from(selectedNodeIds),
         model_profile_id: profileId,
         use_deep_agent: chatAgentOn,
       });
@@ -399,10 +365,17 @@ export function EntityConversation({
         setAgentStatus('Queued…');
         const detail = await api.chat.getSession(entityId, sessionId);
         setMessages(detail.messages);
+        // Update session in list (has_gemini_chain may have changed)
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? detail.session : s))
+        );
       } else {
         setWarnings(out.result.warnings);
         const detail = await api.chat.getSession(entityId, sessionId);
         setMessages(detail.messages);
+        setSessions((prev) =>
+          prev.map((s) => (s.id === sessionId ? detail.session : s))
+        );
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -411,14 +384,32 @@ export function EntityConversation({
     }
   };
 
+  const handleSend = async () => {
+    const text = input.trim();
+    if (!text || !sessionId) return;
+
+    // Confirm before switching from Gemini to Kimi (destroys Interactions API chain)
+    const currentSession = sessions.find((s) => s.id === sessionId);
+    if (
+      profileId === 'kimi_moonshot' &&
+      !chatAgentOn &&
+      currentSession?.has_gemini_chain
+    ) {
+      pendingSendRef.current = doSend;
+      setShowModelSwapConfirm(true);
+      return;
+    }
+
+    await doSend();
+  };
+
   const handleRunPreset = async (presetId: string) => {
     setError(null);
     setBusy(true);
     setWarnings([]);
     try {
       const res = await api.chat.runPreset(entityId, presetId, {
-        resource_ids: [...selectedResources],
-        artifact_ids: [...selectedArtifacts],
+        node_ids: Array.from(selectedNodeIds),
         session_id: sessionId ?? undefined,
         model_profile_id: profileId,
         use_deep_agent: chatAgentOn,
@@ -436,7 +427,7 @@ export function EntityConversation({
     }
   };
 
-  const contextCount = selectedResources.size + selectedArtifacts.size;
+  const contextCount = selectedNodeIds.size;
 
   return (
     <div className="entity-conversation">
@@ -543,7 +534,7 @@ export function EntityConversation({
         {messages.map((m) => {
           const side = m.role === 'user' ? 'user' : 'assistant';
           const artifactCard =
-            side === 'assistant' ? parseArtifactCardMessage(m.content) : null;
+            side === 'assistant' ? parseDeliverableCardMessage(m.content) : null;
           return (
             <div
               key={m.id}
@@ -555,9 +546,7 @@ export function EntityConversation({
                   <button
                     type="button"
                     className="entity-conversation-artifact-card"
-                    onClick={() =>
-                      onViewArtifact(resolveArtifactForViewer(artifactCard, artifacts))
-                    }
+                    onClick={() => onViewDeliverable(artifactCard)}
                   >
                     <span className="entity-conversation-artifact-card-icon" aria-hidden>
                       📝
@@ -566,7 +555,7 @@ export function EntityConversation({
                       <span className="entity-conversation-artifact-card-title">
                         {artifactCard.artifact_title?.trim()
                           ? `${artifactCard.artifact_title} (v${artifactCard.version})`
-                          : `${artifactCard.artifact_type} (v${artifactCard.version})`}
+                          : `${artifactCard.deliverable_type ?? 'Deliverable'} (v${artifactCard.version})`}
                       </span>
                       <span className="entity-conversation-artifact-card-meta">
                         {artifactCard.preset_label} · {artifactCard.status} · Open to read
@@ -637,8 +626,8 @@ export function EntityConversation({
                 <button
                   type="button"
                   className="entity-conversation-attach-chip"
-                  title="Add context: use the Resources and Artifacts columns to include sources with this message."
-                  aria-label="Context: select items in side columns"
+                  title="Add context: select files in the workspace to include as sources with this message."
+                  aria-label="Context: select files in workspace"
                 >
                   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
                     <path
@@ -721,7 +710,7 @@ export function EntityConversation({
           </div>
           <p className="entity-conversation-context-line" role="status">
             {contextCount === 0
-              ? 'No sources in context — select resources or artifacts in the side columns.'
+              ? 'No sources in context — select files in the workspace.'
               : `${contextCount} source${contextCount === 1 ? '' : 's'} in context`}
           </p>
         </div>
@@ -782,6 +771,56 @@ export function EntityConversation({
                   {deletingSessionId ? 'Deleting…' : 'Delete forever'}
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {showModelSwapConfirm && (
+        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Switch model">
+          <div className="modal entity-chat-delete-modal">
+            <div className="modal-header">
+              <h3>Switch to Kimi?</h3>
+              <button
+                type="button"
+                className="modal-close"
+                onClick={() => {
+                  setShowModelSwapConfirm(false);
+                  pendingSendRef.current = null;
+                }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div className="modal-body">
+              <p>
+                This will end the current Gemini session. Multimodal context (images, PDFs)
+                from earlier turns will be permanently lost. Text history is preserved.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => {
+                  setShowModelSwapConfirm(false);
+                  pendingSendRef.current = null;
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="entity-chat-delete-confirm entity-chat-delete-confirm--danger"
+                onClick={() => {
+                  setShowModelSwapConfirm(false);
+                  const fn = pendingSendRef.current;
+                  pendingSendRef.current = null;
+                  if (fn) void fn();
+                }}
+              >
+                Switch &amp; Send
+              </button>
             </div>
           </div>
         </div>

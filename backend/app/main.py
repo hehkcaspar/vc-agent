@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.academic_database import init_academic_db
 from app.database import init_db
-from app.routers import entities, parkinglot, ingest, chat, academic
+from app.routers import entities, parkinglot, ingest, chat, academic, workspace
 
 logger = logging.getLogger(__name__)
 
@@ -106,6 +106,7 @@ app.include_router(entities.router)
 app.include_router(chat.router)
 app.include_router(parkinglot.router)
 app.include_router(ingest.router)
+app.include_router(workspace.router)
 app.include_router(academic.router)
 
 

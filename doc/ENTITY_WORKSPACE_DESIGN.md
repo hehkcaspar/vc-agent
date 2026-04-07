@@ -1,6 +1,6 @@
 # Entity Workspace — Hierarchical File System Design
 
-> **Status:** Draft v4 — post first-principles review
+> **Status:** Implemented — all sections landed 2026-04-04
 > **Date:** 2026-04-04
 > **Stack:** FastAPI + SQLAlchemy (async SQLite) + React 18 / TypeScript / SWR
 > **Future:** S3-compatible object storage via `StorageAdapter` swap

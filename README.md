@@ -7,9 +7,9 @@ VC Portfolio Manager is a web application for managing portfolio companies as ca
 - Manage portfolio entities (create, edit, archive).
 - Ingest files, text, and URLs without data loss.
 - Resolve inbound content to existing/new entities.
-- Browse entity resources and artifacts in a responsive UI.
-- **Entity workspace:** Chat sessions with optional **Agent** mode (LangChain Deep Agents: tools, async **`202`** + job polling, per-request `use_deep_agent` vs server default). **Agent off** = one-shot **`200`** Gemini reply (no tools). **Presets** use the same Agent on/off switch. Context from selected resources/artifacts is optional; in Agent mode the model can list/read entity files via tools. Casual “save / 记下来 / take a note” turns prefer **`portfolio_create_artifact`** so new memos do not silently version an existing `extract_info` lineage (see `CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY` in `backend/.env_sample`). The **Artifacts** column refreshes automatically when an Agent job completes (SWR `mutate`); presets already triggered a refresh on run.
-- **Artifact viewer:** Markdown preview or JSON editors with **Form** vs **Raw JSON** modes (shared segmented-toggle styling with list/grid).
+- Browse entity files in a hierarchical **workspace tree** (folders, file versioning, trash/restore, agent annotations).
+- **Entity workspace:** Chat sessions with optional **Agent** mode (LangChain Deep Agents: 13 workspace tools, async **`202`** + job polling, per-request `use_deep_agent` vs server default). **Agent off** = one-shot **`200`** Gemini reply (no tools). **Presets** use the same Agent on/off switch. Selected workspace files provide chat context; in Agent mode the model can browse, read, write, move, and annotate files via tools. Agents see the full workspace tree + descriptions + WORKSPACE_NOTES.md on every turn.
+- **File viewer:** Preview workspace files (Markdown, JSON, PDF, images, Office docs) with version history and diff.
 - Support light/dark themes and adaptive layout for desktop/laptop/mobile.
 - **Academic Tracking:** Track scholars and research labs with automated pipelines — identity resolution via Google Scholar (Gemini + Google Search), paper collection via Semantic Scholar API, and AI-generated analysis reports. Includes scholar profile cards with h-index/i10-index/citations, sortable publications table, and report history.
 
@@ -28,13 +28,24 @@ VC Portfolio Manager is a web application for managing portfolio companies as ca
 
 ### Setup
 
+**Windows (PowerShell):**
 ```powershell
-# From repo root — always install backend deps from this file (pins matter on Python 3.13).
 python -m venv venv
 .\venv\Scripts\Activate.ps1
 .\venv\Scripts\pip.exe install -U pip
 .\venv\Scripts\pip.exe install -r "backend/requirements.txt"
+```
 
+**macOS/Linux (zsh/bash):**
+```zsh
+python3 -m venv venv
+source venv/bin/activate
+pip install -U pip
+pip install -r "backend/requirements.txt"
+```
+
+**Frontend:**
+```bash
 cd frontend
 npm install
 cd ..
@@ -50,16 +61,24 @@ The versions in `backend/requirements.txt` are chosen so a clean install works o
 | `AssertionError: ... SQLCoreOperations ... TypingOnly ... __static_attributes__` when starting the app | **SQLAlchemy** before ~2.0.31 is incompatible with Python 3.13’s class layout | **SQLAlchemy 2.0.48** (async extra unchanged) |
 
 If you change Python major versions, reinstall:  
-`.\venv\Scripts\pip.exe install -r "backend\requirements.txt"` from repo root after activating the venv.
+`.\venv\Scripts\pip.exe install -r "backend/requirements.txt"` (Windows) or `pip install -r "backend/requirements.txt"` (macOS/Linux) from repo root after activating the venv.
 
 ### Run
 
+**Backend (Windows):**
 ```powershell
-# Terminal 1
 cd backend
 ..\venv\Scripts\python.exe run.py
+```
 
-# Terminal 2
+**Backend (macOS/Linux):**
+```zsh
+cd backend
+../venv/bin/python run.py
+```
+
+**Frontend (All):**
+```bash
 cd frontend
 npm run dev
 ```

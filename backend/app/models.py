@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text
+from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, Index, text
 from sqlalchemy.orm import declarative_base, relationship
 
 from app.datetime_support import utc_now
@@ -22,8 +22,10 @@ class Entity(Base):
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
-    resources = relationship("Resource", back_populates="entity", cascade="all, delete-orphan")
-    artifacts = relationship("Artifact", back_populates="entity", cascade="all, delete-orphan")
+    workspace_nodes = relationship(
+        "WorkspaceNode", back_populates="entity", cascade="all, delete-orphan",
+        foreign_keys="WorkspaceNode.entity_id",
+    )
     chat_sessions = relationship(
         "ConversationSession", back_populates="entity", cascade="all, delete-orphan"
     )
@@ -43,42 +45,6 @@ class IngestItem(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
-class Resource(Base):
-    __tablename__ = "resources"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
-    resource_type = Column(String, nullable=False)  # file, text, url
-    title = Column(String, nullable=False)
-    mime_type = Column(String, nullable=True)
-    original_filename = Column(String, nullable=True)
-    relative_path = Column(String, nullable=False)
-    url = Column(String, nullable=True)
-    origin_ingest_id = Column(String, ForeignKey("ingest_items.ingest_id"), nullable=True)
-    metadata_json = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
-
-    entity = relationship("Entity", back_populates="resources")
-
-
-class Artifact(Base):
-    __tablename__ = "artifacts"
-
-    id = Column(String, primary_key=True, default=generate_uuid)
-    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
-    artifact_type = Column(String, nullable=False)  # memo, factsheet, report, other
-    title = Column(String, nullable=True)
-    version = Column(Integer, default=1)
-    status = Column(String, default="draft")  # draft, final
-    relative_path = Column(String, nullable=False)
-    metadata_json = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
-
-    entity = relationship("Entity", back_populates="artifacts")
-
-
 class ConversationSession(Base):
     __tablename__ = "conversation_sessions"
 
@@ -88,12 +54,25 @@ class ConversationSession(Base):
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
+    # Gemini Interactions API chain bookmark
+    last_gemini_interaction_id = Column(String, nullable=True)
+    last_gemini_interaction_at = Column(DateTime, nullable=True)
+
     entity = relationship("Entity", back_populates="chat_sessions")
     messages = relationship(
         "ConversationMessage",
         back_populates="session",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def has_gemini_chain(self) -> bool:
+        """Whether this session has a valid (non-expired) Gemini Interactions API chain."""
+        if not self.last_gemini_interaction_id or not self.last_gemini_interaction_at:
+            return False
+        from app.config import settings
+        age = (utc_now() - self.last_gemini_interaction_at).days
+        return age < settings.GEMINI_INTERACTION_TTL_DAYS
 
 
 class ConversationMessage(Base):
@@ -103,6 +82,8 @@ class ConversationMessage(Base):
     session_id = Column(String, ForeignKey("conversation_sessions.id"), nullable=False)
     role = Column(String, nullable=False)  # user, assistant, system
     content = Column(Text, nullable=False)
+    model_profile_id = Column(String, nullable=True)   # "gemini_google" | "kimi_moonshot"
+    node_ids_json = Column(Text, nullable=True)         # JSON array of attached workspace node IDs
     created_at = Column(DateTime, default=utc_now)
 
     session = relationship("ConversationSession", back_populates="messages")
@@ -127,8 +108,7 @@ class ChatCompletionJob(Base):
     warnings_json = Column(Text, nullable=True)
     tool_trace_json = Column(Text, nullable=True)
 
-    resource_ids_json = Column(Text, nullable=False)
-    artifact_ids_json = Column(Text, nullable=False)
+    node_ids_json = Column(Text, nullable=False, default="[]")
     model_profile_id = Column(String, nullable=True)
     harness_extras = Column(Text, nullable=False)
 
@@ -136,27 +116,79 @@ class ChatCompletionJob(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
 
-class ArtifactEditEvent(Base):
-    """Audit log for artifact edit attempts (Option B harness; design §8.5)."""
+# ---------------------------------------------------------------------------
+# Workspace (hierarchical file system per entity)
+# ---------------------------------------------------------------------------
 
-    __tablename__ = "artifact_edit_events"
+class WorkspaceNode(Base):
+    """A file, folder, or bookmark in an entity's workspace tree."""
+
+    __tablename__ = "workspace_nodes"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    correlation_id = Column(String, nullable=False, index=True)
-    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
-    session_id = Column(String, ForeignKey("conversation_sessions.id"), nullable=True)
-    artifact_id = Column(String, nullable=True)
+    entity_id = Column(String, ForeignKey("entities.id"), nullable=False, index=True)
 
-    requested_mode = Column(String, nullable=True)  # versioned | overwrite
-    resolved_mode = Column(String, nullable=True)
-    state = Column(String, nullable=False)
-    intent_summary = Column(Text, nullable=True)
-    tool_context_json = Column(Text, nullable=True)
-    validation_result_json = Column(Text, nullable=True)
+    # Tree structure
+    node_type = Column(String, nullable=False)          # file | folder | bookmark
+    name = Column(String, nullable=False)               # display name
+    path = Column(String, nullable=False)               # materialized: "Data Room/Financials/Q4.xlsx"
+    parent_id = Column(String, ForeignKey("workspace_nodes.id"), nullable=True)
+
+    # File-specific (ignored for folders and bookmarks)
+    mime_type = Column(String, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    checksum = Column(String, nullable=True)            # SHA-256 of current content
+    storage_key = Column(String, nullable=True)         # path-independent blob key
+    url = Column(String, nullable=True)                 # bookmark nodes only
+
+    # Versioning
+    version = Column(Integer, default=1)
+
+    # Provenance
+    origin_type = Column(String, nullable=True)         # upload | agent | ingest | shared | user
+    origin_ref = Column(String, nullable=True)          # ingest_id, agent_run_id, etc.
+
+    # Metadata (deliverable type/status, descriptions, etc.)
+    metadata_json = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    deleted_at = Column(DateTime, nullable=True)        # soft delete
+
+    entity = relationship("Entity", back_populates="workspace_nodes")
+
+    __table_args__ = (
+        Index(
+            "uq_entity_path", "entity_id", "path",
+            unique=True,
+            sqlite_where=text("deleted_at IS NULL"),
+        ),
+        Index("ix_workspace_parent", "entity_id", "parent_id"),
+    )
+
+
+class WorkspaceOp(Base):
+    """Audit log for workspace mutations (create, overwrite, move, delete, etc.)."""
+
+    __tablename__ = "workspace_ops"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    entity_id = Column(String, ForeignKey("entities.id"), nullable=False, index=True)
+    batch_id = Column(String, nullable=True, index=True)    # group for atomic undo
+
+    op_type = Column(String, nullable=False)       # create_file | create_folder | overwrite |
+                                                    # move | rename | copy | delete | restore |
+                                                    # upload_tree | extract_zip
+    actor_type = Column(String, nullable=False)    # user | agent | system
+    actor_ref = Column(String, nullable=True)
+
+    node_id = Column(String, nullable=True)
+    payload_json = Column(Text, nullable=False)    # op-specific data
+    inverse_json = Column(Text, nullable=True)     # for undo
+
+    # Versioning checkpoints
     before_checksum = Column(String, nullable=True)
     after_checksum = Column(String, nullable=True)
-    error_message = Column(Text, nullable=True)
-    run_id = Column(String, nullable=True)
-    pipeline_version = Column(String, default="option_b")
 
+    undone_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)

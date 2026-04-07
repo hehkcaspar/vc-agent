@@ -10,13 +10,15 @@ from app.schemas import (
 )
 from app.services.storage import storage
 from app.services.parking import ParkingLotManager
-from app.services.materializer import ResourceMaterializer
+from app.services.materializer import WorkspaceMaterializer
 from app.services.resolver import EntityResolver
+from app.services.workspace import WorkspaceService
 
 router = APIRouter(prefix="/parkinglot", tags=["parkinglot"])
 
 parking_manager = ParkingLotManager(storage)
-materializer = ResourceMaterializer(storage)
+workspace_service = WorkspaceService(storage)
+materializer = WorkspaceMaterializer(storage, workspace_service)
 resolver = EntityResolver()
 
 

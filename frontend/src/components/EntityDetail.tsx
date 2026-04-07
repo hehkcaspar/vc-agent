@@ -1,9 +1,6 @@
-import { useState, useRef, useEffect, useCallback, ReactNode, DragEvent } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import { init as initPptxPreview } from 'pptx-preview';
-import { Entity, Resource, Artifact, ArtifactView } from '../types';
-import { useEntityResources, useEntityArtifacts } from '../hooks/useEntities';
+import { useState, useRef, useEffect, useCallback, DragEvent } from 'react';
+import { Entity, WorkspaceTreeNode, DeliverableCardPayload } from '../types';
+import { useWorkspaceTree } from '../hooks/useEntities';
 import { api } from '../services/api';
 import {
   resolveEffectiveMime,
@@ -18,63 +15,93 @@ import {
   withBuiltinPdfViewerOptions,
   revokeBlobObjectUrl,
 } from '../lib/resourcePreview';
+import { init as initPptxPreview } from 'pptx-preview';
 import { EntityConversation } from './EntityConversation';
-import { JsonArtifactFormEditor } from './JsonArtifactFormEditor';
-import {
-  CLI_SPINNER_DOTS_FRAMES,
-  CLI_SPINNER_DOTS_INTERVAL_MS,
-} from '../lib/cliSpinnerDots';
-import { pollMetadataPreprocessJob } from '../lib/metadataPreprocess';
 import { showToast } from '../lib/appToast';
 import './EntityDetail.css';
 
-function rowHasFileMetadata(
-  metadata: Record<string, unknown> | null | undefined,
-): boolean {
-  if (metadata == null || typeof metadata !== 'object') return false;
-  return Object.keys(metadata).length > 0;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || bytes === 0) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function PreprocessMetadataBadgeIcon() {
+/** Collect every file node id from a tree (recursive). */
+function collectFileIds(nodes: WorkspaceTreeNode[]): string[] {
+  const ids: string[] = [];
+  for (const n of nodes) {
+    if (n.node_type === 'file' || n.node_type === 'bookmark') ids.push(n.id);
+    if (n.children.length) ids.push(...collectFileIds(n.children));
+  }
+  return ids;
+}
+
+// ---------------------------------------------------------------------------
+// File icon helper
+// ---------------------------------------------------------------------------
+
+type FileIconKind =
+  | 'pdf' | 'docx' | 'xlsx' | 'pptx'
+  | 'image' | 'video' | 'audio' | 'zip'
+  | 'url' | 'text' | 'folder' | 'file';
+
+function nodeIconKind(node: WorkspaceTreeNode): FileIconKind {
+  if (node.node_type === 'folder') return 'folder';
+  if (node.node_type === 'bookmark') return 'url';
+  const mime = (node.mime_type || '').toLowerCase();
+  const name = node.name || '';
+  if (isPdf(mime, name)) return 'pdf';
+  if (isDocx(mime, name)) return 'docx';
+  if (isXlsx(mime, name)) return 'xlsx';
+  if (isPptx(mime, name)) return 'pptx';
+  if (isImageType(mime, name)) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.includes('zip') || mime.includes('compressed')) return 'zip';
+  if (isTextLike(mime, name)) return 'text';
+  return 'file';
+}
+
+const ICON_PALETTE: Record<FileIconKind, { bg: string; fg: string; label: string }> = {
+  pdf:   { bg: '#B42318', fg: '#FFF', label: 'PDF' },
+  docx:  { bg: '#185ABD', fg: '#FFF', label: 'DOC' },
+  xlsx:  { bg: '#107C41', fg: '#FFF', label: 'XLS' },
+  pptx:  { bg: '#C43E1C', fg: '#FFF', label: 'PPT' },
+  image: { bg: '#7A5AF8', fg: '#FFF', label: 'IMG' },
+  video: { bg: '#0E7490', fg: '#FFF', label: 'VID' },
+  audio: { bg: '#7C3AED', fg: '#FFF', label: 'AUD' },
+  zip:   { bg: '#475467', fg: '#FFF', label: 'ZIP' },
+  url:   { bg: '#175CD3', fg: '#FFF', label: 'WEB' },
+  text:  { bg: '#344054', fg: '#FFF', label: 'TXT' },
+  folder:{ bg: '#F59E0B', fg: '#FFF', label: 'DIR' },
+  file:  { bg: '#667085', fg: '#FFF', label: 'FILE' },
+};
+
+function NodeIcon({ node }: { node: WorkspaceTreeNode }) {
+  const kind = nodeIconKind(node);
+  if (kind === 'folder') {
+    return <span className="resource-icon" style={{ fontSize: 16 }}>📁</span>;
+  }
+  const { bg, fg, label } = ICON_PALETTE[kind];
   return (
-    <span
-      className="compact-row-preprocess-meta-icon"
-      title="Metadata on file"
-      aria-hidden
-    >
-      <svg viewBox="0 0 20 20" fill="currentColor" focusable="false">
-        <path
-          fillRule="evenodd"
-          d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z"
-          clipRule="evenodd"
-        />
-      </svg>
-    </span>
+    <svg viewBox="0 0 24 24" className="resource-file-logo" role="img" aria-label={`${label} file`}>
+      <rect x="3" y="2" width="18" height="20" rx="4" fill="#FFFFFF" stroke="#D0D5DD" />
+      <path d="M15 2v6h6" fill="#F2F4F7" />
+      <rect x="5.5" y="11.5" width="13" height="7.5" rx="1.5" fill={bg} />
+      <text x="12" y="16.7" textAnchor="middle" fontSize="4" fontWeight="700" fill={fg}
+        fontFamily="Inter, Segoe UI, Arial, sans-serif" letterSpacing="0.2">{label}</text>
+    </svg>
   );
 }
 
-// Resource types that can be added
-const RESOURCE_TYPES = [
-  { id: 'file', label: '📁 File', description: 'Upload PDF, images, text files' },
-  { id: 'text', label: '📝 Text Note', description: 'Add a text or markdown note' },
-  { id: 'url', label: '🔗 URL', description: 'Add a web link' },
-] as const;
-
-function artifactDisplayLabel(artifact: Artifact): string {
-  const t = artifact.title?.trim();
-  if (t) return `${t} (v${artifact.version})`;
-  return `${artifact.artifact_type} (v${artifact.version})`;
-}
-
-function tryFormatArtifactJson(content: string): string | null {
-  const t = content.trim();
-  if (!t.startsWith('{') && !t.startsWith('[')) return null;
-  try {
-    return JSON.stringify(JSON.parse(t), null, 2);
-  } catch {
-    return null;
-  }
-}
+// ---------------------------------------------------------------------------
+// Main component
+// ---------------------------------------------------------------------------
 
 interface EntityDetailProps {
   entity: Entity;
@@ -82,65 +109,49 @@ interface EntityDetailProps {
 }
 
 export function EntityDetail({ entity, onBack }: EntityDetailProps) {
-  const { resources, isLoading: resourcesLoading, mutate: mutateResources } = useEntityResources(entity.id);
-  const { artifacts, isLoading: artifactsLoading, mutate: mutateArtifacts } = useEntityArtifacts(entity.id);
+  const { tree, isLoading: treeLoading, mutate: mutateTree } = useWorkspaceTree(entity.id);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
+  const [previewNode, setPreviewNode] = useState<WorkspaceTreeNode | null>(null);
 
-  const [chatResourceIds, setChatResourceIds] = useState<Set<string>>(() => new Set());
-  const [chatArtifactIds, setChatArtifactIds] = useState<Set<string>>(() => new Set());
-  const [viewerArtifact, setViewerArtifact] = useState<Artifact | null>(null);
-
-  const toggleChatResource = useCallback((id: string) => {
-    setChatResourceIds((prev) => {
+  const toggleNode = useCallback((id: string) => {
+    setSelectedNodeIds(prev => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   }, []);
-  const setAllChatResources = useCallback((ids: string[], checked: boolean) => {
-    setChatResourceIds((prev) => {
+
+  const setAllNodes = useCallback((ids: string[], checked: boolean) => {
+    setSelectedNodeIds(prev => {
       const next = new Set(prev);
       for (const id of ids) {
-        if (checked) next.add(id);
-        else next.delete(id);
+        if (checked) next.add(id); else next.delete(id);
       }
       return next;
     });
   }, []);
 
-  const toggleChatArtifact = useCallback((id: string) => {
-    setChatArtifactIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }, []);
-  const setAllChatArtifacts = useCallback((ids: string[], checked: boolean) => {
-    setChatArtifactIds((prev) => {
-      const next = new Set(prev);
-      for (const id of ids) {
-        if (checked) next.add(id);
-        else next.delete(id);
-      }
-      return next;
-    });
-  }, []);
+  const allFileIds = tree ? collectFileIds(tree) : [];
+  const allSelected = allFileIds.length > 0 && allFileIds.every(id => selectedNodeIds.has(id));
+  const someSelected = allFileIds.some(id => selectedNodeIds.has(id));
+
+  const selectAllRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = someSelected && !allSelected;
+    }
+  }, [someSelected, allSelected]);
+
+  const handleRefresh = useCallback(() => { void mutateTree(); }, [mutateTree]);
 
   return (
     <div className="entity-detail">
       <div className="entity-detail-header">
-        <button className="back-button" onClick={onBack}>
-          ← Back
-        </button>
+        <button className="back-button" onClick={onBack}>← Back</button>
         <h2>{entity.name}</h2>
         <div className="entity-meta">
           {entity.website && (
-            <a 
-              href={entity.website} 
-              target="_blank" 
-              rel="noopener noreferrer"
-            >
+            <a href={entity.website} target="_blank" rel="noopener noreferrer">
               {entity.website}
             </a>
           )}
@@ -148,150 +159,119 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
       </div>
 
       <div className="entity-zones entity-zones--notebook">
-        <ResourcesZoneWithHeader
-          entityId={entity.id}
-          resources={resources}
-          isLoading={resourcesLoading}
-          onSuccess={mutateResources}
-          chatSelectedIds={chatResourceIds}
-          onToggleChatSelected={toggleChatResource}
-          onSetAllChatSelected={setAllChatResources}
-        />
+        {/* Left: Workspace tree */}
+        <div className="zone zone--sidebar">
+          <div className="zone-header">
+            {previewNode ? (
+              <>
+                <button className="back-btn" onClick={() => setPreviewNode(null)}>
+                  ← Back to tree
+                </button>
+                <div className="preview-title-header">{previewNode.name}</div>
+              </>
+            ) : (
+              <>
+                <h3>
+                  Workspace
+                  <span className="zone-count">({allFileIds.length})</span>
+                </h3>
+                <UploadButton entityId={entity.id} onSuccess={handleRefresh} />
+              </>
+            )}
+          </div>
+          <div className="zone-content">
+            {previewNode ? (
+              <FilePreview entityId={entity.id} node={previewNode} />
+            ) : treeLoading ? (
+              <div className="empty-zone">Loading...</div>
+            ) : !tree || tree.length === 0 ? (
+              <div className="empty-zone">No files yet</div>
+            ) : (
+              <div className="resource-list">
+                <div className="select-all-row">
+                  <span className="select-all-label">Select all</span>
+                  <label className="resource-chat-toggle" onClick={e => e.stopPropagation()}>
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={e => setAllNodes(allFileIds, e.target.checked)}
+                    />
+                  </label>
+                </div>
+                {tree.map(node => (
+                  <TreeNode
+                    key={node.id}
+                    node={node}
+                    depth={0}
+                    entityId={entity.id}
+                    selectedNodeIds={selectedNodeIds}
+                    onToggle={toggleNode}
+                    onOpen={setPreviewNode}
+                    onRefresh={handleRefresh}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
 
+        {/* Center: Chat */}
         <div className="zone zone--chat-main">
           <div className="zone-content zone-content--conversation">
             <EntityConversation
               key={entity.id}
               entityId={entity.id}
-              resources={resources}
-              artifacts={artifacts}
-              selectedResources={chatResourceIds}
-              selectedArtifacts={chatArtifactIds}
-              onArtifactsChanged={() => mutateArtifacts()}
-              onViewArtifact={setViewerArtifact}
-            />
-          </div>
-        </div>
-
-        <div className="zone zone--sidebar">
-          <div className="zone-header">
-            <h3>
-              Artifacts
-              <span className="zone-count">({artifacts?.length || 0})</span>
-            </h3>
-          </div>
-          <div className="zone-content">
-            <ArtifactsZone
-              entityId={entity.id}
-              artifacts={artifacts}
-              isLoading={artifactsLoading}
-              chatSelectedIds={chatArtifactIds}
-              onToggleChatSelected={toggleChatArtifact}
-              onSetAllChatSelected={setAllChatArtifacts}
-              onOpenArtifact={setViewerArtifact}
-              onChanged={() => void mutateArtifacts()}
+              selectedNodeIds={selectedNodeIds}
+              onArtifactsChanged={handleRefresh}
+              onViewDeliverable={(card: DeliverableCardPayload) => {
+                // Find node in tree and preview it
+                const found = findNodeById(tree || [], card.node_id);
+                if (found) setPreviewNode(found);
+              }}
             />
           </div>
         </div>
       </div>
-
-      {viewerArtifact && (
-        <ArtifactViewerModal
-          artifact={viewerArtifact}
-          entityId={entity.id}
-          onClose={() => setViewerArtifact(null)}
-          onSaved={() => void mutateArtifacts()}
-        />
-      )}
     </div>
   );
 }
 
-interface AddResourceMenuProps {
-  entityId: string;
-  onSuccess: () => void;
+function findNodeById(nodes: WorkspaceTreeNode[], id: string): WorkspaceTreeNode | null {
+  for (const n of nodes) {
+    if (n.id === id) return n;
+    if (n.children.length) {
+      const found = findNodeById(n.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
 }
 
-function AddResourceMenu({ entityId, onSuccess }: AddResourceMenuProps) {
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
-  const [activeModal, setActiveModal] = useState<'file' | 'text' | 'url' | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+// ---------------------------------------------------------------------------
+// Upload button with drag-drop modal
+// ---------------------------------------------------------------------------
 
-  // Close menu when clicking outside
-  useEffect(() => {
-    function handleClickOutside(event: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
-        setIsMenuOpen(false);
-      }
-    }
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  const handleSuccess = () => {
-    setActiveModal(null);
-    setIsMenuOpen(false);
-    onSuccess();
-  };
+function UploadButton({ entityId, onSuccess }: { entityId: string; onSuccess: () => void }) {
+  const [showModal, setShowModal] = useState(false);
 
   return (
     <>
-      <div className="add-resource-menu" ref={menuRef}>
-        <button
-          className="upload-btn"
-          onClick={() => setIsMenuOpen(!isMenuOpen)}
-        >
-          + Add
-        </button>
-        
-        {isMenuOpen && (
-          <div className="resource-type-dropdown">
-            {RESOURCE_TYPES.map((type) => (
-              <button
-                key={type.id}
-                className="resource-type-option"
-                onClick={() => {
-                  setActiveModal(type.id);
-                  setIsMenuOpen(false);
-                }}
-              >
-                <span className="resource-type-label">{type.label}</span>
-                <span className="resource-type-desc">{type.description}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {activeModal === 'file' && (
+      <button className="upload-btn" onClick={() => setShowModal(true)}>+ Upload</button>
+      {showModal && (
         <FileUploadModal
           entityId={entityId}
-          onClose={() => setActiveModal(null)}
-          onSuccess={handleSuccess}
-        />
-      )}
-
-      {activeModal === 'text' && (
-        <AddTextModal
-          entityId={entityId}
-          onClose={() => setActiveModal(null)}
-          onSuccess={handleSuccess}
-        />
-      )}
-
-      {activeModal === 'url' && (
-        <AddUrlModal
-          entityId={entityId}
-          onClose={() => setActiveModal(null)}
-          onSuccess={handleSuccess}
+          onClose={() => setShowModal(false)}
+          onSuccess={() => { setShowModal(false); onSuccess(); }}
         />
       )}
     </>
   );
 }
 
-// File Upload Modal
-function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; onClose: () => void; onSuccess: () => void }) {
+function FileUploadModal({ entityId, onClose, onSuccess }: {
+  entityId: string; onClose: () => void; onSuccess: () => void;
+}) {
   const [files, setFiles] = useState<File[]>([]);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -301,54 +281,37 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
   const fileMergeKey = (f: File) => `${f.name}\0${f.size}\0${f.lastModified}`;
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setFiles(Array.from(e.target.files));
-    }
+    if (e.target.files) setFiles(Array.from(e.target.files));
   };
 
-  const removeFile = (index: number) => {
-    setFiles(files.filter((_, i) => i !== index));
-  };
+  const removeFile = (index: number) => setFiles(files.filter((_, i) => i !== index));
 
   const handleFileDragEnter = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     fileDropDepthRef.current += 1;
     setFileDragActive(true);
   };
-
   const handleFileDragLeave = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     fileDropDepthRef.current -= 1;
-    if (fileDropDepthRef.current <= 0) {
-      fileDropDepthRef.current = 0;
-      setFileDragActive(false);
-    }
+    if (fileDropDepthRef.current <= 0) { fileDropDepthRef.current = 0; setFileDragActive(false); }
   };
-
   const handleFileDragOver = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     e.dataTransfer.dropEffect = 'copy';
   };
-
   const handleFileDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
+    e.preventDefault(); e.stopPropagation();
     fileDropDepthRef.current = 0;
     setFileDragActive(false);
     const incoming = e.dataTransfer.files;
     if (!incoming?.length) return;
-    setFiles((prev) => {
+    setFiles(prev => {
       const seen = new Set(prev.map(fileMergeKey));
       const next = [...prev];
       for (const f of Array.from(incoming)) {
         const k = fileMergeKey(f);
-        if (!seen.has(k)) {
-          seen.add(k);
-          next.push(f);
-        }
+        if (!seen.has(k)) { seen.add(k); next.push(f); }
       }
       return next;
     });
@@ -356,23 +319,13 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
 
   const handleSubmit = async () => {
     if (files.length === 0) return;
-
     setIsUploading(true);
     try {
-      const formData = new FormData();
-      formData.append('entity_id', entityId);
-      files.forEach(file => formData.append('files', file));
-
-      const result = await api.ingest.resources(formData);
-
-      if (result.status === 'resolved') {
-        onSuccess();
-      } else if (result.status === 'resolution_required') {
-        await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
-        onSuccess();
-      } else {
-        showToast('Upload failed: ' + result.error, 'error');
+      for (const file of files) {
+        await api.workspace.uploadFile(entityId, `Inbox/${file.name}`, file);
       }
+      showToast(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`, 'success');
+      onSuccess();
     } catch (err) {
       showToast('Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
     } finally {
@@ -382,10 +335,10 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Upload Files</h3>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <button className="modal-close" onClick={onClose}>x</button>
         </div>
         <div className="modal-body">
           <div className="form-group">
@@ -398,9 +351,9 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
               onDrop={handleFileDrop}
             >
               <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} />
-              <div>📁 Click to select or drag and drop files</div>
+              <div>Click to select or drag and drop files</div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                PDF, images, text files
+                Files will be uploaded to Inbox/
               </div>
             </div>
             {files.length > 0 && (
@@ -408,7 +361,7 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
                 {files.map((file, index) => (
                   <div key={index} className="file-tag">
                     {file.name}
-                    <button type="button" onClick={() => removeFile(index)}>×</button>
+                    <button type="button" onClick={() => removeFile(index)}>x</button>
                   </div>
                 ))}
               </div>
@@ -426,1123 +379,283 @@ function FileUploadModal({ entityId, onClose, onSuccess }: { entityId: string; o
   );
 }
 
-// Add Text Modal
-function AddTextModal({ entityId, onClose, onSuccess }: { entityId: string; onClose: () => void; onSuccess: () => void }) {
-  const [content, setContent] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+// ---------------------------------------------------------------------------
+// Recursive tree node
+// ---------------------------------------------------------------------------
 
-  const handleSubmit = async () => {
-    if (!content.trim()) return;
-
-    setIsSubmitting(true);
-    try {
-      const formData = new FormData();
-      formData.append('entity_id', entityId);
-      formData.append('text', content);
-
-      const result = await api.ingest.resources(formData);
-
-      if (result.status === 'resolved') {
-        onSuccess();
-      } else if (result.status === 'resolution_required') {
-        await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
-        onSuccess();
-      } else {
-        showToast('Failed: ' + result.error, 'error');
-      }
-    } catch (err) {
-      showToast('Error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Add Text Note</h3>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-        <div className="modal-body">
-          <div className="form-group">
-            <label>Notes / Text *</label>
-            <textarea
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder="Enter your notes or text content..."
-              rows={10}
-              required
-            />
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose} disabled={isSubmitting}>Cancel</button>
-          <button 
-            className="btn-primary" 
-            onClick={handleSubmit} 
-            disabled={isSubmitting || !content.trim()}
-          >
-            {isSubmitting ? 'Adding...' : 'Add Note'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+interface TreeNodeProps {
+  node: WorkspaceTreeNode;
+  depth: number;
+  entityId: string;
+  selectedNodeIds: Set<string>;
+  onToggle: (id: string) => void;
+  onOpen: (node: WorkspaceTreeNode) => void;
+  onRefresh: () => void;
 }
 
-// Add URL Modal
-function AddUrlModal({ entityId, onClose, onSuccess }: { entityId: string; onClose: () => void; onSuccess: () => void }) {
-  const [urls, setUrls] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleSubmit = async () => {
-    const urlList = urls.split('\n').map(u => u.trim()).filter(Boolean);
-    if (urlList.length === 0) return;
-
-    setIsSubmitting(true);
-    try {
-      const formData = new FormData();
-      formData.append('entity_id', entityId);
-      formData.append('urls', JSON.stringify(urlList));
-
-      const result = await api.ingest.resources(formData);
-
-      if (result.status === 'resolved') {
-        onSuccess();
-      } else if (result.status === 'resolution_required') {
-        await api.parkingLot.resolve(result.ingest_id, { entity_id: entityId });
-        onSuccess();
-      } else {
-        showToast('Failed: ' + result.error, 'error');
-      }
-    } catch (err) {
-      showToast('Error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Add URLs</h3>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-        <div className="modal-body">
-          <div className="form-group">
-            <label>URLs (one per line) *</label>
-            <textarea
-              value={urls}
-              onChange={(e) => setUrls(e.target.value)}
-              placeholder="https://example.com&#10;https://another-link.com"
-              rows={6}
-              required
-            />
-          </div>
-        </div>
-        <div className="modal-footer">
-          <button className="btn-secondary" onClick={onClose} disabled={isSubmitting}>Cancel</button>
-          <button 
-            className="btn-primary" 
-            onClick={handleSubmit} 
-            disabled={isSubmitting || !urls.trim()}
-          >
-            {isSubmitting ? 'Adding...' : 'Add URLs'}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface CompactSelectableRowProps {
-  label: string;
-  meta: string;
-  logo: ReactNode;
-  checked: boolean;
-  onToggleChecked: () => void;
-  onOpen: () => void;
-  onRename: () => void;
-  onDownload: () => void;
-  onPreprocess?: () => void;
-  preprocessBusy?: boolean;
-  /** Show trailing icon when this row already has saved metadata (e.g. pre-process). */
-  hasFileMetadata?: boolean;
-  onDelete: () => void;
-}
-
-function CompactSelectableRow({
-  label,
-  meta,
-  logo,
-  checked,
-  onToggleChecked,
-  onOpen,
-  onRename,
-  onDownload,
-  onPreprocess,
-  preprocessBusy = false,
-  hasFileMetadata = false,
-  onDelete,
-}: CompactSelectableRowProps) {
+function TreeNode({ node, depth, entityId, selectedNodeIds, onToggle, onOpen, onRefresh }: TreeNodeProps) {
+  const [expanded, setExpanded] = useState(depth < 1);
   const [menuOpen, setMenuOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement | null>(null);
-  const [spinnerFrame, setSpinnerFrame] = useState(0);
+  const isFolder = node.node_type === 'folder';
+  const isFile = node.node_type === 'file' || node.node_type === 'bookmark';
 
   useEffect(() => {
     if (!menuOpen) return;
-    const onDocMouseDown = (event: MouseEvent) => {
-      if (!rowRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
+    const handler = (e: MouseEvent) => {
+      if (!rowRef.current?.contains(e.target as Node)) setMenuOpen(false);
     };
-    document.addEventListener('mousedown', onDocMouseDown);
-    return () => document.removeEventListener('mousedown', onDocMouseDown);
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, [menuOpen]);
 
-  useEffect(() => {
-    if (!preprocessBusy) return;
-    const id = window.setInterval(() => {
-      setSpinnerFrame((f) => (f + 1) % CLI_SPINNER_DOTS_FRAMES.length);
-    }, CLI_SPINNER_DOTS_INTERVAL_MS);
-    return () => window.clearInterval(id);
-  }, [preprocessBusy]);
-
-  return (
-    <div className="compact-row" onClick={onOpen} ref={rowRef}>
-      <div className="compact-row-left">
-        <div className="resource-icon compact-row-logo">{logo}</div>
-        <button
-          type="button"
-          className="compact-row-actions-trigger"
-          aria-label="Open item actions"
-          onClick={(e) => {
-            e.stopPropagation();
-            setMenuOpen((open) => !open);
-          }}
-        >
-          ⋮
-        </button>
-        {menuOpen && (
-          <div className="compact-row-actions-menu" onClick={(e) => e.stopPropagation()}>
-            <button type="button" onClick={() => { setMenuOpen(false); onRename(); }}>
-              Rename
-            </button>
-            <button type="button" onClick={() => { setMenuOpen(false); onDownload(); }}>
-              Download
-            </button>
-            {onPreprocess && (
-              <button
-                type="button"
-                disabled={preprocessBusy}
-                className={`compact-row-actions-menu-preprocess${preprocessBusy ? ' is-busy' : ''}`}
-                onClick={() => {
-                  if (preprocessBusy) return;
-                  void onPreprocess();
-                }}
-              >
-                {preprocessBusy ? (
-                  <>
-                    <span className="compact-row-preprocess-spinner" aria-hidden>
-                      {CLI_SPINNER_DOTS_FRAMES[spinnerFrame]}
-                    </span>
-                    <span className="compact-row-preprocess-busy-label">Processing…</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="compact-row-preprocess-label">Pre-process</span>
-                    {hasFileMetadata ? <PreprocessMetadataBadgeIcon /> : null}
-                  </>
-                )}
-              </button>
-            )}
-            <button
-              type="button"
-              className="compact-row-actions-menu-danger"
-              onClick={() => { setMenuOpen(false); onDelete(); }}
-            >
-              Delete
-            </button>
-          </div>
-        )}
-      </div>
-      <div className="resource-info compact-row-info">
-        <div className="resource-name">{label}</div>
-        <div className="resource-meta">{meta}</div>
-      </div>
-      <label
-        className="resource-chat-toggle"
-        title="Include in chat context"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <input
-          type="checkbox"
-          checked={checked}
-          onChange={onToggleChecked}
-        />
-      </label>
-    </div>
-  );
-}
-
-interface ResourcesZoneWithHeaderProps {
-  entityId: string;
-  resources?: Resource[];
-  isLoading: boolean;
-  onSuccess: () => void;
-  chatSelectedIds: Set<string>;
-  onToggleChatSelected: (id: string) => void;
-  onSetAllChatSelected: (ids: string[], checked: boolean) => void;
-}
-
-function ResourcesZoneWithHeader({
-  entityId,
-  resources,
-  isLoading,
-  onSuccess,
-  chatSelectedIds,
-  onToggleChatSelected,
-  onSetAllChatSelected,
-}: ResourcesZoneWithHeaderProps) {
-  const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
-  const [previewContent, setPreviewContent] = useState<string | null>(null);
-  const [previewType, setPreviewType] = useState<
-    'text' | 'image' | 'pdf' | 'html' | 'pptx' | 'unsupported' | null
-  >(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
-  const [pptxBuffer, setPptxBuffer] = useState<ArrayBuffer | null>(null);
-  const [pptxRenderLoading, setPptxRenderLoading] = useState(false);
-  const pptxHostRef = useRef<HTMLDivElement | null>(null);
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
-  const resourceIds = resources?.map((r) => r.id) ?? [];
-  const selectedCount = resourceIds.filter((id) => chatSelectedIds.has(id)).length;
-  const allSelected = resourceIds.length > 0 && selectedCount === resourceIds.length;
-  const partiallySelected = selectedCount > 0 && !allSelected;
-  const [preprocessBusyKey, setPreprocessBusyKey] = useState<string | null>(null);
-
-  const runResourcePreprocess = useCallback(
-    async (resourceId: string) => {
-      const key = `resource:${resourceId}`;
-      try {
-        const { job_id } = await api.entities.startMetadataPreprocess(entityId, {
-          target: 'resource',
-          id: resourceId,
-        });
-        setPreprocessBusyKey(key);
-        const result = await pollMetadataPreprocessJob(entityId, job_id);
-        if (result.outcome === 'timeout') {
-          showToast('Pre-process timed out. You can try again.', 'error');
-        } else if (result.outcome === 'failed' && result.status.error_message) {
-          showToast(`Pre-process failed: ${result.status.error_message}`, 'error');
-        } else if (result.outcome === 'succeeded') {
-          showToast('Metadata saved.', 'success');
-        }
-      } catch (e) {
-        showToast(
-          `Pre-process failed: ${e instanceof Error ? e.message : String(e)}`,
-          'error',
-        );
-      } finally {
-        setPreprocessBusyKey(null);
-        onSuccess();
-      }
-    },
-    [entityId, onSuccess],
-  );
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = partiallySelected;
-    }
-  }, [partiallySelected]);
-
-  useEffect(() => {
-    if (previewType !== 'pptx' || !pptxBuffer || !pptxHostRef.current) {
-      return;
-    }
-    const host = pptxHostRef.current;
-    host.innerHTML = '';
-    setPptxRenderLoading(true);
-    const previewer = initPptxPreview(host, {
-      width: 960,
-      height: 540,
-    });
-    let cancelled = false;
-    previewer
-      .preview(pptxBuffer)
-      .catch(() => {
-        if (!cancelled) {
-          setPreviewType('unsupported');
-          setPptxBuffer(null);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setPptxRenderLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-      previewer.destroy();
-      host.innerHTML = '';
-    };
-  }, [previewType, pptxBuffer]);
-
-  const handleResourceClick = async (resource: Resource) => {
-    if (resource.resource_type === 'url' && resource.url) {
-      window.open(resource.url, '_blank');
-      return;
-    }
-
-    setSelectedResource(resource);
-    setIsLoadingPreview(true);
-    setPreviewContent(null);
-    setPreviewType(null);
-    setPptxBuffer(null);
-    setPptxRenderLoading(false);
-
-    const filename = resource.original_filename || resource.title || '';
-    const mimeType = resolveEffectiveMime(resource.mime_type, filename);
-
-    try {
-      const response = await api.entities.viewResource(entityId, resource.id);
-
-      if (isImageType(mimeType, filename)) {
-        const blob = await response.blob();
-        const type =
-          blob.type && blob.type !== 'application/octet-stream'
-            ? blob.type
-            : mimeType.startsWith('image/')
-              ? mimeType
-              : 'image/png';
-        const typedBlob =
-          blob.type === type ? blob : new Blob([await blob.arrayBuffer()], { type });
-        const url = window.URL.createObjectURL(typedBlob);
-        setPreviewContent(url);
-        setPreviewType('image');
-      } else if (isTextLike(mimeType, filename)) {
-        const text = await response.text();
-        setPreviewContent(text);
-        setPreviewType('text');
-      } else if (isPdf(mimeType, filename)) {
-        const blob = await response.blob();
-        const objectUrl = window.URL.createObjectURL(blob);
-        setPreviewContent(withBuiltinPdfViewerOptions(objectUrl));
-        setPreviewType('pdf');
-      } else if (isXlsx(mimeType, filename)) {
-        const buf = await response.arrayBuffer();
-        try {
-          setPreviewContent(xlsxToPreviewHtml(buf));
-          setPreviewType('html');
-        } catch {
-          setPreviewType('unsupported');
-        }
-      } else if (isDocx(mimeType, filename)) {
-        const buf = await response.arrayBuffer();
-        try {
-          setPreviewContent(await docxToPreviewHtml(buf));
-          setPreviewType('html');
-        } catch {
-          setPreviewType('unsupported');
-        }
-      } else if (isPptx(mimeType, filename)) {
-        const buf = await response.arrayBuffer();
-        setPptxBuffer(buf);
-        setPreviewType('pptx');
-      } else {
-        setPreviewType('unsupported');
-      }
-    } catch {
-      setPreviewType('unsupported');
-    } finally {
-      setIsLoadingPreview(false);
-    }
+  const handleRename = () => {
+    const newName = window.prompt('Rename', node.name)?.trim();
+    if (!newName || newName === node.name) return;
+    void api.workspace.rename(entityId, node.path, newName)
+      .then(() => { showToast('Renamed', 'success'); onRefresh(); })
+      .catch(err => showToast(`Rename failed: ${err instanceof Error ? err.message : String(err)}`, 'error'));
   };
 
-  const handleBack = () => {
-    if (previewContent && (previewType === 'image' || previewType === 'pdf')) {
-      revokeBlobObjectUrl(previewContent);
-    }
-    setSelectedResource(null);
-    setPreviewContent(null);
-    setPreviewType(null);
-    setPptxBuffer(null);
-    setPptxRenderLoading(false);
+  const handleDelete = () => {
+    if (!window.confirm(`Delete "${node.name}"?`)) return;
+    void api.workspace.deleteNode(entityId, node.path)
+      .then(() => { showToast('Deleted', 'success'); onRefresh(); })
+      .catch(err => showToast(`Delete failed: ${err instanceof Error ? err.message : String(err)}`, 'error'));
   };
 
   const handleDownload = async () => {
-    if (!selectedResource) return;
     try {
-      const response = await api.entities.viewResource(entityId, selectedResource.id);
+      const response = await api.workspace.downloadFile(entityId, node.id);
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = selectedResource.original_filename || selectedResource.title;
+      a.download = node.name;
       document.body.appendChild(a);
       a.click();
       window.URL.revokeObjectURL(url);
       document.body.removeChild(a);
-    } catch (err) {
+    } catch {
       showToast('Download failed', 'error');
     }
   };
 
-  // Determine header content based on whether we're in preview mode
-  const isPreviewMode = selectedResource !== null;
-
-  return (
-    <div className="zone zone--sidebar">
-      <div className="zone-header">
-        {isPreviewMode ? (
-          // Preview header - shows back button, filename, and download
-          <>
-            <button className="back-btn" onClick={handleBack}>
-              ← Back to list
-            </button>
-            <div className="preview-title-header">{selectedResource.title}</div>
-            {(previewType === 'unsupported' ||
-              previewType === 'html' ||
-              previewType === 'pptx') && (
-              <button className="download-btn" onClick={handleDownload}>
-                ⬇ Download
-              </button>
-            )}
-          </>
-        ) : (
-          // List header - shows title and add button
-          <>
-            <h3>
-              Resources
-              <span className="zone-count">
-                ({resources?.length || 0})
-              </span>
-            </h3>
-            <AddResourceMenu entityId={entityId} onSuccess={onSuccess} />
-          </>
-        )}
-      </div>
-      
-      <div className="zone-content">
-        {isLoading ? (
-          <div className="empty-zone">Loading...</div>
-        ) : !resources || resources.length === 0 ? (
-          <div className="empty-zone">No resources yet</div>
-        ) : isPreviewMode ? (
-          // Preview content
-          <div className="resource-preview">
-            <div className="preview-content">
-              {isLoadingPreview ? (
-                <div className="preview-loading">Loading...</div>
-              ) : previewType === 'text' ? (
-                <pre className="preview-text">{previewContent}</pre>
-              ) : previewType === 'image' ? (
-                <img src={previewContent!} alt={selectedResource.title} className="preview-image" />
-              ) : previewType === 'pdf' ? (
-                <iframe 
-                  src={previewContent!} 
-                  title={selectedResource.title}
-                  className="preview-pdf"
-                />
-              ) : previewType === 'html' ? (
-                <div
-                  className="preview-html"
-                  dangerouslySetInnerHTML={{ __html: previewContent! }}
-                />
-              ) : previewType === 'pptx' ? (
-                <div className="preview-pptx-wrap">
-                  {pptxRenderLoading && (
-                    <div className="preview-loading preview-pptx-loading">Loading presentation…</div>
-                  )}
-                  <div ref={pptxHostRef} className="preview-pptx-host" />
-                </div>
-              ) : (
-                <div className="preview-unsupported">
-                  <p>Preview not available for this file type.</p>
-                  <button className="btn-primary" onClick={handleDownload}>
-                    Download File
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        ) : (
-          // List content
-          <div className="resource-list">
-            <div className="select-all-row">
-              <span className="select-all-label">Select all sources</span>
-              <label
-                className="resource-chat-toggle"
-                title="Select all sources"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  ref={selectAllRef}
-                  type="checkbox"
-                  checked={allSelected}
-                  onChange={(e) => onSetAllChatSelected(resourceIds, e.target.checked)}
-                />
-              </label>
-            </div>
-            {resources.map((resource) => {
-              const label =
-                resource.resource_type === 'url'
-                  ? (() => {
-                      try {
-                        return new URL(resource.url || '').hostname.replace(/^www\./, '');
-                      } catch {
-                        return resource.url || resource.title;
-                      }
-                    })()
-                  : resource.title;
-              const meta = `${resource.resource_type} • ${new Date(resource.created_at).toLocaleDateString()}`;
-              return (
-                <CompactSelectableRow
-                  key={resource.id}
-                  label={label}
-                  meta={meta}
-                  logo={renderResourceLogo(resource)}
-                  checked={chatSelectedIds.has(resource.id)}
-                  onToggleChecked={() => onToggleChatSelected(resource.id)}
-                  onOpen={() => void handleResourceClick(resource)}
-                  onRename={() => {
-                    const nextTitle = window.prompt('Rename resource', resource.title)?.trim();
-                    if (!nextTitle || nextTitle === resource.title) return;
-                    void api.entities
-                      .updateResource(entityId, resource.id, { title: nextTitle })
-                      .then(() => onSuccess())
-                      .catch((err) =>
-                        showToast(
-                          `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
-                          'error',
-                        ),
-                      );
-                  }}
-                  onDownload={() => {
-                    if (resource.resource_type === 'url' && resource.url) {
-                      window.open(resource.url, '_blank');
-                      return;
-                    }
-                    void api.entities
-                      .viewResource(entityId, resource.id)
-                      .then(async (response) => {
-                        const blob = await response.blob();
-                        const url = window.URL.createObjectURL(blob);
-                        const a = document.createElement('a');
-                        a.href = url;
-                        a.download = resource.original_filename || resource.title;
-                        document.body.appendChild(a);
-                        a.click();
-                        window.URL.revokeObjectURL(url);
-                        document.body.removeChild(a);
-                      })
-                      .catch(() => showToast('Download failed', 'error'));
-                  }}
-                  preprocessBusy={preprocessBusyKey === `resource:${resource.id}`}
-                  hasFileMetadata={rowHasFileMetadata(resource.metadata)}
-                  onPreprocess={() => void runResourcePreprocess(resource.id)}
-                  onDelete={() => {
-                    const ok = window.confirm(`Delete resource "${resource.title}"?`);
-                    if (!ok) return;
-                    void api.entities
-                      .deleteResource(entityId, resource.id)
-                      .then(() => onSuccess())
-                      .catch((err) =>
-                        showToast(
-                          `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
-                          'error',
-                        ),
-                      );
-                  }}
-                />
-              );
-            })}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ArtifactsZone({
-  entityId,
-  artifacts,
-  isLoading,
-  chatSelectedIds,
-  onToggleChatSelected,
-  onSetAllChatSelected,
-  onOpenArtifact,
-  onChanged,
-}: {
-  entityId: string;
-  artifacts?: Artifact[];
-  isLoading: boolean;
-  chatSelectedIds: Set<string>;
-  onToggleChatSelected: (id: string) => void;
-  onSetAllChatSelected: (ids: string[], checked: boolean) => void;
-  onOpenArtifact: (artifact: Artifact) => void;
-  onChanged: () => void;
-}) {
-  const selectAllRef = useRef<HTMLInputElement | null>(null);
-  const artifactIds = artifacts?.map((a) => a.id) ?? [];
-  const selectedCount = artifactIds.filter((id) => chatSelectedIds.has(id)).length;
-  const allSelected = artifactIds.length > 0 && selectedCount === artifactIds.length;
-  const partiallySelected = selectedCount > 0 && !allSelected;
-  const [preprocessBusyKey, setPreprocessBusyKey] = useState<string | null>(null);
-
-  const runArtifactPreprocess = useCallback(
-    async (artifactId: string) => {
-      const key = `artifact:${artifactId}`;
-      try {
-        const { job_id } = await api.entities.startMetadataPreprocess(entityId, {
-          target: 'artifact',
-          id: artifactId,
-        });
-        setPreprocessBusyKey(key);
-        const result = await pollMetadataPreprocessJob(entityId, job_id);
-        if (result.outcome === 'timeout') {
-          showToast('Pre-process timed out. You can try again.', 'error');
-        } else if (result.outcome === 'failed' && result.status.error_message) {
-          showToast(`Pre-process failed: ${result.status.error_message}`, 'error');
-        } else if (result.outcome === 'succeeded') {
-          showToast('Metadata saved.', 'success');
-        }
-      } catch (e) {
-        showToast(
-          `Pre-process failed: ${e instanceof Error ? e.message : String(e)}`,
-          'error',
-        );
-      } finally {
-        setPreprocessBusyKey(null);
-        onChanged();
-      }
-    },
-    [entityId, onChanged],
-  );
-
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = partiallySelected;
+  const handleClick = () => {
+    if (isFolder) {
+      setExpanded(e => !e);
+    } else {
+      onOpen(node);
     }
-  }, [partiallySelected]);
-
-  if (isLoading) {
-    return <div className="empty-zone">Loading...</div>;
-  }
-
-  if (!artifacts || artifacts.length === 0) {
-    return <div className="empty-zone">No artifacts yet</div>;
-  }
+  };
 
   return (
     <>
-      <div className="artifact-list">
-        <div className="select-all-row">
-          <span className="select-all-label">Select all artifacts</span>
-          <label
-            className="resource-chat-toggle"
-            title="Select all artifacts"
-            onClick={(e) => e.stopPropagation()}
+      <div
+        className="compact-row"
+        ref={rowRef}
+        onClick={handleClick}
+        style={{ paddingLeft: `${8 + depth * 16}px` }}
+      >
+        <div className="compact-row-left">
+          <div className="resource-icon compact-row-logo">
+            {isFolder ? (
+              <span style={{ fontSize: 14, cursor: 'pointer' }}>
+                {expanded ? '▾' : '▸'}
+              </span>
+            ) : (
+              <NodeIcon node={node} />
+            )}
+          </div>
+          <button
+            type="button"
+            className="compact-row-actions-trigger"
+            aria-label="Actions"
+            onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
           >
+            &#x22EE;
+          </button>
+          {menuOpen && (
+            <div className="compact-row-actions-menu" onClick={e => e.stopPropagation()}>
+              <button type="button" onClick={() => { setMenuOpen(false); handleRename(); }}>Rename</button>
+              {isFile && (
+                <button type="button" onClick={() => { setMenuOpen(false); void handleDownload(); }}>Download</button>
+              )}
+              <button
+                type="button"
+                className="compact-row-actions-menu-danger"
+                onClick={() => { setMenuOpen(false); handleDelete(); }}
+              >
+                Delete
+              </button>
+            </div>
+          )}
+        </div>
+        <div className="resource-info compact-row-info">
+          <div className="resource-name">{node.name}</div>
+          <div className="resource-meta">
+            {node.description
+              ? node.description
+              : isFile
+                ? formatBytes(node.size_bytes)
+                : `${node.children.length} item${node.children.length !== 1 ? 's' : ''}`}
+          </div>
+        </div>
+        {isFile && (
+          <label className="resource-chat-toggle" title="Include in chat context" onClick={e => e.stopPropagation()}>
             <input
-              ref={selectAllRef}
               type="checkbox"
-              checked={allSelected}
-              onChange={(e) => onSetAllChatSelected(artifactIds, e.target.checked)}
+              checked={selectedNodeIds.has(node.id)}
+              onChange={() => onToggle(node.id)}
             />
           </label>
-        </div>
-        {artifacts.map((artifact) => (
-          <CompactSelectableRow
-            key={artifact.id}
-            label={artifactDisplayLabel(artifact)}
-            meta={`${artifact.status} • ${new Date(artifact.created_at).toLocaleDateString()}`}
-            logo={<span className="artifact-row-icon">📝</span>}
-            checked={chatSelectedIds.has(artifact.id)}
-            onToggleChecked={() => onToggleChatSelected(artifact.id)}
-            onOpen={() => onOpenArtifact(artifact)}
-            onRename={() => {
-              const currentTitle = artifact.title || '';
-              const nextTitle = window.prompt('Rename artifact', currentTitle)?.trim();
-              if (nextTitle == null || nextTitle === currentTitle) return;
-              void api.entities
-                .updateArtifact(entityId, artifact.id, { title: nextTitle || '' })
-                .then(() => onChanged())
-                .catch((err) =>
-                  showToast(
-                    `Rename failed: ${err instanceof Error ? err.message : String(err)}`,
-                    'error',
-                  ),
-                );
-            }}
-            onDownload={() => {
-              void api.entities
-                .viewArtifact(entityId, artifact.id)
-                .then(async (response) => {
-                  const blob = new Blob([response.content ?? ''], { type: 'text/markdown;charset=utf-8' });
-                  const url = window.URL.createObjectURL(blob);
-                  const a = document.createElement('a');
-                  a.href = url;
-                  a.download = `${artifact.title || artifact.artifact_type}-v${artifact.version}.md`;
-                  document.body.appendChild(a);
-                  a.click();
-                  window.URL.revokeObjectURL(url);
-                  document.body.removeChild(a);
-                })
-                .catch(() => showToast('Download failed', 'error'));
-            }}
-            preprocessBusy={preprocessBusyKey === `artifact:${artifact.id}`}
-            hasFileMetadata={rowHasFileMetadata(artifact.metadata)}
-            onPreprocess={() => void runArtifactPreprocess(artifact.id)}
-            onDelete={() => {
-              const ok = window.confirm(`Delete artifact "${artifactDisplayLabel(artifact)}"?`);
-              if (!ok) return;
-              void api.entities
-                .deleteArtifact(entityId, artifact.id)
-                .then(() => onChanged())
-                .catch((err) =>
-                  showToast(
-                    `Delete failed: ${err instanceof Error ? err.message : String(err)}`,
-                    'error',
-                  ),
-                );
-            }}
-          />
-        ))}
+        )}
       </div>
+      {isFolder && expanded && node.children.map(child => (
+        <TreeNode
+          key={child.id}
+          node={child}
+          depth={depth + 1}
+          entityId={entityId}
+          selectedNodeIds={selectedNodeIds}
+          onToggle={onToggle}
+          onOpen={onOpen}
+          onRefresh={onRefresh}
+        />
+      ))}
     </>
   );
 }
 
-function ArtifactViewerModal({
-  artifact,
-  entityId,
-  onClose,
-  onSaved,
-}: {
-  artifact: Artifact;
-  entityId: string;
-  onClose: () => void;
-  onSaved?: () => void;
-}) {
+// ---------------------------------------------------------------------------
+// File preview panel (replaces ArtifactViewerModal + resource preview)
+// ---------------------------------------------------------------------------
+
+function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTreeNode }) {
   const [content, setContent] = useState<string | null>(null);
+  const [previewType, setPreviewType] = useState<
+    'text' | 'image' | 'pdf' | 'html' | 'pptx' | 'unsupported' | null
+  >(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [jsonDraft, setJsonDraft] = useState<unknown | null>(null);
-  const [jsonBaseline, setJsonBaseline] = useState<string | null>(null);
-  const [rawJsonText, setRawJsonText] = useState('');
-  const [showRawJson, setShowRawJson] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [pptxBuffer, setPptxBuffer] = useState<ArrayBuffer | null>(null);
+  const [pptxRenderLoading, setPptxRenderLoading] = useState(false);
+  const pptxHostRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
-    setJsonDraft(null);
-    setJsonBaseline(null);
-    setSaveError(null);
-    setShowRawJson(false);
+    setContent(null);
+    setPreviewType(null);
+    setPptxBuffer(null);
+
+    const mime = resolveEffectiveMime(node.mime_type || '', node.name);
+
     (async () => {
       try {
-        const response = await fetch(`/api/entities/${entityId}/artifacts/${artifact.id}/view`);
-        const data: ArtifactView = await response.json();
+        const response = await api.workspace.downloadFile(entityId, node.id);
         if (cancelled) return;
-        setContent(data.content);
-        const raw = data.content;
-        if (tryFormatArtifactJson(raw) !== null) {
-          try {
-            const parsed = JSON.parse(raw.trim()) as unknown;
-            setJsonDraft(parsed);
-            const stable = JSON.stringify(parsed);
-            setJsonBaseline(stable);
-            setRawJsonText(JSON.stringify(parsed, null, 2));
-          } catch {
-            setJsonDraft(null);
-            setJsonBaseline(null);
-            setRawJsonText('');
-          }
+
+        if (isImageType(mime, node.name)) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          setContent(url);
+          setPreviewType('image');
+        } else if (isTextLike(mime, node.name)) {
+          const text = await response.text();
+          setContent(text);
+          setPreviewType('text');
+        } else if (isPdf(mime, node.name)) {
+          const blob = await response.blob();
+          const url = window.URL.createObjectURL(blob);
+          setContent(withBuiltinPdfViewerOptions(url));
+          setPreviewType('pdf');
+        } else if (isXlsx(mime, node.name)) {
+          const buf = await response.arrayBuffer();
+          try { setContent(xlsxToPreviewHtml(buf)); setPreviewType('html'); }
+          catch { setPreviewType('unsupported'); }
+        } else if (isDocx(mime, node.name)) {
+          const buf = await response.arrayBuffer();
+          try { setContent(await docxToPreviewHtml(buf)); setPreviewType('html'); }
+          catch { setPreviewType('unsupported'); }
+        } else if (isPptx(mime, node.name)) {
+          const buf = await response.arrayBuffer();
+          setPptxBuffer(buf);
+          setPreviewType('pptx');
         } else {
-          setJsonDraft(null);
-          setJsonBaseline(null);
-          setRawJsonText('');
+          setPreviewType('unsupported');
         }
       } catch {
-        if (!cancelled) setContent('Error loading content');
+        if (!cancelled) setPreviewType('unsupported');
       } finally {
         if (!cancelled) setIsLoading(false);
       }
     })();
+
     return () => {
       cancelled = true;
-    };
-  }, [artifact.id, entityId]);
-
-  const isJsonArtifact = jsonDraft !== null && jsonBaseline !== null;
-
-  const rawJsonCanonical = (): string | null => {
-    try {
-      return JSON.stringify(JSON.parse(rawJsonText));
-    } catch {
-      return null;
-    }
-  };
-
-  const dirty = (() => {
-    if (!isJsonArtifact || jsonBaseline === null) return false;
-    if (showRawJson) {
-      const c = rawJsonCanonical();
-      if (c === null) return true;
-      return c !== jsonBaseline;
-    }
-    return JSON.stringify(jsonDraft) !== jsonBaseline;
-  })();
-
-  const rawJsonInvalidMessage = (): string | null => {
-    if (!showRawJson) return null;
-    try {
-      JSON.parse(rawJsonText);
-      return null;
-    } catch (e) {
-      return e instanceof Error ? e.message : 'Invalid JSON';
-    }
-  };
-
-  const handleSaveJson = async () => {
-    if (!isJsonArtifact || jsonBaseline === null) return;
-    setSaveError(null);
-
-    let payload: unknown;
-    if (showRawJson) {
-      try {
-        payload = JSON.parse(rawJsonText);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : 'Parse error';
-        setSaveError(`Invalid JSON — fix syntax before saving. (${msg})`);
-        return;
+      if (content && (previewType === 'image' || previewType === 'pdf')) {
+        revokeBlobObjectUrl(content);
       }
-    } else {
-      if (jsonDraft === null) return;
-      payload = jsonDraft;
-    }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityId, node.id]);
 
-    setSaving(true);
+  // Render pptx when buffer is ready
+  useEffect(() => {
+    if (previewType !== 'pptx' || !pptxBuffer || !pptxHostRef.current) return;
+    const host = pptxHostRef.current;
+    host.innerHTML = '';
+    setPptxRenderLoading(true);
+    const previewer = initPptxPreview(host, { width: 960, height: 540 });
+    let cancelled = false;
+    previewer.preview(pptxBuffer)
+      .catch(() => { if (!cancelled) { setPreviewType('unsupported'); setPptxBuffer(null); } })
+      .finally(() => { if (!cancelled) setPptxRenderLoading(false); });
+    return () => { cancelled = true; previewer.destroy(); host.innerHTML = ''; };
+  }, [previewType, pptxBuffer]);
+
+  const handleDownload = async () => {
     try {
-      await api.entities.updateArtifactContent(entityId, artifact.id, payload);
-      const stable = JSON.stringify(payload);
-      setJsonBaseline(stable);
-      setJsonDraft(payload);
-      setRawJsonText(JSON.stringify(payload, null, 2));
-      onSaved?.();
-    } catch (e) {
-      setSaveError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
+      const response = await api.workspace.downloadFile(entityId, node.id);
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = node.name;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch {
+      showToast('Download failed', 'error');
     }
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div
-        className={
-          `modal viewer-modal artifact-viewer-modal${isJsonArtifact ? ' artifact-viewer-modal--json' : ''}`
-        }
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h3>{artifactDisplayLabel(artifact)}</h3>
-          <button type="button" className="modal-close" onClick={onClose}>×</button>
-        </div>
-        <div className="modal-body viewer-body">
-          {isLoading ? (
-            <div className="loading">Loading...</div>
-          ) : content !== null ? (
-            isJsonArtifact ? (
-              <div className="artifact-json-editor-shell">
-                <div className="artifact-viewer-json-toolbar">
-                  <div className="segmented-toggle" role="tablist" aria-label="View mode">
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={!showRawJson}
-                      className={!showRawJson ? 'active' : ''}
-                      onClick={() => {
-                        if (!showRawJson) return;
-                        try {
-                          const p = JSON.parse(rawJsonText) as unknown;
-                          setJsonDraft(p);
-                          setShowRawJson(false);
-                          setSaveError(null);
-                        } catch (e) {
-                          const msg = e instanceof Error ? e.message : 'Parse error';
-                          setSaveError(`Invalid JSON — cannot switch to Form. (${msg})`);
-                        }
-                      }}
-                    >
-                      Form
-                    </button>
-                    <button
-                      type="button"
-                      role="tab"
-                      aria-selected={showRawJson}
-                      className={showRawJson ? 'active' : ''}
-                      onClick={() => {
-                        setRawJsonText(JSON.stringify(jsonDraft, null, 2));
-                        setSaveError(null);
-                        setShowRawJson(true);
-                      }}
-                    >
-                      Raw JSON
-                    </button>
-                  </div>
-                  {dirty && <span className="artifact-viewer-dirty">Unsaved changes</span>}
-                  {showRawJson && rawJsonInvalidMessage() && (
-                    <span className="artifact-viewer-json-invalid" role="status">
-                      Invalid JSON
-                    </span>
-                  )}
-                </div>
-                {saveError && (
-                  <div className="entity-conversation-error artifact-viewer-save-error">{saveError}</div>
-                )}
-                {showRawJson ? (
-                  <textarea
-                    className="artifact-json-textarea"
-                    value={rawJsonText}
-                    onChange={(e) => setRawJsonText(e.target.value)}
-                    spellCheck={false}
-                    autoComplete="off"
-                    aria-label="Raw JSON"
-                  />
-                ) : (
-                  <div className="artifact-json-form-shell">
-                    <JsonArtifactFormEditor
-                      value={jsonDraft}
-                      onChange={setJsonDraft}
-                    />
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="markdown-viewer">
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  components={{
-                    a: ({ href, children, ...props }) => (
-                      <a
-                        href={href}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        {...props}
-                      >
-                        {children}
-                      </a>
-                    ),
-                  }}
-                >
-                  {content}
-                </ReactMarkdown>
-              </div>
-            )
-          ) : null}
-        </div>
-        {isJsonArtifact && (
-          <div className="modal-footer artifact-viewer-footer">
-            <button type="button" className="btn-secondary" onClick={onClose}>
-              Close
-            </button>
-            <button
-              type="button"
-              className="btn-primary"
-              onClick={() => void handleSaveJson()}
-              disabled={
-                saving ||
-                !dirty ||
-                (showRawJson && rawJsonInvalidMessage() !== null)
-              }
-            >
-              {saving ? 'Saving…' : 'Save changes'}
-            </button>
+    <div className="resource-preview">
+      <div className="preview-content">
+        {isLoading ? (
+          <div className="preview-loading">Loading...</div>
+        ) : previewType === 'text' ? (
+          <pre className="preview-text">{content}</pre>
+        ) : previewType === 'image' ? (
+          <img src={content!} alt={node.name} className="preview-image" />
+        ) : previewType === 'pdf' ? (
+          <iframe src={content!} title={node.name} className="preview-pdf" />
+        ) : previewType === 'html' ? (
+          <div className="preview-html" dangerouslySetInnerHTML={{ __html: content! }} />
+        ) : previewType === 'pptx' ? (
+          <div className="preview-pptx-wrap">
+            {pptxRenderLoading && <div className="preview-loading preview-pptx-loading">Loading presentation...</div>}
+            <div ref={pptxHostRef} className="preview-pptx-host" />
+          </div>
+        ) : (
+          <div className="preview-unsupported">
+            <p>Preview not available for this file type.</p>
+            <button className="btn-primary" onClick={() => void handleDownload()}>Download File</button>
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-type ResourceLogoKind =
-  | 'pdf'
-  | 'docx'
-  | 'xlsx'
-  | 'pptx'
-  | 'image'
-  | 'video'
-  | 'audio'
-  | 'zip'
-  | 'url'
-  | 'text'
-  | 'file';
-
-function getResourceLogoKind(resource: Resource): ResourceLogoKind {
-  if (resource.resource_type === 'url') return 'url';
-  if (resource.resource_type === 'text') return 'text';
-  if (resource.resource_type !== 'file') return 'file';
-
-  const filename = resource.original_filename || resource.title || '';
-  const mimeType = resolveEffectiveMime(resource.mime_type, filename).toLowerCase();
-
-  if (isPdf(mimeType, filename)) return 'pdf';
-  if (isDocx(mimeType, filename)) return 'docx';
-  if (isXlsx(mimeType, filename)) return 'xlsx';
-  if (isPptx(mimeType, filename)) return 'pptx';
-  if (isImageType(mimeType, filename)) return 'image';
-  if (mimeType.startsWith('video/')) return 'video';
-  if (mimeType.startsWith('audio/')) return 'audio';
-  if (mimeType.includes('zip') || mimeType.includes('compressed')) return 'zip';
-  return 'file';
-}
-
-function renderResourceLogo(resource: Resource) {
-  const kind = getResourceLogoKind(resource);
-
-  const palette: Record<ResourceLogoKind, { bg: string; fg: string; label: string }> = {
-    pdf: { bg: '#B42318', fg: '#FFFFFF', label: 'PDF' },
-    docx: { bg: '#185ABD', fg: '#FFFFFF', label: 'DOC' },
-    xlsx: { bg: '#107C41', fg: '#FFFFFF', label: 'XLS' },
-    pptx: { bg: '#C43E1C', fg: '#FFFFFF', label: 'PPT' },
-    image: { bg: '#7A5AF8', fg: '#FFFFFF', label: 'IMG' },
-    video: { bg: '#0E7490', fg: '#FFFFFF', label: 'VID' },
-    audio: { bg: '#7C3AED', fg: '#FFFFFF', label: 'AUD' },
-    zip: { bg: '#475467', fg: '#FFFFFF', label: 'ZIP' },
-    url: { bg: '#175CD3', fg: '#FFFFFF', label: 'WEB' },
-    text: { bg: '#344054', fg: '#FFFFFF', label: 'TXT' },
-    file: { bg: '#667085', fg: '#FFFFFF', label: 'FILE' },
-  };
-
-  const { bg, fg, label } = palette[kind];
-
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="resource-file-logo"
-      role="img"
-      aria-label={`${label} file`}
-    >
-      <rect x="3" y="2" width="18" height="20" rx="4" fill="#FFFFFF" stroke="#D0D5DD" />
-      <path d="M15 2v6h6" fill="#F2F4F7" />
-      <rect x="5.5" y="11.5" width="13" height="7.5" rx="1.5" fill={bg} />
-      <text
-        x="12"
-        y="16.7"
-        textAnchor="middle"
-        fontSize="4"
-        fontWeight="700"
-        fill={fg}
-        fontFamily="Inter, Segoe UI, Arial, sans-serif"
-        letterSpacing="0.2"
-      >
-        {label}
-      </text>
-    </svg>
   );
 }

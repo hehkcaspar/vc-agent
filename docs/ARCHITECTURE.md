@@ -6,7 +6,7 @@ For documentation map, see `README.md`.
 
 ## Overview
 
-The VC Portfolio Manager follows an **Entity-Canonical, Parking-Lot Ingestion** architecture designed for reliability and future extensibility.
+The VC Portfolio Manager follows an **Entity-Canonical, Parking-Lot Ingestion** architecture designed for reliability and future extensibility. Each entity has a unified **hierarchical workspace** (replacing the old dual Resource/Artifact model) where all files live in a single tree with folder structure, versioning, and provenance tracking.
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -26,13 +26,16 @@ The VC Portfolio Manager follows an **Entity-Canonical, Parking-Lot Ingestion** 
 Every inbound submission is persisted to the Parking Lot immediately before any processing.
 
 ### 2. Downstream Simplicity
-All normal portfolio/resource APIs operate only on **canonical** records (never missing entity_id).
+All normal portfolio/workspace APIs operate only on **canonical** records (never missing entity_id).
 
 ### 3. Resolver Isolation
 All entity-matching complexity lives behind `EntityResolver`; other modules never implement matching logic.
 
 ### 4. Storage Abstraction
 Business logic uses a `StorageAdapter` interface so local FS can be swapped for cloud storage later.
+
+### 5. Unified Workspace
+Each entity has one hierarchical workspace tree. No separate "resources" and "artifacts" — everything is a file or folder in the tree. Provenance metadata distinguishes uploads from agent-created deliverables.
 
 ## Backend Architecture
 
@@ -42,7 +45,7 @@ Business logic uses a `StorageAdapter` interface so local FS can be swapped for 
 ┌─────────────────────────────────────────────────────────────┐
 │                        API Routers                           │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌────────────┐  │
-│  │ /ingest  │  │/entities │  │/parking  │  │ /artifacts │  │
+│  │ /ingest  │  │/entities │  │/parking  │  │ /workspace │  │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └─────┬──────┘  │
 └───────┼─────────────┼─────────────┼──────────────┼─────────┘
         │             │             │              │
@@ -55,11 +58,16 @@ Business logic uses a `StorageAdapter` interface so local FS can be swapped for 
 │  │ - list_items     │  │                  │                │
 │  └──────────────────┘  └──────────────────┘                │
 │  ┌──────────────────┐  ┌──────────────────┐                │
-│  │ResourceMaterializer│ │  StorageAdapter  │                │
+│  │WorkspaceMaterializer│ │ WorkspaceService │                │
 │  │ - materialize()  │  │ - write_file()   │                │
-│  │                  │  │ - copy_file()    │                │
-│  └──────────────────┘  │ - delete_recursive│                │
-│                        └──────────────────┘                │
+│  │ (→ Inbox/)       │  │ - move/rename()  │                │
+│  └──────────────────┘  │ - get_tree()     │                │
+│  ┌──────────────────┐  │ - annotate()     │                │
+│  │  StorageAdapter  │  │ - versioning     │                │
+│  │ - write_file()   │  └──────────────────┘                │
+│  │ - copy_file()    │                                      │
+│  │ - delete_recursive│                                      │
+│  └──────────────────┘                                      │
 └─────────────────────────────────────────────────────────────┘
         │
         ▼
@@ -90,11 +98,20 @@ Business logic uses a `StorageAdapter` interface so local FS can be swapped for 
     - Multiple/no match → resolution_required
   - No hints → resolution_required
 
-#### ResourceMaterializer
-- Converts `IngestItem` to canonical Resources
+#### WorkspaceMaterializer
+- Converts `IngestItem` into `WorkspaceNode` entries under the entity's **Inbox/** folder
 - Follows safety rule: **Copy → Verify → Write DB → Delete parking**
-- Creates entity folder structure
+- Creates workspace node records with `origin_type="ingest"`
 - Marks ingest item as `materialized`
+
+#### WorkspaceService
+- Manages the hierarchical workspace tree per entity
+- Operations: create folder, write file, move, rename, annotate, delete (soft), version history, restore
+- Scaffolds new workspaces with a default folder template (`Inbox`, `Data Room`, `Technical`, `Deliverables`, etc.)
+- Creates a shared `WORKSPACE_NOTES.md` file for cross-file context
+- Enforces provenance-based write protection (see below)
+- Content-addressed blob storage with path-independent keys
+- Moves and renames are DB-only operations (no file system changes)
 
 #### StorageAdapter (Abstract)
 ```python
@@ -108,30 +125,61 @@ class StorageAdapter(ABC):
     async def exists(self, relative_path: str) -> bool
 ```
 
-#### Resource and artifact `metadata_json` (plus async pre-process)
+#### Workspace provenance enforcement
 
-- **`resources.metadata_json`** and **`artifacts.metadata_json`** store one JSON object as SQLite **TEXT** (nullable). Migrations / `create_all` add the column on older DBs (`database.py`).
-- **API surface:** Responses use a parsed **`metadata`** field (`dict` or `null`). Invalid or non-object JSON in the DB is exposed as `null` (`schemas.metadata_json_to_dict`).
-- **Row pre-process:** `POST /entities/{id}/metadata-preprocess` enqueues a FastAPI **`BackgroundTasks`** job registered in **`metadata_preprocess_jobs.py`** (in-memory **`_jobs` / `_inflight`**). Successful runs **merge** into existing JSON:
-  - **`native_file_metadata`** — size/MIME-oriented hints from **`native_file_metadata.py`**
-  - **`gemini_preprocessed`** — Gemini JSON output for a single attached file, using **`file_lookup_preprocess.md`** (via **`preset_registry.load_file_lookup_preprocess_instruction`**), tolerant parsing **`json_loose.parse_json_loose`**, normalization **`file_lookup_normalize.normalize_file_lookup_result`**, model id from **`GEMINI_METADATA_EXTRACTION_MODEL`** (fallback `generate_json_with_context` wiring in **`metadata_preprocess_jobs`**).
-- **Caveats (MVP):** No SQL-backed job table — status is **lost on API restart**; scaling to multiple workers would need a shared queue. Idempotency: starting pre-process for the same entity + resource/artifact while **pending/running** returns the existing **`job_id`**.
-- **Preset `extract_info`:** Separate path — **`metadata_extraction.py`** + **`extract_info.md`** produce VC-shaped JSON artifacts; not the same as file-lookup pre-process (though both may share **`GEMINI_METADATA_EXTRACTION_MODEL`**).
-- **Deep Agent:** **`artifact_editing.resolve_snapshot`** includes **`metadata`** for resolved artifact rows so tool payloads stay JSON-safe.
+Every `WorkspaceNode` has an `origin_type` field (`upload`, `agent`, `ingest`, `shared`, `user`) that records how the file entered the workspace. The write-protection rule is:
+
+- **Agents cannot overwrite or delete user-uploaded files** (`origin_type="upload"` or `"ingest"`). If an agent tool attempts to write to an upload path, `WorkspaceService` raises `ProtectedFileError` with guidance to create a derivative file instead (e.g., `Data Room/pitch-deck.pdf` → `Deliverables/pitch-deck-analysis.md`).
+- **Shared files** (e.g., `WORKSPACE_NOTES.md`, `origin_type="shared"`) are writable by agents.
+- **Agent-created files** (`origin_type="agent"`) are freely editable by agents; old content is auto-versioned on overwrite.
+
+This prevents agents from accidentally destroying original materials while allowing full creative freedom in the `Deliverables/` subtree and elsewhere.
+
+#### 3-layer agent context
+
+The Deep Agent system prompt is assembled from three layers so the agent understands the workspace without needing to browse on every turn:
+
+1. **Auto-generated tree** — `WorkspaceService.build_annotated_tree_text()` renders the full workspace tree as indented text (folders, files, sizes). Injected into the system prompt so the agent can reference file paths immediately.
+2. **Node descriptions** — Each file/folder can have a one-line description (set via `workspace_annotate`). These appear inline in the tree text, giving the agent semantic context about what each file contains.
+3. **WORKSPACE_NOTES.md** — A shared markdown file for cross-file context, data quality issues, and information gaps. Appended to the tree context under a `--- Workspace Notes ---` separator. The agent is instructed to update this file after learning non-obvious context.
+
+#### Workspace node metadata and async pre-process
+
+- **`workspace_nodes.metadata_json`** stores one JSON object as SQLite **TEXT** (nullable). Contains descriptions, native file metadata, and Gemini-preprocessed summaries.
+- **API surface:** Responses use a parsed **`metadata`** field (`dict` or `null`).
+- **Row pre-process:** `POST /entities/{id}/metadata-preprocess` enqueues a background job for metadata extraction. Successful runs **merge** into existing JSON:
+  - **`native_file_metadata`** — size/MIME-oriented hints
+  - **`gemini_preprocessed`** — Gemini JSON output for a single attached file
+- **Caveats (MVP):** No SQL-backed job table — status is **lost on API restart**. Idempotency: starting pre-process for the same entity + node while **pending/running** returns the existing **`job_id`**.
 
 #### Portfolio chat (one-shot + optional Deep Agent)
 
-- **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings (`schemas.ChatMessageCreate`).
-- **One-shot path:** synchronous model call (`generate_with_context`); response **`200`** with `ChatMessageResult` (no tools; no artifact writes from chat in this path).
-- **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → `portfolio_deep_agent.on_status`). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages.
-- **Presets follow the same mode switch:** `PresetRunRequest.use_deep_agent` (falling back to `CHAT_USE_DEEP_AGENT`). The UI sends Agent On/Off into preset runs. For `extract_info`, the preset prioritizes attached materials and avoids prior session history contamination.
-- **Tools** (`portfolio_deep_agent.build_portfolio_tools`): list/read artifacts and resources; resolve artifact target; validate / **`portfolio_apply_artifact_edit`** (Option B); **`portfolio_create_artifact`** for new lineage (markdown / JSON / text). Optional **`resource_ids` / `artifact_ids`** seed the turn and populate **`session_artifact_ids`** hints for edit resolution.
-- **Create vs edit (guardrail):** When **`CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY=create_new`** (default), user turns that heuristically sound like “save / take a note / 记下来 …” **without** an artifact selected for that turn cannot call **`portfolio_apply_artifact_edit`** alone; the tool returns `create_intent_requires_create_tool` so the model should use **`portfolio_create_artifact`**. Explicit update wording or a selected artifact clears the block. See `portfolio_deep_agent._looks_like_create_intent` / `_looks_like_explicit_edit_intent` (covered by `tests/test_natural_artifact_intent.py` when `data/vc_portfolio.db` exists).
-- **Option B edits:** `artifact_editing.py` (resolve → validate → apply); audit **`artifact_edit_events`**; versioning vs overwrite via `CHAT_ARTIFACT_*` settings.
+- **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings.
+- **One-shot path:** synchronous model call (`generate_with_context`); response **`200`** with `ChatMessageResult` (no tools; no file writes from chat in this path).
+- **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → status callback). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages.
+- **Presets follow the same mode switch:** `PresetRunRequest.use_deep_agent` (falling back to `CHAT_USE_DEEP_AGENT`). The UI sends Agent On/Off into preset runs.
+- **Tools** (`workspace_tools.build_workspace_tools`): 13 workspace tools:
+
+| Tool | Purpose |
+|------|---------|
+| `workspace_get_tree` | Browse the workspace tree structure |
+| `workspace_list_files` | List files and folders at a specific path |
+| `workspace_read_file` | Read text content of a file (with PDF/Office extraction) |
+| `workspace_search_files` | Search for files by name and path |
+| `workspace_create_folder` | Create a folder (with parent auto-creation) |
+| `workspace_move` | Move a file or folder to a new location |
+| `workspace_rename` | Rename a file or folder in place |
+| `workspace_write_file` | Write or overwrite a file (auto-versions old content) |
+| `workspace_annotate` | Set a description on a file or folder |
+| `workspace_delete` | Soft-delete a file or folder |
+| `workspace_file_versions` | List version history for a file |
+| `workspace_restore_version` | Revert a file to a previous version |
+| `workspace_history` | View recent workspace operations |
+
+- **Write zones (guardrail):** Agent tools enforce provenance-based write protection. User uploads are read-only to agents; agents create derivative files instead. See "Workspace provenance enforcement" above.
 - **Profiles:** `model_profiles.py` — `gemini_google`, `kimi_moonshot`. **`CHAT_DEFAULT_MODEL_PROFILE`** when `model_profile_id` omitted.
 - **Attachment materialization:** `gemini_context.py` + `deep_agent_office_extractors.py`. PDFs and Office formats become text for preamble / one-shot; multimodal parts where the profile supports it.
-- **Frontend:** `EntityDetail` passes **`onArtifactsChanged`** (`mutate` from `useEntityArtifacts`) into `EntityConversation`. After a **successful** deep-agent job, the chat panel calls **`onArtifactsChanged()`** so new or updated artifacts appear without a full page reload (presets already called this after `runPreset`).
-- **Storage:** `artifact_service` + `app.services.storage.storage`.
+- **Frontend:** `EntityDetail` passes workspace mutation callbacks into `EntityConversation`. After a **successful** deep-agent job, the chat panel triggers workspace revalidation so new or updated files appear without a full page reload.
 
 ## Data Flow
 
@@ -167,16 +215,19 @@ User Upload
          │                                  │
          └──────────────┬───────────────────┘
                         ▼
-              ┌─────────────────┐
-              │  Materializer   │
-              │  - Copy files   │
-              │  - Write DB     │
-              │  - Delete parking│
-              └────────┬────────┘
+              ┌─────────────────────────┐
+              │  WorkspaceMaterializer  │
+              │  - Copy files to blob   │
+              │  - Create workspace     │
+              │    nodes under Inbox/   │
+              │  - Write DB             │
+              │  - Delete parking       │
+              └────────┬────────────────┘
                        ▼
               ┌─────────────────┐
               │  Entity Detail  │
-              │  (show resources)│
+              │  (show workspace│
+              │   file tree)    │
               └─────────────────┘
 ```
 
@@ -203,10 +254,10 @@ Entity Detail
 └─────────────────┘
          │
          ▼
-┌─────────────────┐
-│  Materializer   │
-│  (auto-resolve) │
-└─────────────────┘
+┌──────────────────────────┐
+│  WorkspaceMaterializer   │
+│  (files → Inbox/ nodes)  │
+└──────────────────────────┘
 ```
 
 ## File System Layout
@@ -225,16 +276,19 @@ DATA_ROOT/
 │               └── urls.json       # Optional URLs
 │
 └── {entity_uuid}/                  # Real entities
-    ├── resources/
-    │   └── {resource_uuid}/
-    │       └── pitch_deck.pdf
-    └── artifacts/
-        └── {artifact_uuid}/
-            ├── v1.md
-            └── v2.md
+    └── workspace/
+        ├── blobs/
+        │   └── {node_id}/         # Content-addressed blob storage
+        │       └── pitch_deck.pdf  # Path-independent file content
+        └── .versions/
+            └── {node_id}/         # Version history per file
+                ├── v1              # Previous version snapshots
+                └── v2
 ```
 
-SQLite **`create_all`** runs on startup; incremental **SQLite** column adds for older DBs live in `database.py` (e.g. `artifacts.title`, `artifact_edit_events.*`). Optional offline reset: `backend/scripts/reset_sqlite_db.py --yes` (stop the API first).
+The workspace tree structure is stored in the **`workspace_nodes`** table, not in the file system. Moves and renames update the DB path only — blob storage keys are stable. This decouples logical organization from physical storage.
+
+SQLite **`create_all`** runs on startup. Optional offline reset: `backend/scripts/reset_sqlite_db.py --yes` (stop the API first).
 
 ## Database Schema
 
@@ -263,43 +317,53 @@ ingest_items (
     updated_at TIMESTAMP
 )
 
--- Canonical resources (never parking lot)
-resources (
+-- Workspace nodes (unified file tree per entity)
+workspace_nodes (
     id TEXT PRIMARY KEY,
     entity_id TEXT NOT NULL,
-    resource_type TEXT NOT NULL,  -- file, text, url
-    title TEXT NOT NULL,
-    mime_type TEXT,
-    original_filename TEXT,
-    relative_path TEXT NOT NULL,
-    url TEXT,
-    origin_ingest_id TEXT,
-    metadata_json TEXT,             -- single JSON object; API exposes as "metadata"
+    node_type TEXT NOT NULL,        -- file | folder | bookmark
+    name TEXT NOT NULL,             -- display name
+    path TEXT NOT NULL,             -- materialized: "Data Room/Financials/Q4.xlsx"
+    parent_id TEXT,                 -- FK to workspace_nodes.id
+    mime_type TEXT,                 -- file-specific
+    size_bytes INTEGER,
+    checksum TEXT,                  -- SHA-256 of current content
+    storage_key TEXT,               -- path-independent blob key
+    url TEXT,                       -- bookmark nodes only
+    version INTEGER DEFAULT 1,
+    origin_type TEXT,               -- upload | agent | ingest | shared | user
+    origin_ref TEXT,                -- e.g., ingest_id, agent_run_id
+    metadata_json TEXT,             -- descriptions, preprocessed data
+    deleted_at TIMESTAMP,           -- soft delete
     created_at TIMESTAMP,
     updated_at TIMESTAMP,
     FOREIGN KEY (entity_id) REFERENCES entities(id),
-    FOREIGN KEY (origin_ingest_id) REFERENCES ingest_items(ingest_id)
+    FOREIGN KEY (parent_id) REFERENCES workspace_nodes(id)
 )
 
--- Artifacts (system-generated)
-artifacts (
+-- Workspace operations (audit log for all mutations)
+workspace_ops (
     id TEXT PRIMARY KEY,
     entity_id TEXT NOT NULL,
-    artifact_type TEXT NOT NULL,  -- memo, factsheet, report, other
-    title TEXT,                     -- optional: e.g. extract_info, used for display/versioning
-    version INTEGER DEFAULT 1,
-    status TEXT DEFAULT 'draft',
-    relative_path TEXT NOT NULL,  -- vN.md or vN.json under artifact folder
-    metadata_json TEXT,             -- single JSON object; API exposes as "metadata"
+    batch_id TEXT,                  -- group for atomic undo
+    op_type TEXT NOT NULL,          -- create_file | create_folder | overwrite |
+                                   -- move | rename | copy | delete | restore |
+                                   -- upload_tree | extract_zip
+    actor_type TEXT NOT NULL,       -- user | agent | system
+    actor_ref TEXT,
+    node_id TEXT,
+    payload_json TEXT NOT NULL,     -- op-specific data
+    inverse_json TEXT,              -- for undo
+    before_checksum TEXT,
+    after_checksum TEXT,
+    undone_at TIMESTAMP,
     created_at TIMESTAMP,
-    updated_at TIMESTAMP,
     FOREIGN KEY (entity_id) REFERENCES entities(id)
 )
 
 -- Chat (sessions + messages + async deep-agent jobs)
 -- conversation_sessions, conversation_messages: see SQLAlchemy models
 -- chat_completion_jobs: pending/running deep-agent work; links user_message_id → assistant_message_id when done
--- artifact_edit_events: audit log for harness artifact edits (Option B)
 ```
 
 ## Frontend Architecture
@@ -343,29 +407,25 @@ App (ToastHost for global toasts, e.g. metadata pre-process)
             ├── ParkingLotModal
             └── EntityDetail (when selected)
                 ├── Header (Back button)
-                ├── entity-zones--notebook (three columns on desktop: Resources | Chat | Artifacts)
-                ├── ResourcesZoneWithHeader (.zone)
-                │   ├── ZoneHeader + chat context toggles per resource
+                ├── entity-zones--notebook (three columns on desktop: Workspace | Chat | Workspace)
+                ├── WorkspaceZone (.zone)
+                │   ├── ZoneHeader + workspace tree browser
                 │   └── .zone-content (scrolls)
-                │       ├── ResourceList
-                │       └── ResourcePreview (PDF/Image/Text/HTML viewer)
+                │       ├── File tree with folders
+                │       └── FilePreview (PDF/Image/Text/HTML viewer)
                 ├── EntityConversation (.zone--chat-main): sessions, transcript, **Run preset** dashed shortcuts (mode follows Agent On/Off), **Agent** pill (persistent mode, On/Off + `use_deep_agent`), composer shell (+ / send), **async polling** on `202` + status line in textarea; optional `ChatModelProfileContext` / sidebar model selector (Layout)
-                ├── Artifacts .zone
-                │   ├── ZoneHeader
-                │   └── .zone-content (scrolls)
-                │       └── ArtifactsZone → ArtifactList
-                └── ArtifactViewerModal (markdown or JSON): segmented-toggle Form / Raw JSON; PUT …/content for JSON saves
+                └── Workspace details/viewer panel
 ```
 
 ### Viewport layout and scrolling
 
-The shell and entity detail view are wired so **long resource previews** (for example DOCX rendered as HTML) scroll **inside the Resources column**, not by growing the whole document.
+The shell and entity detail view are wired so **long file previews** (for example DOCX rendered as HTML) scroll **inside the workspace column**, not by growing the whole document.
 
-**Desktop (viewport width ≥ 769px)**
+**Desktop (viewport width >= 769px)**
 
 - `Layout.css`: `.layout` uses `height` / `max-height: 100vh` and `overflow: hidden` so the app chrome stays within the window.
 - `Layout.css`: `.main-content` uses `min-height: 0`, `overflow-y: auto`, and a column flex container so it can shrink inside the row, scroll the portfolio list when needed, and pass a bounded height to its children.
-- `EntityDetail.css`: `.entity-detail` is `flex: 1` / `min-height: 0`; `.entity-zones--notebook` is a three-column grid (Resources, Chat, Artifacts) with `minmax(0, 1fr)` so columns shrink correctly; each `.zone` is a column flex card; `.zone-content` is `flex: 1` / `min-height: 0` / `overflow-y: auto` so lists and previews scroll inside the card.
+- `EntityDetail.css`: `.entity-detail` is `flex: 1` / `min-height: 0`; `.entity-zones--notebook` is a three-column grid with `minmax(0, 1fr)` so columns shrink correctly; each `.zone` is a column flex card; `.zone-content` is `flex: 1` / `min-height: 0` / `overflow-y: auto` so lists and previews scroll inside the card.
 
 **Mobile (width < 769px)**
 
@@ -465,10 +525,10 @@ The architecture supports these future extensions:
    - Swap in config
    - No business logic changes
 
-4. **Artifact Generation**
-   - Write markdown files directly to entity folders
-   - Create `Artifact` records via `ArtifactStore`
-   - Portfolio UI shows them automatically
+4. **Workspace Automation**
+   - Agents create deliverables directly in workspace tree
+   - Version history and audit log track all changes
+   - Provenance enforcement protects user uploads
 
 5. **Search/Filtering**
    - Add search endpoints

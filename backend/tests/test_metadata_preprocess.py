@@ -50,34 +50,42 @@ def client():
         yield c
 
 
-def test_metadata_preprocess_merges_into_resource(client: TestClient, monkeypatch):
+def test_metadata_preprocess_merges_into_node(client: TestClient, monkeypatch):
     monkeypatch.setattr(
-        "app.services.metadata_preprocess_jobs.generate_json_with_context",
+        "app.services.metadata_preprocess_jobs.generate_json_one_shot",
         lambda *a, **k: _SAMPLE_LOOKUP_JSON,
     )
 
     r = client.post("/entities", json={"name": "Preprocess Co"})
     entity_id = r.json()["id"]
-    files = [("files", ("note.txt", io.BytesIO(b"hello world"), "text/plain"))]
-    r = client.post("/ingest/resources", files=files, data={"entity_id": entity_id})
-    resource_id = r.json()["resources"][0]["id"]
 
+    # Upload file via workspace
+    files = {"file": ("note.txt", io.BytesIO(b"hello world"), "text/plain")}
+    r = client.post(
+        f"/entities/{entity_id}/workspace/file?path=Inbox/note.txt",
+        files=files,
+    )
+    assert r.status_code == 200
+    node_id = r.json()["id"]
+
+    # Set manual metadata first
     r = client.patch(
-        f"/entities/{entity_id}/resources/{resource_id}",
+        f"/entities/{entity_id}/workspace/node/{node_id}",
         json={"metadata": {"manual": True}},
     )
     assert r.status_code == 200
 
+    # Trigger metadata preprocess
     r = client.post(
-        f"/entities/{entity_id}/metadata-preprocess",
-        json={"target": "resource", "id": resource_id},
+        f"/entities/{entity_id}/workspace/node/{node_id}/metadata-preprocess",
     )
     assert r.status_code == 200
     job_id = r.json()["job_id"]
 
+    # Poll until done
     for _ in range(200):
         jr = client.get(
-            f"/entities/{entity_id}/metadata-preprocess-jobs/{job_id}",
+            f"/entities/{entity_id}/workspace/metadata-preprocess-jobs/{job_id}",
         )
         assert jr.status_code == 200
         st = jr.json()
@@ -87,9 +95,10 @@ def test_metadata_preprocess_merges_into_resource(client: TestClient, monkeypatc
     else:
         pytest.fail("job did not complete")
 
-    r = client.get(f"/entities/{entity_id}/resources")
-    row = next(x for x in r.json() if x["id"] == resource_id)
-    meta = row["metadata"]
+    # Verify metadata was merged
+    r = client.get(f"/entities/{entity_id}/workspace/node/{node_id}")
+    assert r.status_code == 200
+    meta = r.json()["metadata"]
     assert meta.get("manual") is True
     assert "gemini_preprocessed" in meta
     gp = meta["gemini_preprocessed"]
@@ -107,15 +116,14 @@ def test_metadata_preprocess_merges_into_resource(client: TestClient, monkeypatc
 
 
 def test_create_or_reuse_job_returns_same_id_while_pending():
-    """TestClient may run background tasks before the next request; test the registry directly."""
     from app.services import metadata_preprocess_jobs as jm
 
     async def run():
         jm._jobs.clear()
         jm._inflight.clear()
-        jid1, sched1 = await jm.create_or_reuse_job("ent-a", "resource", "res-1")
+        jid1, sched1 = await jm.create_or_reuse_job("ent-a", "res-1")
         assert sched1 is True
-        jid2, sched2 = await jm.create_or_reuse_job("ent-a", "resource", "res-1")
+        jid2, sched2 = await jm.create_or_reuse_job("ent-a", "res-1")
         assert sched2 is False
         assert jid1 == jid2
 

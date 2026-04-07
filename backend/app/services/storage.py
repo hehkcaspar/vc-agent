@@ -48,6 +48,11 @@ class StorageAdapter(ABC):
         """Get full filesystem path from relative path."""
         pass
 
+    @abstractmethod
+    async def file_checksum(self, relative_path: str) -> str:
+        """SHA-256 hex digest of file contents."""
+        pass
+
 
 class LocalFilesystemAdapter(StorageAdapter):
     """Local filesystem implementation of StorageAdapter."""
@@ -118,6 +123,16 @@ class LocalFilesystemAdapter(StorageAdapter):
     def ensure_dir_sync(self, relative_path: str) -> None:
         full_path = self.get_full_path(relative_path)
         full_path.mkdir(parents=True, exist_ok=True)
+
+    async def file_checksum(self, relative_path: str) -> str:
+        import hashlib
+        content = await self.read_file(relative_path)
+        return hashlib.sha256(content).hexdigest()
+
+    def file_checksum_sync(self, relative_path: str) -> str:
+        import hashlib
+        content = self.read_file_sync(relative_path)
+        return hashlib.sha256(content).hexdigest()
 
 
 # Global storage instance

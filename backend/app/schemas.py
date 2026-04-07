@@ -70,65 +70,25 @@ class EntityResponse(EntityBase):
         from_attributes = True
 
 
-# ============== Resource Schemas ==============
+# ============== Workspace Schemas ==============
 
-class ResourceBase(BaseModel):
-    title: str
-    resource_type: Literal["file", "text", "url"]
-
-
-class ResourceCreate(ResourceBase):
+class WorkspaceNodeResponse(BaseModel):
+    id: str
     entity_id: str
+    node_type: Literal["file", "folder", "bookmark"]
+    name: str
+    path: str
+    parent_id: Optional[str] = None
     mime_type: Optional[str] = None
-    original_filename: Optional[str] = None
-    relative_path: str
+    size_bytes: Optional[int] = None
+    checksum: Optional[str] = None
     url: Optional[str] = None
-    origin_ingest_id: Optional[str] = None
-
-
-class ResourceResponse(ResourceBase):
-    id: str
-    entity_id: str
-    mime_type: Optional[str]
-    original_filename: Optional[str]
-    relative_path: str
-    url: Optional[str]
-    origin_ingest_id: Optional[str]
-    metadata: Optional[dict[str, Any]] = None
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_metadata(cls, data: Any) -> Any:
-        return coerce_orm_metadata_before_model(data)
-
-
-# ============== Artifact Schemas ==============
-
-class ArtifactBase(BaseModel):
-    artifact_type: Literal["memo", "factsheet", "report", "other"]
-
-
-class ArtifactCreate(ArtifactBase):
-    entity_id: str
-    relative_path: str
     version: int = 1
-    status: Literal["draft", "final"] = "draft"
-
-
-class ArtifactResponse(ArtifactBase):
-    id: str
-    entity_id: str
-    title: Optional[str] = None
-    version: int
-    status: str
-    relative_path: str
+    origin_type: Optional[str] = None
     metadata: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
+    deleted_at: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -136,14 +96,57 @@ class ArtifactResponse(ArtifactBase):
     @classmethod
     def _coerce_metadata(cls, data: Any) -> Any:
         return coerce_orm_metadata_before_model(data)
+
+
+class WorkspaceTreeNode(BaseModel):
+    """Recursive tree node for GET /workspace/tree."""
+    id: str
+    name: str
+    node_type: str
+    path: str
+    size_bytes: Optional[int] = None
+    mime_type: Optional[str] = None
+    description: Optional[str] = None
+    version: Optional[int] = None
+    children: List["WorkspaceTreeNode"] = Field(default_factory=list)
+
+
+class WorkspaceOpResponse(BaseModel):
+    id: str
+    op_type: str
+    actor_type: str
+    actor_ref: Optional[str] = None
+    node_id: Optional[str] = None
+    payload: Optional[dict[str, Any]] = None
+    created_at: datetime
+    undone_at: Optional[datetime] = None
+
+
+class WorkspaceMoveRequest(BaseModel):
+    from_path: str
+    to_path: str
+
+
+class WorkspaceRenameRequest(BaseModel):
+    path: str
+    new_name: str
+
+
+class WorkspaceAnnotateRequest(BaseModel):
+    path: str
+    description: str
+
+
+class WorkspaceCopyRequest(BaseModel):
+    from_path: str
+    to_path: str
 
 
 # ============== Metadata pre-process (in-memory jobs) ==============
 
 
 class MetadataPreprocessStart(BaseModel):
-    target: Literal["resource", "artifact"]
-    id: str
+    node_id: str
 
 
 class MetadataPreprocessAccepted(BaseModel):
@@ -186,7 +189,7 @@ class IngestResourcesRequest(BaseModel):
 class IngestSuccessResponse(BaseModel):
     status: Literal["resolved"]
     entity_id: str
-    resources: List[ResourceResponse]
+    nodes: List[WorkspaceNodeResponse]
 
 
 class IngestResolutionRequiredResponse(BaseModel):
@@ -228,6 +231,7 @@ class ChatSessionResponse(BaseModel):
     title: Optional[str]
     created_at: datetime
     updated_at: datetime
+    has_gemini_chain: bool = False
 
     class Config:
         from_attributes = True
@@ -238,6 +242,8 @@ class ChatMessageResponse(BaseModel):
     session_id: str
     role: str
     content: str
+    model_profile_id: Optional[str] = None
+    node_ids_json: Optional[str] = None
     created_at: datetime
 
     class Config:
@@ -251,8 +257,7 @@ class ChatSessionDetailResponse(BaseModel):
 
 class ChatMessageCreate(BaseModel):
     text: str
-    resource_ids: List[str] = Field(default_factory=list)
-    artifact_ids: List[str] = Field(default_factory=list)
+    node_ids: List[str] = Field(default_factory=list)
     model_profile_id: Optional[str] = None
     # When set, overrides server CHAT_USE_DEEP_AGENT for this message only.
     use_deep_agent: Optional[bool] = None
@@ -293,18 +298,17 @@ class PresetInfoResponse(BaseModel):
 
 
 class PresetRunRequest(BaseModel):
-    resource_ids: List[str] = Field(default_factory=list)
-    artifact_ids: List[str] = Field(default_factory=list)
+    node_ids: List[str] = Field(default_factory=list)
     session_id: Optional[str] = None
     model_profile_id: Optional[str] = None
     use_deep_agent: Optional[bool] = None
     industry: Optional[str] = None
     stage: Optional[str] = None
-    artifact_type: Optional[Literal["memo", "factsheet", "report", "other"]] = None
-    artifact_status: Optional[Literal["draft", "final"]] = None
+    deliverable_type: Optional[str] = None
+    deliverable_status: Optional[Literal["draft", "final"]] = None
 
 
 class PresetRunResponse(BaseModel):
-    artifact_id: str
+    node_id: str
     assistant_summary: str
     warnings: List[str] = Field(default_factory=list)

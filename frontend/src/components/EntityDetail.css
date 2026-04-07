@@ -86,7 +86,7 @@
 
 /* NotebookLM-style: sources | chat | artifacts */
 .entity-zones.entity-zones--notebook {
-  grid-template-columns: minmax(240px, 1fr) minmax(320px, 1.45fr) minmax(240px, 1fr);
+  grid-template-columns: minmax(240px, 380px) minmax(0, 1fr);
   gap: var(--space-4);
   --zone-header-height: 36px;
   --zone-header-gap: var(--space-2);
@@ -117,7 +117,7 @@
   }
 
   .entity-zones.entity-zones--notebook {
-    grid-template-columns: minmax(200px, 1fr) minmax(260px, 1.25fr) minmax(200px, 1fr);
+    grid-template-columns: minmax(200px, 340px) minmax(0, 1fr);
   }
 }
 

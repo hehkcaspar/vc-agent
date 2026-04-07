@@ -1,8 +1,8 @@
 import {
   Entity,
   EntityUpdateData,
-  Resource,
-  Artifact,
+  WorkspaceNode,
+  WorkspaceTreeNode,
   IngestItem,
   IngestResponse,
   ChatSession,
@@ -10,13 +10,11 @@ import {
   ChatMessage,
   ChatMessageResult,
   ChatMessageJobStatus,
-  MetadataPreprocessJobStatus,
   PostChatMessageResult,
   PresetInfo,
   PresetRunResponse,
 } from '../types';
 
-/** When set (e.g. http://127.0.0.1:8000), call FastAPI directly and skip the /api dev proxy. */
 const DIRECT_API = import.meta.env.VITE_API_URL?.trim() ?? '';
 const useDirectApi = /^https?:\/\//i.test(DIRECT_API);
 const API_PREFIX = useDirectApi ? DIRECT_API.replace(/\/$/, '') : '/api';
@@ -34,12 +32,12 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     },
     ...options,
   });
-  
+
   if (!response.ok) {
     const error = await response.text();
     throw new Error(error || `HTTP ${response.status}`);
   }
-  
+
   return response.json();
 }
 
@@ -48,7 +46,7 @@ export const api = {
   entities: {
     list: () => fetchJson<Entity[]>('/entities'),
     get: (id: string) => fetchJson<Entity>(`/entities/${id}`),
-    create: (data: { name: string; website?: string }) => 
+    create: (data: { name: string; website?: string }) =>
       fetchJson<Entity>('/entities', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -67,84 +65,105 @@ export const api = {
         throw new Error(error || `HTTP ${response.status}`);
       }
     },
-    getResources: (id: string) =>
-      fetchJson<Resource[]>(`/entities/${id}/resources`),
-    getArtifacts: (id: string) =>
-      fetchJson<Artifact[]>(`/entities/${id}/artifacts`),
-    updateResource: (
-      entityId: string,
-      resourceId: string,
-      data: { title?: string; metadata?: Record<string, unknown> | null },
-    ) =>
-      fetchJson<Resource>(`/entities/${entityId}/resources/${resourceId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }),
-    deleteResource: async (entityId: string, resourceId: string) => {
-      const response = await fetch(apiUrl(`/entities/${entityId}/resources/${resourceId}`), {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || `HTTP ${response.status}`);
-      }
-    },
-    updateArtifact: (
-      entityId: string,
-      artifactId: string,
-      data: { title?: string; metadata?: Record<string, unknown> | null },
-    ) =>
-      fetchJson<Artifact>(`/entities/${entityId}/artifacts/${artifactId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      }),
-    deleteArtifact: async (entityId: string, artifactId: string) => {
-      const response = await fetch(apiUrl(`/entities/${entityId}/artifacts/${artifactId}`), {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        const error = await response.text();
-        throw new Error(error || `HTTP ${response.status}`);
-      }
-    },
-    viewResource: (entityId: string, resourceId: string) =>
-      fetch(apiUrl(`/entities/${entityId}/resources/${resourceId}/view`)),
-    viewArtifact: (entityId: string, artifactId: string) =>
-      fetchJson<{
-        content: string;
-        metadata?: Record<string, unknown> | null;
-        id?: string;
-        type?: string;
-        version?: number;
-        status?: string;
-        created_at?: string;
-      }>(`/entities/${entityId}/artifacts/${artifactId}/view`),
-    createArtifact: (entityId: string, data: FormData) =>
-      fetchJson<Artifact>(`/entities/${entityId}/artifacts`, {
-        method: 'POST',
-        body: data,
-      }),
-    updateArtifactContent: (entityId: string, artifactId: string, payload: unknown) =>
-      fetchJson<Artifact>(`/entities/${entityId}/artifacts/${artifactId}/content`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      }),
-    startMetadataPreprocess: (
-      entityId: string,
-      body: { target: 'resource' | 'artifact'; id: string },
-    ) =>
-      fetchJson<{ job_id: string }>(`/entities/${entityId}/metadata-preprocess`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }),
-    getMetadataPreprocessJob: (entityId: string, jobId: string) =>
-      fetchJson<MetadataPreprocessJobStatus>(
-        `/entities/${entityId}/metadata-preprocess-jobs/${jobId}`,
+  },
+
+  // Workspace
+  workspace: {
+    getTree: (entityId: string, path = '', depth = 10) =>
+      fetchJson<WorkspaceTreeNode[]>(
+        `/entities/${entityId}/workspace/tree?path=${encodeURIComponent(path)}&depth=${depth}`,
       ),
+    listDir: (entityId: string, path = '') =>
+      fetchJson<WorkspaceNode[]>(
+        `/entities/${entityId}/workspace/ls?path=${encodeURIComponent(path)}`,
+      ),
+    getNode: (entityId: string, nodeId: string) =>
+      fetchJson<WorkspaceNode>(`/entities/${entityId}/workspace/node/${nodeId}`),
+    search: (entityId: string, query: string) =>
+      fetchJson<WorkspaceNode[]>(
+        `/entities/${entityId}/workspace/search?q=${encodeURIComponent(query)}`,
+      ),
+    downloadFile: (entityId: string, nodeId: string) =>
+      fetch(apiUrl(`/entities/${entityId}/workspace/file/${nodeId}`)),
+    downloadFileByPath: (entityId: string, path: string) =>
+      fetch(apiUrl(`/entities/${entityId}/workspace/file?path=${encodeURIComponent(path)}`)),
+    uploadFile: (entityId: string, path: string, file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return fetchJson<WorkspaceNode>(
+        `/entities/${entityId}/workspace/file?path=${encodeURIComponent(path)}`,
+        { method: 'POST', body: fd },
+      );
+    },
+    uploadFolder: (entityId: string, files: File[], basePath = 'Inbox') => {
+      const fd = new FormData();
+      files.forEach((f) => fd.append('files', f));
+      return fetchJson<{ uploaded: number; results: unknown[] }>(
+        `/entities/${entityId}/workspace/upload?base_path=${encodeURIComponent(basePath)}`,
+        { method: 'POST', body: fd },
+      );
+    },
+    createFolder: (entityId: string, path: string) =>
+      fetchJson<WorkspaceNode>(
+        `/entities/${entityId}/workspace/folder?path=${encodeURIComponent(path)}`,
+        { method: 'POST' },
+      ),
+    move: (entityId: string, fromPath: string, toPath: string) =>
+      fetchJson<WorkspaceNode>(`/entities/${entityId}/workspace/move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_path: fromPath, to_path: toPath }),
+      }),
+    rename: (entityId: string, path: string, newName: string) =>
+      fetchJson<WorkspaceNode>(`/entities/${entityId}/workspace/rename`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, new_name: newName }),
+      }),
+    deleteNode: async (entityId: string, path: string) => {
+      const response = await fetch(
+        apiUrl(`/entities/${entityId}/workspace/node?path=${encodeURIComponent(path)}`),
+        { method: 'DELETE' },
+      );
+      if (!response.ok) {
+        const error = await response.text();
+        throw new Error(error || `HTTP ${response.status}`);
+      }
+    },
+    fileVersions: (entityId: string, nodeId: string) =>
+      fetchJson<{ versions: unknown[] }>(
+        `/entities/${entityId}/workspace/file/${nodeId}/versions`,
+      ),
+    restoreVersion: (entityId: string, nodeId: string, version: number) =>
+      fetchJson<WorkspaceNode>(
+        `/entities/${entityId}/workspace/file/${nodeId}/restore/${version}`,
+        { method: 'POST' },
+      ),
+    listTrash: (entityId: string) =>
+      fetchJson<WorkspaceNode[]>(`/entities/${entityId}/workspace/trash`),
+    restoreFromTrash: (entityId: string, nodeId: string) =>
+      fetchJson<WorkspaceNode>(
+        `/entities/${entityId}/workspace/trash/${nodeId}/restore`,
+        { method: 'POST' },
+      ),
+    listOps: (entityId: string, limit = 50) =>
+      fetchJson<unknown[]>(`/entities/${entityId}/workspace/ops?limit=${limit}`),
+    annotate: (entityId: string, path: string, description: string) =>
+      fetchJson<WorkspaceNode>(`/entities/${entityId}/workspace/annotate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path, description }),
+      }),
+    updateNodeMetadata: (
+      entityId: string,
+      nodeId: string,
+      data: Record<string, unknown>,
+    ) =>
+      fetchJson<WorkspaceNode>(`/entities/${entityId}/workspace/node/${nodeId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
   },
 
   // Ingestion
@@ -187,12 +206,12 @@ export const api = {
       }),
     getSession: (entityId: string, sessionId: string) =>
       fetchJson<ChatSessionDetail>(
-        `/entities/${entityId}/chat/sessions/${sessionId}`
+        `/entities/${entityId}/chat/sessions/${sessionId}`,
       ),
     deleteSession: async (entityId: string, sessionId: string) => {
       const response = await fetch(
         apiUrl(`/entities/${entityId}/chat/sessions/${sessionId}`),
-        { method: 'DELETE' }
+        { method: 'DELETE' },
       );
       if (!response.ok) {
         const error = await response.text();
@@ -204,12 +223,10 @@ export const api = {
       sessionId: string,
       body: {
         text: string;
-        resource_ids: string[];
-        artifact_ids: string[];
+        node_ids: string[];
         model_profile_id?: string | null;
-        /** When set, overrides server default for this message. */
         use_deep_agent?: boolean | null;
-      }
+      },
     ): Promise<PostChatMessageResult> => {
       const response = await fetch(
         apiUrl(`/entities/${entityId}/chat/sessions/${sessionId}/messages`),
@@ -220,12 +237,9 @@ export const api = {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(body),
-        }
+        },
       );
-      const data = (await response.json().catch(() => ({}))) as Record<
-        string,
-        unknown
-      >;
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
       if (response.status === 202) {
         return {
           kind: 'accepted',
@@ -238,27 +252,26 @@ export const api = {
         throw new Error(
           typeof data?.detail === 'string'
             ? data.detail
-            : response.statusText || `HTTP ${response.status}`
+            : response.statusText || `HTTP ${response.status}`,
         );
       }
       return { kind: 'completed', result: data as unknown as ChatMessageResult };
     },
     getMessageJob: (entityId: string, sessionId: string, jobId: string) =>
       fetchJson<ChatMessageJobStatus>(
-        `/entities/${entityId}/chat/sessions/${sessionId}/jobs/${jobId}`
+        `/entities/${entityId}/chat/sessions/${sessionId}/jobs/${jobId}`,
       ),
     runPreset: (
       entityId: string,
       presetId: string,
       body: {
-        resource_ids: string[];
-        artifact_ids: string[];
+        node_ids: string[];
         session_id?: string | null;
         model_profile_id?: string | null;
         use_deep_agent?: boolean | null;
         industry?: string | null;
         stage?: string | null;
-      }
+      },
     ) =>
       fetchJson<PresetRunResponse>(
         `/entities/${entityId}/chat/presets/${presetId}/run`,
@@ -266,7 +279,7 @@ export const api = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
-        }
+        },
       ),
   },
 };

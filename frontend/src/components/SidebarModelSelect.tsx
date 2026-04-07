@@ -18,7 +18,7 @@ export function SidebarModelSelect() {
           value={profileId}
           onChange={(e) => setProfileId(e.target.value as ChatModelProfileId)}
           aria-label="Model for entity chat (Deep Agent harness)"
-          title="Used for portfolio chat when the server runs the Deep Agent harness. Preset buttons use the legacy Gemini path unless the server is extended."
+          title="Model used for portfolio chat and presets (both direct and agent modes)."
         >
           {OPTIONS.map((o) => (
             <option key={o.value} value={o.value}>

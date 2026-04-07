@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Any, Dict, Literal, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,24 +13,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.database import AsyncSessionLocal
 from app.datetime_support import utc_now, utc_now_iso
-from app.models import Artifact, Entity, Resource
+from app.models import Entity, WorkspaceNode
 from app.schemas import metadata_json_to_dict
 from app.services.gemini_context import build_context_parts
-from app.services.gemini_runner import generate_json_with_context
+from app.services.direct_llm import generate_json_one_shot
 from app.services.json_loose import parse_json_loose
 from app.services.file_lookup_normalize import normalize_file_lookup_result
 from app.services.native_file_metadata import extract_native_file_metadata
-from app.services.preset_registry import load_file_lookup_preprocess_instruction
 from app.services.storage import storage
-
-TargetKind = Literal["resource", "artifact"]
 
 MAX_JOBS = 200
 
 _lock = asyncio.Lock()
 _jobs: Dict[str, dict[str, Any]] = {}
-# (entity_id, target_kind, target_id) -> job_id while pending/running
-_inflight: Dict[Tuple[str, str, str], str] = {}
+_inflight: Dict[Tuple[str, str], str] = {}  # (entity_id, node_id) -> job_id
 
 
 def _prune_locked() -> None:
@@ -49,10 +45,9 @@ def _prune_locked() -> None:
 
 
 async def create_or_reuse_job(
-    entity_id: str, target_kind: TargetKind, target_id: str
+    entity_id: str, node_id: str,
 ) -> Tuple[str, bool]:
-    """Returns (job_id, schedule_task). When reusing pending/running, schedule_task is False."""
-    key = (entity_id, target_kind, target_id)
+    key = (entity_id, node_id)
     async with _lock:
         if key in _inflight:
             jid = _inflight[key]
@@ -66,8 +61,7 @@ async def create_or_reuse_job(
         _jobs[jid] = {
             "job_id": jid,
             "entity_id": entity_id,
-            "target_kind": target_kind,
-            "target_id": target_id,
+            "node_id": node_id,
             "status": "pending",
             "error_message": None,
             "created_at": now,
@@ -81,16 +75,13 @@ async def get_job_status(entity_id: str, job_id: str) -> Optional[dict[str, Any]
         rec = _jobs.get(job_id)
         if not rec or rec["entity_id"] != entity_id:
             return None
-        out = {
-            "job_id": job_id,
-            "status": rec["status"],
-        }
+        out = {"job_id": job_id, "status": rec["status"]}
         if rec["status"] == "failed" and rec.get("error_message"):
             out["error_message"] = rec["error_message"]
         return out
 
 
-def _set_job_failed_locked(job_id: str, msg: str, key: Tuple[str, str, str]) -> None:
+def _set_job_failed_locked(job_id: str, msg: str, key: Tuple[str, str]) -> None:
     if job_id in _jobs:
         _jobs[job_id]["status"] = "failed"
         _jobs[job_id]["error_message"] = msg
@@ -98,48 +89,11 @@ def _set_job_failed_locked(job_id: str, msg: str, key: Tuple[str, str, str]) -> 
         del _inflight[key]
 
 
-def _set_job_succeeded_locked(job_id: str, key: Tuple[str, str, str]) -> None:
+def _set_job_succeeded_locked(job_id: str, key: Tuple[str, str]) -> None:
     if job_id in _jobs:
         _jobs[job_id]["status"] = "succeeded"
     if _inflight.get(key) == job_id:
         del _inflight[key]
-
-
-def _json_merge_preprocess_metadata(
-    existing: Dict[str, Any],
-    native_block: Dict[str, Any],
-    gemini_block: Dict[str, Any],
-) -> str:
-    merged = {
-        **existing,
-        "native_file_metadata": native_block,
-        "gemini_preprocessed": gemini_block,
-    }
-    return json.dumps(merged, ensure_ascii=False)
-
-
-async def _persist_preprocess_metadata(
-    db: AsyncSession,
-    *,
-    target_kind: TargetKind,
-    entity_id: str,
-    target_id: str,
-    native_block: Dict[str, Any],
-    gemini_block: Dict[str, Any],
-) -> None:
-    if target_kind == "resource":
-        row = await _load_resource(db, entity_id, target_id)
-        if not row:
-            raise ValueError("resource_not_found")
-    else:
-        row = await _load_artifact(db, entity_id, target_id)
-        if not row:
-            raise ValueError("artifact_not_found")
-    existing = metadata_json_to_dict(getattr(row, "metadata_json", None)) or {}
-    row.metadata_json = _json_merge_preprocess_metadata(
-        existing, native_block, gemini_block
-    )
-    row.updated_at = utc_now()
 
 
 async def run_metadata_preprocess_job(job_id: str) -> None:
@@ -148,9 +102,8 @@ async def run_metadata_preprocess_job(job_id: str) -> None:
         if not rec:
             return
         entity_id = rec["entity_id"]
-        target_kind: TargetKind = rec["target_kind"]
-        target_id = rec["target_id"]
-        key = (entity_id, target_kind, target_id)
+        node_id = rec["node_id"]
+        key = (entity_id, node_id)
         rec["status"] = "running"
 
     try:
@@ -163,62 +116,36 @@ async def run_metadata_preprocess_job(job_id: str) -> None:
                 "Output one JSON object matching the system schema."
             )
 
-            if target_kind == "resource":
-                row = await _load_resource(db, entity_id, target_id)
-                if not row:
-                    raise ValueError("resource_not_found")
-                resources = [row]
-                artifacts_list: list[Artifact] = []
-                native_source: Dict[str, Any] = {
-                    "kind": "resource",
-                    "resource_type": row.resource_type,
-                    "title": row.title,
-                    "original_filename": row.original_filename,
-                }
-                raw_bytes: Optional[bytes] = None
-                if row.resource_type == "file" and row.relative_path:
-                    try:
-                        raw_bytes = await storage.read_file(row.relative_path)
-                    except Exception:
-                        raw_bytes = None
-                mime_for_native: Optional[str] = row.mime_type
-                filename_hint: Optional[str] = row.original_filename or row.title
-            else:
-                row = await _load_artifact(db, entity_id, target_id)
-                if not row:
-                    raise ValueError("artifact_not_found")
-                resources = []
-                artifacts_list = [row]
-                native_source = {
-                    "kind": "artifact",
-                    "artifact_type": row.artifact_type,
-                    "title": row.title,
-                    "version": row.version,
-                }
-                raw_bytes = None
-                if row.relative_path:
-                    try:
-                        raw_bytes = await storage.read_file(row.relative_path)
-                    except Exception:
-                        raw_bytes = None
-                mime_for_native = None
-                filename_hint = row.title
+            node = await _load_node(db, entity_id, node_id)
+            if not node:
+                raise ValueError("node_not_found")
 
-            context_parts, _warnings = await build_context_parts(
-                resources, artifacts_list
-            )
+            native_source: Dict[str, Any] = {
+                "kind": node.node_type,
+                "name": node.name,
+                "path": node.path,
+                "mime_type": node.mime_type,
+            }
+            raw_bytes: Optional[bytes] = None
+            if node.storage_key:
+                try:
+                    raw_bytes = await storage.read_file(node.storage_key)
+                except Exception:
+                    raw_bytes = None
+
+            context_parts, _warnings = await build_context_parts([node])
             if not context_parts:
                 raise ValueError("no_context_parts_built")
 
         native_block = extract_native_file_metadata(
             raw_bytes,
-            mime_type=mime_for_native,
-            filename_hint=filename_hint,
+            mime_type=node.mime_type,
+            filename_hint=node.name,
             source=native_source,
         )
 
         raw_json = await asyncio.to_thread(
-            generate_json_with_context,
+            generate_json_one_shot,
             system_instruction,
             [],
             user_message,
@@ -244,14 +171,17 @@ async def run_metadata_preprocess_job(job_id: str) -> None:
         }
 
         async with AsyncSessionLocal() as db:
-            await _persist_preprocess_metadata(
-                db,
-                target_kind=target_kind,
-                entity_id=entity_id,
-                target_id=target_id,
-                native_block=native_block,
-                gemini_block=block,
-            )
+            node = await _load_node(db, entity_id, node_id)
+            if not node:
+                raise ValueError("node_not_found")
+            existing = metadata_json_to_dict(getattr(node, "metadata_json", None)) or {}
+            merged = {
+                **existing,
+                "native_file_metadata": native_block,
+                "gemini_preprocessed": block,
+            }
+            node.metadata_json = json.dumps(merged, ensure_ascii=False)
+            node.updated_at = utc_now()
             await db.commit()
 
         async with _lock:
@@ -269,25 +199,18 @@ async def _get_entity(db: AsyncSession, entity_id: str) -> Entity:
     return entity
 
 
-async def _load_resource(
-    db: AsyncSession, entity_id: str, resource_id: str
-) -> Optional[Resource]:
+async def _load_node(
+    db: AsyncSession, entity_id: str, node_id: str,
+) -> Optional[WorkspaceNode]:
     result = await db.execute(
-        select(Resource).where(
-            Resource.id == resource_id,
-            Resource.entity_id == entity_id,
+        select(WorkspaceNode).where(
+            WorkspaceNode.id == node_id,
+            WorkspaceNode.entity_id == entity_id,
+            WorkspaceNode.deleted_at.is_(None),
         )
     )
     return result.scalar_one_or_none()
 
 
-async def _load_artifact(
-    db: AsyncSession, entity_id: str, artifact_id: str
-) -> Optional[Artifact]:
-    result = await db.execute(
-        select(Artifact).where(
-            Artifact.id == artifact_id,
-            Artifact.entity_id == entity_id,
-        )
-    )
-    return result.scalar_one_or_none()
+# Re-import at bottom to avoid circular
+from app.services.preset_registry import load_file_lookup_preprocess_instruction

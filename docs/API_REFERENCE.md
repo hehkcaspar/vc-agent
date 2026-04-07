@@ -111,161 +111,339 @@ Update entity.
 ```
 
 #### DELETE /entities/{id}
-Delete entity and all associated resources/artifacts.
+Delete entity and all associated workspace nodes.
 
-#### GET /entities/{id}/resources
-Get all resources for an entity (sorted by created_at desc).
+---
 
-**Response:** Each item is a `ResourceResponse`. Listings include a parsed **`metadata`** object (or `null` if unset/invalid in DB — stored column is `metadata_json`).
+### Workspace
 
-```json
-[
-  {
-    "id": "uuid",
-    "entity_id": "uuid",
-    "resource_type": "file|text|url",
-    "title": "Resource Title",
-    "mime_type": "application/pdf",
-    "original_filename": "document.pdf",
-    "relative_path": "{entity_id}/resources/{resource_id}/document.pdf",
-    "url": null,
-    "origin_ingest_id": "uuid",
-    "metadata": null,
-    "created_at": "2024-01-01T00:00:00",
-    "updated_at": "2024-01-01T00:00:00"
-  }
-]
-```
+All workspace endpoints are scoped to an entity: `/entities/{entity_id}/workspace/...`
 
-#### PATCH /entities/{id}/resources/{resource_id}
-Update mutable resource fields (`title`, optional `metadata`).
+The workspace replaces the former Resource + Artifact model with a unified hierarchical file system. Each entity has a tree of **nodes** (files, folders, bookmarks). Files support versioning, soft-delete (trash), and metadata enrichment.
 
-**Request Body:**
-```json
-{
-  "title": "Renamed file title",
-  "metadata": { "custom_key": "value" }
-}
-```
+#### Tree
 
-`metadata` may be set to `null` to clear stored JSON.
+##### GET /entities/{entity_id}/workspace/tree
+Return the full workspace tree (recursive).
 
-**Response:** `ResourceResponse` for the updated row.
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| path | string | "" | Subtree root path (empty = entire tree) |
+| depth | int | 10 | Max depth (1-20) |
 
-#### DELETE /entities/{id}/resources/{resource_id}
-Delete a resource row and best-effort remove its backing file from storage.
-
-**Response:**
-```json
-{
-  "message": "Resource deleted successfully"
-}
-```
-
-#### GET /entities/{id}/resources/{resource_id}/view
-View or download a resource payload.
-
-- For `file` / `text` resources: returns a file stream (`FileResponse`) with inferred/declared MIME type.
-- For `url` resources: returns JSON with the URL target and parsed row **`metadata`** (same as list/detail responses):
-
-```json
-{
-  "url": "https://example.com",
-  "type": "url",
-  "metadata": null
-}
-```
-
-#### GET /entities/{id}/artifacts
-Get all artifacts for an entity (sorted by created_at desc).
-
-**Response:** Each item is an `ArtifactResponse` with optional **`metadata`** (parsed from `metadata_json`).
+**Response:** Array of `WorkspaceTreeNode` (recursive `children`).
 
 ```json
 [
   {
     "id": "uuid",
-    "entity_id": "uuid",
-    "artifact_type": "memo|factsheet|report|other",
-    "title": "extract_info",
-    "version": 1,
-    "status": "draft|final",
-    "relative_path": "{entity_id}/artifacts/{artifact_id}/v1.md",
-    "metadata": null,
-    "created_at": "2024-01-01T00:00:00",
-    "updated_at": "2024-01-01T00:00:00"
+    "name": "Data Room",
+    "node_type": "folder",
+    "path": "Data Room",
+    "size_bytes": null,
+    "mime_type": null,
+    "description": "Due diligence documents",
+    "version": null,
+    "children": [
+      {
+        "id": "uuid",
+        "name": "Q4.xlsx",
+        "node_type": "file",
+        "path": "Data Room/Q4.xlsx",
+        "size_bytes": 12345,
+        "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "description": null,
+        "version": 2,
+        "children": []
+      }
+    ]
   }
 ]
 ```
 
-`title` is optional and may be `null`. JSON artifacts (for example from the `extract_info` preset) use a `.json` file suffix in `relative_path`; markdown reports use `.md`.
+##### GET /entities/{entity_id}/workspace/ls
+List direct children of a directory.
 
-#### PATCH /entities/{id}/artifacts/{artifact_id}
-Update mutable artifact fields (`title`, optional `metadata`).
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| path | string | "" | Directory path (empty = root) |
+
+**Response:** Array of `WorkspaceNodeResponse`.
+
+##### GET /entities/{entity_id}/workspace/node/{node_id}
+Get a single node by ID.
+
+**Response:** `WorkspaceNodeResponse`.
+
+##### GET /entities/{entity_id}/workspace/search
+Search workspace files by name/path substring.
+
+**Query Parameters:**
+| Param | Type | Description |
+|-------|------|-------------|
+| q | string | Search query (matched against name and path, case-insensitive) |
+
+**Response:** Array of `WorkspaceNodeResponse`.
+
+#### Files
+
+##### GET /entities/{entity_id}/workspace/file/{node_id}
+Download a file's content. Returns `FileResponse` for files, JSON `{"url", "type"}` for bookmarks, 400 for folders.
+
+##### GET /entities/{entity_id}/workspace/file?path=...
+Download a file by its workspace path.
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| path | string | yes | Full workspace path to the file |
+
+**Response:** `FileResponse` with inferred MIME type.
+
+##### POST /entities/{entity_id}/workspace/file?path=...
+Upload a single file to a specific path. Creates intermediate folders automatically.
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| path | string | yes | Target workspace path |
+
+**Request:** `multipart/form-data` with a single `file` field.
+
+**Response:** `WorkspaceNodeResponse` for the created/overwritten file.
+
+##### POST /entities/{entity_id}/workspace/upload
+Bulk upload multiple files, preserving relative paths.
+
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| base_path | string | "Inbox" | Base folder for uploads |
+
+**Request:** `multipart/form-data` with `files` field (multiple).
+
+**Response:**
+```json
+{
+  "uploaded": 3,
+  "results": [
+    { "id": "uuid", "path": "Inbox/report.pdf", "size": 12345 },
+    { "path": "Inbox/bad.bin", "error": "File too large" }
+  ]
+}
+```
+
+##### POST /entities/{entity_id}/workspace/folder?path=...
+Create a new folder.
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| path | string | yes | Folder path to create |
+
+**Response:** `WorkspaceNodeResponse` for the created folder.
+
+#### Versioning
+
+##### GET /entities/{entity_id}/workspace/file/{node_id}/versions
+List all versions of a file.
+
+**Response:**
+```json
+{
+  "versions": [
+    { "version": 1, "timestamp": "...", "checksum": "sha256", "size": 1234 },
+    { "version": 2, "timestamp": "...", "checksum": "sha256", "size": 5678, "current": true }
+  ]
+}
+```
+
+##### GET /entities/{entity_id}/workspace/file/{node_id}/versions/{version}
+Download a specific old version of a file.
+
+**Response:** `FileResponse` with filename `v{version}_{name}`.
+
+##### POST /entities/{entity_id}/workspace/file/{node_id}/restore/{version}
+Restore a previous version as the new current version (creates a new version entry).
+
+**Response:** `WorkspaceNodeResponse` for the updated file.
+
+##### GET /entities/{entity_id}/workspace/file/{node_id}/diff?v1=...&v2=...
+Unified text diff between two versions of a file. Returns 400 for binary files.
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| v1 | int | yes | First version number |
+| v2 | int | yes | Second version number |
+
+**Response:**
+```json
+{
+  "node_id": "uuid",
+  "v1": 1,
+  "v2": 2,
+  "diff": "--- v1/report.md\n+++ v2/report.md\n...",
+  "has_changes": true
+}
+```
+
+#### Mutations
+
+##### POST /entities/{entity_id}/workspace/move
+Move a node to a new path.
 
 **Request Body:**
 ```json
 {
-  "title": "extract_info",
+  "from_path": "Inbox/report.pdf",
+  "to_path": "Data Room/report.pdf"
+}
+```
+
+**Response:** `WorkspaceNodeResponse` for the moved node.
+
+##### POST /entities/{entity_id}/workspace/rename
+Rename a node (same parent, new name).
+
+**Request Body:**
+```json
+{
+  "path": "Data Room/old-name.pdf",
+  "new_name": "new-name.pdf"
+}
+```
+
+**Response:** `WorkspaceNodeResponse` for the renamed node.
+
+##### POST /entities/{entity_id}/workspace/copy
+Copy a node to a new path.
+
+**Request Body:**
+```json
+{
+  "from_path": "Data Room/report.pdf",
+  "to_path": "Archive/report.pdf"
+}
+```
+
+**Response:** `WorkspaceNodeResponse` for the new copy.
+
+##### DELETE /entities/{entity_id}/workspace/node?path=...
+Soft-delete a node (moves to trash).
+
+**Query Parameters:**
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| path | string | yes | Path of node to delete |
+
+**Response:**
+```json
+{
+  "message": "Deleted 'Data Room/report.pdf'",
+  "node_id": "uuid"
+}
+```
+
+#### Trash
+
+##### GET /entities/{entity_id}/workspace/trash
+List all soft-deleted nodes.
+
+**Response:** Array of `WorkspaceNodeResponse` (with `deleted_at` set).
+
+##### POST /entities/{entity_id}/workspace/trash/{node_id}/restore
+Restore a soft-deleted node.
+
+**Response:** `WorkspaceNodeResponse` for the restored node.
+
+##### DELETE /entities/{entity_id}/workspace/trash/{node_id}
+Permanently delete a trashed node and its storage.
+
+**Response:**
+```json
+{
+  "message": "Permanently deleted",
+  "node_id": "uuid"
+}
+```
+
+#### History
+
+##### GET /entities/{entity_id}/workspace/ops
+List recent workspace operations (audit log).
+
+**Query Parameters:**
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| limit | int | 50 | Max items (1-200) |
+
+**Response:** Array of `WorkspaceOpResponse`.
+
+```json
+[
+  {
+    "id": "uuid",
+    "op_type": "move",
+    "actor_type": "user",
+    "actor_ref": null,
+    "node_id": "uuid",
+    "payload": { "from_path": "...", "to_path": "..." },
+    "created_at": "2024-01-01T00:00:00",
+    "undone_at": null
+  }
+]
+```
+
+##### POST /entities/{entity_id}/workspace/ops/{op_id}/undo
+Undo a workspace operation.
+
+**Response:** Operation-specific undo result.
+
+#### Metadata
+
+##### POST /entities/{entity_id}/workspace/annotate
+Set a description on a node.
+
+**Request Body:**
+```json
+{
+  "path": "Data Room/report.pdf",
+  "description": "Q4 2024 financial report"
+}
+```
+
+**Response:** `WorkspaceNodeResponse` for the updated node.
+
+##### PATCH /entities/{entity_id}/workspace/node/{node_id}
+Update node metadata and/or name.
+
+**Request Body (any combination):**
+```json
+{
+  "name": "renamed.pdf",
   "metadata": { "custom_key": "value" }
 }
 ```
 
-`title` may also be an empty string to clear it (`null` persisted in DB). `metadata` may be `null` to clear.
+`metadata` is merged with existing metadata. Set to `null` to clear.
 
-**Response:** `ArtifactResponse` for the updated row.
+**Response:** `WorkspaceNodeResponse` for the updated node.
 
-#### DELETE /entities/{id}/artifacts/{artifact_id}
-Delete an artifact row and best-effort remove its stored file.
-
-**Response:**
-```json
-{
-  "message": "Artifact deleted successfully"
-}
-```
-
-#### GET /entities/{id}/artifacts/{artifact_id}/view
-
-Return the artifact body as UTF-8 text for display in the UI.
-
-**Response:**
-```json
-{
-  "id": "uuid",
-  "type": "report",
-  "version": 1,
-  "status": "draft",
-  "content": "…markdown or JSON string…",
-  "created_at": "2024-01-01T00:00:00",
-  "metadata": null
-}
-```
-
-#### POST /entities/{entity_id}/metadata-preprocess
-
-Start an **async** metadata enrichment job for a single resource or artifact. Merges programmatic file hints and Gemini “file lookup” JSON into the row’s `metadata_json` (see `ARCHITECTURE.md`).
-
-**Request body:**
-```json
-{
-  "target": "resource",
-  "id": "uuid-of-resource-or-artifact"
-}
-```
-
-`target` is `"resource"` or `"artifact"`. `id` must belong to `{entity_id}`.
+##### POST /entities/{entity_id}/workspace/node/{node_id}/metadata-preprocess
+Start async Gemini metadata extraction for a file node.
 
 **Response:** `200 OK`
 ```json
 { "job_id": "uuid" }
 ```
 
-If a job for the same entity + target + id is already **pending** or **running**, the same `job_id` is returned and no duplicate work is scheduled.
+If a job for the same node is already pending/running, the same `job_id` is returned.
 
-#### GET /entities/{entity_id}/metadata-preprocess-jobs/{job_id}
-
-Poll job status (no `step_detail`; unlike chat deep-agent jobs).
+##### GET /entities/{entity_id}/workspace/metadata-preprocess-jobs/{job_id}
+Poll metadata extraction job status.
 
 **Response:**
 ```json
@@ -275,26 +453,6 @@ Poll job status (no `step_detail`; unlike chat deep-agent jobs).
   "error_message": "optional when failed"
 }
 ```
-
-#### PUT /entities/{id}/artifacts/{artifact_id}/content
-
-Replace the artifact file on disk with **pretty-printed JSON** derived from the request body. Accepts any JSON-serializable value (`object`, `array`, string, number, boolean, or `null`). Used by the entity UI when saving structured artifacts from the Form or Raw JSON editor.
-
-**Request body:** arbitrary JSON (for example a nested `object`).
-
-**Response:** `ArtifactResponse` for the updated row (same shape as list items, including `title` and `relative_path`).
-
-### Resource and artifact row actions in UI
-
-The Entity detail side columns use a compact row model with these API mappings:
-
-- **Pre-process metadata** -> `POST /entities/{id}/metadata-preprocess` then poll `GET .../metadata-preprocess-jobs/{job_id}`; on success, refresh lists so **`metadata`** updates. UI uses toasts (`ToastHost` / `showToast`) instead of blocking alerts.
-- **Rename resource** -> `PATCH /entities/{id}/resources/{resource_id}`
-- **Delete resource** -> `DELETE /entities/{id}/resources/{resource_id}`
-- **Download/open resource** -> `GET /entities/{id}/resources/{resource_id}/view`
-- **Rename artifact** -> `PATCH /entities/{id}/artifacts/{artifact_id}`
-- **Delete artifact** -> `DELETE /entities/{id}/artifacts/{artifact_id}`
-- **Download artifact text** -> `GET /entities/{id}/artifacts/{artifact_id}/view`
 
 ---
 
@@ -344,12 +502,12 @@ The server computes an **effective** deep-agent flag per request:
 use_deep_agent = body.use_deep_agent if body.use_deep_agent is not None else CHAT_USE_DEEP_AGENT
 ```
 
-- **`use_deep_agent` true:** LangChain **Deep Agents** (`create_deep_agent`) with entity-scoped tools (`portfolio_*` in `portfolio_deep_agent.py`). The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API (e.g. read artifacts) and **poll** job status for step text.
+- **`use_deep_agent` true:** LangChain **Deep Agents** (`create_deep_agent`) with entity-scoped tools (workspace-aware tools in `portfolio_deep_agent.py`). The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API and **poll** job status for step text.
 - **`use_deep_agent` false:** one-shot model call (`generate_with_context`). Returns **`200 OK`** with the assistant message in the body (no job).
 
-The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) now also accept `use_deep_agent` and `model_profile_id`, so shortcut runs can follow the same mode/profile selection.
+The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) also accept `use_deep_agent` and `model_profile_id`, so shortcut runs can follow the same mode/profile selection.
 
-**Context selection:** Selected `resource_ids` / `artifact_ids` inline excerpts into the user turn and help edit resolution. They are **optional** in Agent mode: tools can **list/read** all entity artifacts and resources without prior selection.
+**Context selection:** Selected `node_ids` inline excerpts from workspace files into the user turn and help edit resolution. They are **optional** in Agent mode: tools can **list/read** all entity workspace nodes without prior selection.
 
 ### Environment (summary)
 
@@ -357,30 +515,26 @@ The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `
 |----------|---------|
 | `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Legacy chat + presets |
 | `GEMINI_MODEL` | Main chat model id (default `gemini-3.1-pro-preview`) |
-| `GEMINI_METADATA_EXTRACTION_MODEL` | Presets such as `extract_info` and **row metadata pre-process** (file lookup JSON); default `gemini-3.1-flash-lite-preview` |
+| `GEMINI_METADATA_EXTRACTION_MODEL` | Presets such as `extract_info` and **node metadata pre-process** (file lookup JSON); default `gemini-3.1-flash-lite-preview` |
 | `CHAT_USE_DEEP_AGENT` | Server default for deep agent when request omits `use_deep_agent` |
 | `CHAT_DEFAULT_MODEL_PROFILE` | Default profile id if client omits `model_profile_id` |
 | `CHAT_AGENT_RECURSION_LIMIT` | LangGraph recursion limit (default 50) |
-| `CHAT_ARTIFACT_*` | Edit policy: default **`versioned`** vs **`overwrite`**, overwrite enabled flag, resolver score threshold |
-| `CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY` | `create_new` (default) or `allow_edit` — when `create_new`, casual “save / note / 记下来” turns without a selected artifact cannot mutate via `portfolio_apply_artifact_edit` until the model uses `portfolio_create_artifact` (or user wording / selection implies a clear edit). |
+| `WORKSPACE_MAX_FILE_BYTES` | Max upload size per file (default 50 MB) |
+| `WORKSPACE_VERSION_RETENTION_DAYS` | How long old file versions are kept (default 30 days) |
 | `MOONSHOT_API_KEY`, `KIMI_CODE_API_KEY`, URLs, `KIMI_CODE_MODEL`, etc. | Moonshot Open Platform vs Kimi Code routing — see `backend/app/config.py`, `backend/.env_sample`, `model_profiles.py` |
 
 Other: `CHAT_ENABLE_GOOGLE_SEARCH`, attachment/history limits. Deep-agent steps are pushed to `chat_completion_jobs.step_detail` for UI polling.
 
-**Deep-agent artifact tools (summary):**
+**Deep-agent workspace tools (summary):**
 
-- **`portfolio_list_artifacts` / `portfolio_list_resources`** — discover corpus.
-- **`portfolio_read_artifact` / `portfolio_read_resource`** — text payloads (policies in `artifact_editing.read_*`).
-- **`portfolio_resolve_artifact_target`**, **`portfolio_validate_artifact_edit`**, **`portfolio_apply_artifact_edit`** — Option B pipeline; **`apply`** is the only tool that mutates existing artifact bytes / versions. Resolve results exposed to the model include a JSON-safe **`metadata`** field when an artifact row is resolved.
-- **`portfolio_create_artifact`** — new canonical artifact row + file (`.md` / `.json` / `.txt`), independent lineage.
-
-If policy is `create_new` and the user message looks like “persist this” but no artifact id was attached for the turn, **`portfolio_apply_artifact_edit`** may return **`create_intent_requires_create_tool`** in the tool JSON instead of writing.
-
-**Artifact edits (Option B):** resolve → validate → `portfolio_apply_artifact_edit` → audit **`artifact_edit_events`**. Parsed PDF/Office text available via read tools and harness preamble.
+- **`portfolio_list_workspace` / `portfolio_search_workspace`** — discover workspace files and folders.
+- **`portfolio_read_file`** — read file content (text payloads, parsed PDF/Office text).
+- **`portfolio_create_file`** — create a new file in the workspace tree.
+- **`portfolio_edit_file`** — overwrite/update an existing file (creates a new version).
 
 ### `GET /entities/{entity_id}/chat/presets`
 
-List shortcut presets. Each preset has an `id` (for example `red_team`, `extract_info`), display fields, and output hints. **Preset run** behavior is defined in `backend/app/services/preset_registry.py`: markdown-style outputs are stored as `.md` artifacts; `extract_info` produces a versioned **JSON** artifact (title `extract_info`) with structured company metadata.
+List shortcut presets. Each preset has an `id` (for example `red_team`, `extract_info`), display fields, and output hints. **Preset run** behavior is defined in `backend/app/services/preset_registry.py`: markdown-style outputs are stored as `.md` files; `extract_info` produces a versioned **JSON** file (title `extract_info`) with structured company metadata.
 
 ### `GET /entities/{entity_id}/chat/sessions`
 
@@ -401,8 +555,7 @@ Send a user turn. JSON body:
 ```json
 {
   "text": "What are the top risks?",
-  "resource_ids": ["uuid"],
-  "artifact_ids": ["uuid"],
+  "node_ids": ["uuid"],
   "model_profile_id": "gemini_google",
   "use_deep_agent": true
 }
@@ -411,15 +564,14 @@ Send a user turn. JSON body:
 | Field | Required | Description |
 |-------|----------|-------------|
 | `text` | yes | User message |
-| `resource_ids` | no | Canonical resources to emphasize this turn |
-| `artifact_ids` | no | Canonical artifacts to emphasize / edit hints |
+| `node_ids` | no | Workspace node IDs to emphasize this turn |
 | `model_profile_id` | no | `gemini_google` \| `kimi_moonshot` (harness only) |
 | `use_deep_agent` | no | If set, overrides server `CHAT_USE_DEEP_AGENT` for **this** message |
 
 **Responses**
 
 - **`202 Accepted`** — Deep agent path. Body (`ChatMessageJobAccepted`): `job_id`, `user_message` (already stored), `warnings`. Client should **poll** `GET .../jobs/{job_id}` until `status` is `succeeded` or `failed`; then load session messages or read `assistant_message` from the job payload.
-- **`200 OK`** — Legacy path. Body (`ChatMessageResult`): `assistant_message`, `warnings` (no `run_id` / `tool_trace` unless you extend legacy).
+- **`200 OK`** — Legacy path. Body (`ChatMessageResult`): `assistant_message`, `warnings`.
 
 Legacy: multimodal context where supported. Harness: text-inline preamble from selections; tools can fetch the rest. Search behavior follows the active profile when enabled.
 
@@ -429,30 +581,33 @@ Poll deep-agent progress after a `202` from `POST .../messages`. Returns `ChatMe
 
 ### `POST /entities/{entity_id}/chat/presets/{preset_id}/run`
 
-Run a preset and **create a new canonical artifact** (markdown or JSON on disk + DB row, depending on preset). JSON body:
+Run a preset and **create a new workspace file** (markdown or JSON, depending on preset). JSON body:
 
 ```json
 {
-  "resource_ids": [],
-  "artifact_ids": [],
+  "node_ids": [],
   "session_id": "optional — if set, appends assistant note to that session",
   "industry": "optional",
   "stage": "optional",
-  "artifact_type": "optional override",
-  "artifact_status": "optional override"
+  "deliverable_type": "optional override",
+  "deliverable_status": "optional override"
 }
 ```
 
-Response: `{ "artifact_id", "assistant_summary", "warnings" }` (exact fields may include artifact metadata for UI artifact cards).
-
-When `session_id` is provided, the run can append a short assistant message to that session (for example an artifact card referencing the new artifact).
+Response (`PresetRunResponse`):
+```json
+{
+  "node_id": "uuid",
+  "assistant_summary": "...",
+  "warnings": []
+}
+```
 
 `PresetRunRequest` supports:
 
 ```json
 {
-  "resource_ids": ["..."],
-  "artifact_ids": ["..."],
+  "node_ids": ["..."],
   "session_id": "...",
   "model_profile_id": "gemini_google",
   "use_deep_agent": true
@@ -479,41 +634,51 @@ Notes:
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
 
-### Resource (Canonical)
-| Field | Type | Description |
-|-------|------|-------------|
-| id | UUID | Primary key |
-| entity_id | UUID | Parent entity (required, not "00000") |
-| resource_type | string | "file", "text", or "url" |
-| title | string | Display title |
-| mime_type | string | MIME type for files |
-| original_filename | string | Original upload name |
-| relative_path | string | Path relative to DATA_ROOT |
-| url | string | URL for url-type resources |
-| origin_ingest_id | UUID | Traceability to parking lot |
-| metadata | object \| null | Parsed from `metadata_json`; API never returns raw `metadata_json` text |
-| created_at | datetime | Creation timestamp |
-| updated_at | datetime | Last update timestamp |
-
-### Artifact (Canonical)
+### WorkspaceNode
 | Field | Type | Description |
 |-------|------|-------------|
 | id | UUID | Primary key |
 | entity_id | UUID | Parent entity |
-| artifact_type | string | "memo", "factsheet", "report", "other" |
-| title | string \| null | Optional display key (for example `extract_info`); versioning may group by title |
-| version | int | Version number |
-| status | string | "draft" or "final" |
-| relative_path | string | Path under `DATA_ROOT` to file (typically `v{n}.md` or `v{n}.json`) |
-| metadata | object \| null | Parsed from `metadata_json` |
+| node_type | string | "file", "folder", or "bookmark" |
+| name | string | Display name |
+| path | string | Materialized path (e.g. "Data Room/Financials/Q4.xlsx") |
+| parent_id | UUID | Parent folder node (null for root-level nodes) |
+| mime_type | string | MIME type (files only) |
+| size_bytes | int | File size in bytes (files only) |
+| checksum | string | SHA-256 of current content (files only) |
+| storage_key | string | Path-independent blob key (files only) |
+| url | string | Target URL (bookmarks only) |
+| version | int | Current version number (files; default 1) |
+| origin_type | string | "upload", "ingest", "agent", "preset" |
+| metadata | object \| null | Parsed from `metadata_json`; API never returns raw text |
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
+| deleted_at | datetime | Soft-delete timestamp (null if alive) |
+
+Unique constraint on `(entity_id, path)` where `deleted_at IS NULL`.
 
 After **metadata pre-process** succeeds, `metadata` often includes top-level keys such as **`native_file_metadata`** and **`gemini_preprocessed`** (merged with any existing object).
 
+### WorkspaceOp (audit log)
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | Primary key |
+| entity_id | UUID | Parent entity |
+| batch_id | string | Group ID for atomic undo |
+| op_type | string | create_file, create_folder, overwrite, move, rename, copy, delete, restore, upload_tree, extract_zip |
+| actor_type | string | "user", "agent", or "system" |
+| actor_ref | string | Optional actor reference |
+| node_id | UUID | Affected node |
+| payload_json | text | Operation-specific data |
+| inverse_json | text | Data needed for undo |
+| before_checksum | string | File checksum before mutation |
+| after_checksum | string | File checksum after mutation |
+| created_at | datetime | Operation timestamp |
+| undone_at | datetime | When undone (null if not undone) |
+
 ### Chat completion job (Deep Agent only)
 
-Persisted in **`chat_completion_jobs`** for async turns. Not exposed as a full CRUD resource; use the job GET above. Stores `status`, `step_detail`, FKs to `user_message_id` / `assistant_message_id`, serialized attachment ids, `harness_extras`, `warnings_json`, `tool_trace_json`, `agent_run_id` (correlates with `artifact_edit_events.run_id`).
+Persisted in **`chat_completion_jobs`** for async turns. Not exposed as a full CRUD resource; use the job GET above. Stores `status`, `step_detail`, FKs to `user_message_id` / `assistant_message_id`, serialized `node_ids_json`, `model_profile_id`, `harness_extras`, `warnings_json`, `tool_trace_json`, `agent_run_id`.
 
 ### IngestItem (Parking Lot)
 | Field | Type | Description |

@@ -1,7 +1,7 @@
 """
 End-to-end chat tests against the **real** Gemini / deep-agent stack.
 
-- **Direct mode** (`use_deep_agent: false`): one-shot `generate_with_context`.
+- **Direct mode** (`use_deep_agent: false`): Gemini Interactions API via `generate_with_interaction`.
 - **Agent mode** (`use_deep_agent: true`): background job + tools (poll until terminal).
 
 Run manually (from repo root or `backend/`), with API key available (e.g. `backend/.env`):
@@ -104,14 +104,13 @@ def entity_and_session(client: TestClient):
 
 
 def test_e2e_direct_mode_llm_roundtrip(client: TestClient, entity_and_session):
-    """One-shot Gemini path: no tools, synchronous 200."""
+    """Gemini Interactions API path: no tools, synchronous 200, interaction ID stored."""
     entity_id, session_id = entity_and_session
     r = client.post(
         f"/entities/{entity_id}/chat/sessions/{session_id}/messages",
         json={
             "text": "Reply with exactly one English word: OK",
-            "resource_ids": [],
-            "artifact_ids": [],
+            "node_ids": [],
             "use_deep_agent": False,
         },
     )
@@ -121,6 +120,20 @@ def test_e2e_direct_mode_llm_roundtrip(client: TestClient, entity_and_session):
     assert len(content.strip()) > 0
     assert "OK" in content.upper()
 
+    # Verify Interactions API chain: session should now have has_gemini_chain=true
+    detail = client.get(f"/entities/{entity_id}/chat/sessions/{session_id}")
+    assert detail.status_code == 200
+    session_data = detail.json()["session"]
+    assert session_data.get("has_gemini_chain") is True, (
+        f"Expected has_gemini_chain=True after direct Gemini call, got {session_data}"
+    )
+
+    # Verify message provenance
+    msgs = detail.json()["messages"]
+    assert len(msgs) == 2
+    assert msgs[0]["model_profile_id"] == "gemini_google"  # user msg
+    assert msgs[1]["model_profile_id"] == "gemini_google"  # assistant msg
+
 
 def test_e2e_agent_mode_llm_roundtrip(client: TestClient, entity_and_session):
     """Deep-agent path: 202 + background job completes with an assistant message."""
@@ -129,8 +142,7 @@ def test_e2e_agent_mode_llm_roundtrip(client: TestClient, entity_and_session):
         f"/entities/{entity_id}/chat/sessions/{session_id}/messages",
         json={
             "text": "Reply with exactly one English word: ALIVE",
-            "resource_ids": [],
-            "artifact_ids": [],
+            "node_ids": [],
             "use_deep_agent": True,
         },
     )
@@ -167,8 +179,7 @@ def test_e2e_agent_mode_tools_list_artifacts(client: TestClient, entity_and_sess
                 "Use portfolio_list_artifacts (limit 20). "
                 "How many artifacts does this entity have? Reply with one digit only."
             ),
-            "resource_ids": [],
-            "artifact_ids": [],
+            "node_ids": [],
             "use_deep_agent": True,
         },
     )
@@ -210,8 +221,7 @@ def test_e2e_agent_mode_natural_language_save_note_may_create_artifact(
                 "Quick: jot this down for the record — E2E casual save ping. "
                 "顺便 workspace 里帮我记一下 same ping 中文一行就好。"
             ),
-            "resource_ids": [],
-            "artifact_ids": [],
+            "node_ids": [],
             "use_deep_agent": True,
         },
     )

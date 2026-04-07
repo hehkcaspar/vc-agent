@@ -39,13 +39,14 @@ This folder is the canonical source for technical documentation.
 - If **Academic Tracking v2** agent, API, storage, or models change, update `API_REFERENCE.md` (Academic section), `ARCHITECTURE.md` (Academic module section), and `../CLAUDE.md` (Academic Tracking Module). Design spec lives in `../doc/ACADEMIC_TRACKING_V2_DESIGN.md` — do not modify.
 - **Design history** lives in `docs/plans/`; **`API_REFERENCE.md` + `ARCHITECTURE.md`** are the source of truth for *current* shipped behavior.
 
-## Chat & artifacts (quick map)
+## Workspace & chat (quick map)
 
 | Topic | Where |
 |--------|--------|
-| Endpoints, bodies, env summary | `API_REFERENCE.md` → Entity chat |
-| `metadata` on resources/artifacts, pre-process POST/GET | `API_REFERENCE.md` → Entities; `ARCHITECTURE.md` → Resource and artifact `metadata_json` |
-| Deep agent, tools, Option B edits, create-vs-edit policy | `ARCHITECTURE.md` → Portfolio chat |
+| Workspace endpoints (tree, files, versioning, trash, ops) | `API_REFERENCE.md` → Workspace |
+| Chat endpoints, bodies, env summary | `API_REFERENCE.md` → Entity chat |
+| Deep agent, 13 workspace tools, provenance enforcement | `ARCHITECTURE.md` → Portfolio chat |
+| Workspace design (full spec) | `../doc/ENTITY_WORKSPACE_DESIGN.md` |
 | Local env, pytest (unit + optional real LLM E2E), manual checklist | `DEVELOPER_GUIDE.md` → Configuration, Testing |
 
 ## Academic Tracking v2 (quick map)

@@ -59,11 +59,11 @@ $env:GEMINI_API_KEY = "your-key"
 $env:GOOGLE_API_KEY = "your-key"
 ```
 
-Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info` and for **per-row metadata pre-process** / file-lookup enrichment), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_ARTIFACT_CHARS`, `CHAT_MAX_HISTORY_MESSAGES`.
+Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info` and for **per-row metadata pre-process** / file-lookup enrichment), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_HISTORY_MESSAGES`.
 
 **Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (server default when the client omits `use_deep_agent`), `CHAT_DEFAULT_MODEL_PROFILE`, per-message `model_profile_id` / **`use_deep_agent`** body field, `CHAT_AGENT_RECURSION_LIMIT`, Moonshot / Kimi Code keys and URLs (`MOONSHOT_*`, `KIMI_CODE_*`, see `config.py`).
 
-**Artifact policy:** `CHAT_ARTIFACT_DEFAULT_EDIT_MODE`, `CHAT_ARTIFACT_OVERWRITE_ENABLED`, `CHAT_ARTIFACT_RESOLVE_MIN_SCORE`, and **`CHAT_ARTIFACT_AMBIGUOUS_INTENT_POLICY`** (`create_new` \| `allow_edit`). See `backend/.env_sample` and `docs/API_REFERENCE.md` (Entity chat env table).
+**Workspace policy:** `WORKSPACE_MAX_FILE_BYTES` (default 50 MB per file), `WORKSPACE_VERSION_RETENTION_DAYS` (default 30 days). These govern upload size limits and how long old file versions are kept before cleanup.
 
 **Optional real-LLM E2E:** set `RUN_E2E_LLM=1` and a valid Gemini key, then from `backend` run `pytest tests/test_chat_e2e_llm.py` (isolated temp DB + `DATA_ROOT`; does not touch `data/vc_portfolio.db`). Documented in `tests/test_chat_e2e_llm.py` module docstring; marker `e2e_llm` registered in `backend/pytest.ini`.
 
@@ -109,26 +109,27 @@ vc-agent/
 │   ├── app/
 │   │   ├── main.py                  # FastAPI entry point
 │   │   ├── config.py                # Settings
-│   │   ├── models.py                # SQLAlchemy models
+│   │   ├── models.py                # SQLAlchemy models (Entity, WorkspaceNode, WorkspaceOp, …)
 │   │   ├── schemas.py               # Pydantic schemas
 │   │   ├── database.py              # DB connection
 │   │   ├── routers/
-│   │   │   ├── entities.py          # Entity CRUD + resources/artifacts + metadata-preprocess jobs
+│   │   │   ├── entities.py          # Entity CRUD + metadata-preprocess jobs
+│   │   │   ├── workspace.py         # Workspace tree: upload, browse, move, rename, versions, trash, ops
 │   │   │   ├── chat.py              # Gemini chat sessions, messages, presets
 │   │   │   ├── ingest.py            # Ingestion endpoint
 │   │   │   └── parkinglot.py        # Parking lot management
 │   │   ├── prompts/                 # Markdown prompts (extract_info, file_lookup_preprocess, …)
 │   │   └── services/
 │   │       ├── storage.py             # Storage adapter
+│   │       ├── workspace.py           # WorkspaceService — unified hierarchical file system per entity
+│   │       ├── workspace_tools.py     # 13 agent tools for workspace operations (Deep Agent)
 │   │       ├── parking.py             # Parking lot manager
 │   │       ├── resolver.py            # Entity resolver
-│   │       ├── materializer.py        # Resource materializer
+│   │       ├── materializer.py        # Workspace materializer (ingest → Inbox/)
 │   │       ├── gemini_runner.py       # Legacy Gemini generate + JSON extraction
 │   │       ├── gemini_context.py      # Multimodal parts + harness attachment text
 │   │       ├── preset_registry.py     # Chat presets (red_team, extract_info); loads file_lookup_preprocess text
 │   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent)
-│   │       ├── artifact_service.py    # Artifact create/version/overwrite helpers
-│   │       ├── artifact_editing.py    # Option B resolve/validate/apply + edit events (+ resolve_snapshot metadata)
 │   │       ├── metadata_extraction.py # VC-normalized JSON for extract_info preset
 │   │       ├── file_lookup_normalize.py  # Normalize Gemini file-lookup JSON (pre-process)
 │   │       ├── metadata_preprocess_jobs.py # In-memory async jobs; merge into metadata_json
@@ -145,9 +146,8 @@ vc-agent/
 │   │   ├── components/
 │   │   │   ├── Layout.tsx           # App layout; sidebar may include chat model selector
 │   │   │   ├── PortfolioTab.tsx     # Main portfolio view (list/grid segmented toggle)
-│   │   │   ├── EntityDetail.tsx     # Entity workspace: resources, chat, artifacts + viewer modal
+│   │   │   ├── EntityDetail.tsx     # Entity workspace: workspace tree, chat, file viewer
 │   │   │   ├── EntityConversation.tsx  # Chat UI: presets, Agent toggle, async job polling, composer shell
-│   │   │   ├── JsonArtifactFormEditor.tsx  # Structured JSON editor (form mode)
 │   │   │   ├── CreateEntityModal.tsx
 │   │   │   ├── EditEntityModal.tsx  # Edit entity metadata
 │   │   │   ├── EntityMetadataForm.tsx
@@ -155,7 +155,7 @@ vc-agent/
 │   │   ├── context/
 │   │   │   └── ChatModelProfileContext.tsx  # Persisted harness profile id
 │   │   ├── hooks/
-│   │   │   ├── useEntities.ts       # Entity data hooks
+│   │   │   ├── useEntities.ts       # Entity + workspace data hooks
 │   │   │   └── useParkingLot.ts     # Parking lot hooks
 │   │   ├── lib/
 │   │   │   ├── appToast.ts          # showToast helper (used by EntityDetail, pre-process)
@@ -232,35 +232,26 @@ Multi-option switches (portfolio **List / Grid**, JSON artifact **Form / Raw JSO
 
 Inactive segments sit on the tertiary track; the active segment uses elevated background, border, and `--shadow-sm` so it reads clearly as selected (not as part of the content area below).
 
-### Entity chat, presets, Agent mode, and JSON artifacts
+### Entity chat, presets, Agent mode, and the workspace
 
-On **Entity detail**, the layout is a three-column **notebook**: Resources | Chat | Artifacts.
+On **Entity detail**, the layout is a two-column **notebook**: Workspace Tree | Chat.
 
-- **Presets** (`EntityConversation`): labeled **Run preset** — **one-shot** actions (dashed pills); they call `POST .../chat/presets/{id}/run` and create artifacts via the **legacy** Gemini pipeline (`preset_registry.py`).
+- The **Workspace Tree** replaces the old flat Resources and Artifacts columns with a unified hierarchical file browser. Users can expand folders, upload files to any folder (default Inbox), create deliverables, move/rename/copy nodes, and view version history.
+- **Presets** (`EntityConversation`): labeled **Run preset** — **one-shot** actions (dashed pills); they call `POST .../chat/presets/{id}/run` and create workspace files via the **legacy** Gemini pipeline (`preset_registry.py`).
 - **Agent** pill: **persistent mode** for ordinary messages (`use_deep_agent` in the POST body, preference in `localStorage`). **On** → deep agent path → typically **`202`** + poll `GET .../jobs/{job_id}`; status text can appear in the composer while the user switches sessions elsewhere. **Off** → **`200`** one-shot `generate_with_context`. See `API_REFERENCE.md`.
-- **Context:** side-column selections send `resource_ids` / `artifact_ids` (optional; Agent tools can still list/read entity files). Hint ids also participate in ambiguous **edit vs create** gating (see `ARCHITECTURE.md` → Portfolio chat).
-- **Artifacts list refresh:** when an Agent job finishes successfully, `EntityConversation` calls **`onArtifactsChanged`** so SWR refetches `GET /entities/{id}/artifacts` (new memos appear without reloading the page). Preset runs already invoked the same callback after `runPreset`.
+- **Context:** workspace node selections send `node_ids` (optional; Agent tools can still list/read entity files via workspace tools). The Deep Agent uses 13 workspace tools (`workspace_tools.py`) to browse, read, create, move, and annotate files.
+- **Workspace refresh:** when an Agent job finishes successfully, `EntityConversation` calls **`onWorkspaceChanged`** so SWR refetches the workspace tree (new files appear without reloading the page). Preset runs invoke the same callback.
 
-**JSON artifact viewer** (`EntityDetail.tsx` → `ArtifactViewerModal`): Form vs Raw JSON; saves via `PUT .../artifacts/{id}/content`. See existing notes on soft-wrap and `min-width: 0`.
+### Entity detail workspace tree
 
-### Entity detail side columns (Resources / Artifacts)
+The workspace tree replaces the old separate Resources and Artifacts side columns.
 
-The Resources and Artifacts zones intentionally share the same row interaction model.
-
-- **Compact rows (space-saving):** item cards were replaced by dense rows with divider lines.
-- **Select-all control:** each zone has a top row (`Select all sources` / `Select all artifacts`) with a master checkbox.
-  - Checked: all rows selected for chat context.
-  - Unchecked: none selected.
-  - Indeterminate: partial selection.
-- **Per-row checkbox:** right side checkbox toggles inclusion in chat context.
-- **Hover actions menu:** hover the file/logo area to reveal a menu trigger, then open actions:
-  - `Pre-process` (metadata enrichment: async job + toast + list refresh; row may show a check when **`metadata`** is non-empty)
-  - `Rename`
-  - `Download`
-  - `Delete`
-- **Row body click behavior:** clicking the row body still opens preview/view exactly as before.
-
-API mapping for those actions is documented in `API_REFERENCE.md` under Entity resource/artifact endpoints.
+- **Hierarchical folder browser:** files are organised into a tree with default folders (Inbox, Deliverables, etc.). Users can create arbitrary sub-folders.
+- **Upload to Inbox:** files dropped or selected land in `/Inbox` by default; they can be moved to any folder afterwards.
+- **Versions:** each file tracks version history. Old versions are retained for `WORKSPACE_VERSION_RETENTION_DAYS` (default 30 days). Users can view diffs and restore previous versions.
+- **Trash:** deleted nodes go to trash (soft delete) and can be restored or permanently purged.
+- **Operations log and undo:** workspace mutations are logged as ops; recent ops can be undone.
+- **Node selection for chat context:** clicking the checkbox on a file node includes it in the chat context, similar to the old resource/artifact selection.
 
 ### Schema-Driven Forms
 
@@ -330,7 +321,7 @@ MVP uses SQLite with auto-create tables. For schema changes:
 
 **Entity detail layout and scrolling**
 
-On desktop, the app shell is viewport-height-bounded and `main` scrolls only when needed (for example a long portfolio list). On the entity detail screen, Resources and Artifacts columns grow to use the space below the entity header; overflowing lists and file previews scroll inside each zone’s `.zone-content`, not the whole page. See **Viewport layout and scrolling** in `docs/ARCHITECTURE.md` for the flex/grid rules and file references.
+On desktop, the app shell is viewport-height-bounded and `main` scrolls only when needed (for example a long portfolio list). On the entity detail screen, the workspace tree and chat columns grow to fill the space below the entity header; overflowing content scrolls inside each zone, not the whole page. See **Viewport layout and scrolling** in `docs/ARCHITECTURE.md` for the flex/grid rules and file references.
 
 **Adding a New Component:**
 
@@ -370,9 +361,7 @@ From `backend/` (venv activated or use `..\venv\Scripts\python.exe -m pytest`):
 ..\venv\Scripts\python.exe -m pytest tests/ -v --tb=short
 ```
 
-**Heuristic / gate tests** (no LLM): `tests/test_natural_artifact_intent.py` exercises natural-language create vs edit classification and the `portfolio_apply_artifact_edit` gate. Uses your repo `data/vc_portfolio.db` when present; skipped if the file is missing.
-
-**Metadata pipeline** (mocked Gemini where needed): `tests/test_metadata_preprocess.py`, `tests/test_json_loose.py`, `tests/test_native_file_metadata.py`, `tests/test_entity_metadata.py`.
+**Metadata pipeline** (mocked Gemini where needed): `tests/test_metadata_preprocess.py`, `tests/test_json_loose.py`, `tests/test_native_file_metadata.py`, `tests/test_entity_metadata.py`. The metadata tests use workspace APIs for file operations.
 
 **Real LLM end-to-end** (optional, costs quota): `tests/test_chat_e2e_llm.py` — set `RUN_E2E_LLM=1`, ensure `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) is set (`backend/.env` loaded by the test module). Uses a **temporary** SQLite file and temp `DATA_ROOT` only.
 
@@ -411,20 +400,28 @@ These tests start a standalone server on port 8877/8878 (no portfolio dependenci
 - [ ] No match shows resolution_required
 - [ ] Can resolve to existing entity
 - [ ] Can resolve to new entity
-- [ ] Files appear in entity after resolution
+- [ ] Files appear in entity workspace after resolution
 
-**Resource Management:**
-- [ ] Add file to existing entity
-- [ ] Add text note to existing entity
-- [ ] Add URL to existing entity
+**Workspace Operations:**
+- [ ] Upload file to entity workspace (lands in Inbox)
+- [ ] Browse workspace tree, expand/collapse folders
+- [ ] Create a new folder
+- [ ] Move a file from Inbox to another folder
+- [ ] Rename a file or folder
+- [ ] Copy a file to another folder
+- [ ] Delete a file (goes to trash)
+- [ ] View trash, restore a deleted file
+- [ ] Permanently purge a trashed file
+- [ ] View file version history
+- [ ] Restore a previous file version
+- [ ] View diff between file versions
 - [ ] View PDF inline
 - [ ] View image inline
 - [ ] View text file inline
-- [ ] Download unsupported files
-- [ ] Toggle row checkbox and verify chat-context count changes
-- [ ] Use `Select all sources` and verify full/partial/none states
-- [ ] Hover row logo and run Pre-process (poll to completion), confirm **`metadata`** / UI indicator updates
-- [ ] Hover row logo and run Rename / Download / Delete actions
+- [ ] Download file
+- [ ] Toggle node checkbox and verify chat-context count changes
+- [ ] Hover row and run Pre-process (poll to completion), confirm metadata indicator updates
+- [ ] Annotate a workspace node with tags/notes
 
 **Tab State:**
 - [ ] Switch view mode (list/grid)
@@ -432,20 +429,19 @@ These tests start a standalone server on port 8877/8878 (no portfolio dependenci
 - [ ] View mode is preserved
 - [ ] Selection is preserved
 
-**Entity chat & artifacts:**
+**Entity chat & workspace:**
 - [ ] Send with **Agent off**: `200` and immediate assistant reply
 - [ ] Send with **Agent on** (if server supports harness): `202`, progress in composer, final message after poll
-- [ ] **Agent on** + ask to save a note / memo: new artifact appears in the **Artifacts** column when the job finishes (no manual full refresh)
+- [ ] **Agent on** + ask to save a note / memo: new file appears in the workspace tree when the job finishes (no manual full refresh)
 - [ ] Optional: override server default using Agent toggle vs `CHAT_USE_DEEP_AGENT`
-- [ ] Optional resource/artifact context; Agent without selection still reaches corpus via tools
-- [ ] Run a **preset** (one-shot) and see artifact card / new artifact row
-- [ ] JSON artifact: Form / Raw JSON save
-- [ ] Use `Select all artifacts` and verify full/partial/none states
-- [ ] Hover artifact row logo and run Pre-process / Rename / Download / Delete actions
+- [ ] Optional workspace node context; Agent without selection still reaches corpus via workspace tools
+- [ ] Run a **preset** (one-shot) and see new file in workspace tree
+- [ ] JSON file: Form / Raw JSON save
+- [ ] Undo a recent workspace operation via the ops log
 
 **UI/UX:**
-- [ ] Header height is compact and consistent across Resources, Chat, and Artifacts
-- [ ] Compact row hover states are clear and non-jumpy
+- [ ] Header height is compact and consistent
+- [ ] Workspace tree hover states are clear and non-jumpy
 - [ ] Edit/Archive buttons appear on hover
 - [ ] Modal animations smooth
 - [ ] Archived entities visually distinct
@@ -480,6 +476,49 @@ curl http://localhost:8000/parkinglot
 curl -X POST http://localhost:8000/parkinglot/{ingest_id}/resolve \
   -H "Content-Type: application/json" \
   -d '{"entity_id": "uuid"}'
+
+# --- Workspace API ---
+
+# Get workspace tree
+curl http://localhost:8000/entities/{id}/workspace/tree
+
+# List files in a folder (by path)
+curl "http://localhost:8000/entities/{id}/workspace/ls?path=/Inbox"
+
+# Upload a file to workspace
+curl -X POST http://localhost:8000/entities/{id}/workspace/upload \
+  -F "files=@document.pdf" \
+  -F "parent_path=/Inbox"
+
+# Create a folder
+curl -X POST http://localhost:8000/entities/{id}/workspace/folder \
+  -H "Content-Type: application/json" \
+  -d '{"path": "/Deliverables/Q1 Report"}'
+
+# Move a node
+curl -X POST http://localhost:8000/entities/{id}/workspace/move \
+  -H "Content-Type: application/json" \
+  -d '{"node_id": "uuid", "new_parent_path": "/Deliverables"}'
+
+# Rename a node
+curl -X POST http://localhost:8000/entities/{id}/workspace/rename \
+  -H "Content-Type: application/json" \
+  -d '{"node_id": "uuid", "new_name": "renamed-file.pdf"}'
+
+# Get file content
+curl http://localhost:8000/entities/{id}/workspace/file/{node_id}
+
+# Get file version history
+curl http://localhost:8000/entities/{id}/workspace/file/{node_id}/versions
+
+# Delete a node (soft delete to trash)
+curl -X DELETE "http://localhost:8000/entities/{id}/workspace/node?node_id={node_id}"
+
+# List trash
+curl http://localhost:8000/entities/{id}/workspace/trash
+
+# Restore from trash
+curl -X POST http://localhost:8000/entities/{id}/workspace/trash/{node_id}/restore
 ```
 
 **Academic Tracking (v2):**
@@ -550,7 +589,7 @@ If frontend can't connect to backend:
 Check:
 1. DATA_ROOT directory exists and is writable
 2. Disk space available
-3. File size (no limit in MVP, but very large files may timeout)
+3. File size within `WORKSPACE_MAX_FILE_BYTES` limit (default 50 MB)
 
 ### TypeScript Errors
 

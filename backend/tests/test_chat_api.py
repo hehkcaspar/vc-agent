@@ -26,6 +26,11 @@ def _stub_gemini(**kwargs) -> str:
     return "Assistant stub reply."
 
 
+def _stub_gemini_interaction(**kwargs) -> tuple[str, str]:
+    """Stub for generate_with_interaction — returns (reply_text, interaction_id)."""
+    return ("Assistant stub reply.", "stub-interaction-id")
+
+
 def _stub_gemini_json(**kwargs) -> str:
     return json.dumps(
         {
@@ -37,28 +42,32 @@ def _stub_gemini_json(**kwargs) -> str:
 
 @pytest.fixture
 def client(monkeypatch):
-    # Local .env may set CHAT_USE_DEEP_AGENT=true; tests expect stubbed legacy path unless overridden.
+    # Local .env may set CHAT_USE_DEEP_AGENT=true; tests expect stubbed direct path unless overridden.
     monkeypatch.setattr(settings, "CHAT_USE_DEEP_AGENT", False)
     monkeypatch.setattr(
-        "app.routers.chat.generate_with_context",
+        "app.routers.chat.generate_one_shot",
         _stub_gemini,
     )
     monkeypatch.setattr(
-        "app.routers.chat.generate_json_with_context",
+        "app.routers.chat.generate_with_interaction",
+        _stub_gemini_interaction,
+    )
+    monkeypatch.setattr(
+        "app.routers.chat.generate_json_one_shot",
         _stub_gemini_json,
     )
     with TestClient(app) as c:
         yield c
 
 
-def test_post_message_deep_agent_override_off_uses_legacy(
+def test_post_message_deep_agent_override_off_uses_direct(
     client: TestClient, monkeypatch
 ):
-    """Client can force one-shot Gemini even when server default is harness."""
+    """Client can force direct Gemini even when server default is harness."""
     monkeypatch.setattr(settings, "CHAT_USE_DEEP_AGENT", True)
     monkeypatch.setattr(
-        "app.routers.chat.generate_with_context",
-        _stub_gemini,
+        "app.routers.chat.generate_with_interaction",
+        _stub_gemini_interaction,
     )
     r = client.post("/entities", json={"name": "Override Co"})
     entity_id = r.json()["id"]
@@ -68,8 +77,7 @@ def test_post_message_deep_agent_override_off_uses_legacy(
         f"/entities/{entity_id}/chat/sessions/{session_id}/messages",
         json={
             "text": "Hi",
-            "resource_ids": [],
-            "artifact_ids": [],
+            "node_ids": [],
             "use_deep_agent": False,
         },
     )
@@ -101,8 +109,7 @@ def test_post_message_deep_agent_override_on_uses_harness(
         f"/entities/{entity_id}/chat/sessions/{session_id}/messages",
         json={
             "text": "Hi",
-            "resource_ids": [],
-            "artifact_ids": [],
+            "node_ids": [],
             "use_deep_agent": True,
         },
     )
@@ -143,7 +150,7 @@ def test_post_message_uses_deep_agent_when_enabled(client: TestClient, monkeypat
     session_id = r.json()["id"]
     r = client.post(
         f"/entities/{entity_id}/chat/sessions/{session_id}/messages",
-        json={"text": "Hi", "resource_ids": [], "artifact_ids": []},
+        json={"text": "Hi", "node_ids": [], },
     )
     assert r.status_code == 202
     accepted = r.json()
@@ -192,7 +199,7 @@ def test_chat_session_flow(client: TestClient):
 
     r = client.post(
         f"/entities/{entity_id}/chat/sessions/{session_id}/messages",
-        json={"text": "Hello", "resource_ids": [], "artifact_ids": []},
+        json={"text": "Hello", "node_ids": [], },
     )
     assert r.status_code == 200
     body = r.json()
@@ -203,9 +210,9 @@ def test_chat_session_flow(client: TestClient):
     assert len(r.json()["messages"]) == 2
 
 
-def test_preset_run_creates_artifact(client: TestClient, monkeypatch):
+def test_preset_run_creates_deliverable(client: TestClient, monkeypatch):
     monkeypatch.setattr(
-        "app.routers.chat.generate_with_context",
+        "app.routers.chat.generate_one_shot",
         lambda **kw: "# Red team report\n\nStub markdown.",
     )
     r = client.post("/entities", json={"name": "Beta Inc"})
@@ -213,20 +220,20 @@ def test_preset_run_creates_artifact(client: TestClient, monkeypatch):
 
     r = client.post(
         f"/entities/{entity_id}/chat/presets/red_team/run",
-        json={"resource_ids": [], "artifact_ids": []},
+        json={"node_ids": []},
     )
     assert r.status_code == 200
-    aid = r.json()["artifact_id"]
-    assert uuid.UUID(aid).version == 4
+    nid = r.json()["node_id"]
+    assert uuid.UUID(nid).version == 4
 
-    arts = client.get(f"/entities/{entity_id}/artifacts").json()
-    created = next(a for a in arts if a["id"] == aid)
-    assert created["title"] == "risk_analyze"
+    node = client.get(f"/entities/{entity_id}/workspace/node/{nid}").json()
+    assert "risk_analyze" in node["name"]
+    assert node["path"].startswith("Deliverables/")
 
 
-def test_preset_run_session_message_is_artifact_card_json(client: TestClient, monkeypatch):
+def test_preset_run_session_message_is_deliverable_card(client: TestClient, monkeypatch):
     monkeypatch.setattr(
-        "app.routers.chat.generate_with_context",
+        "app.routers.chat.generate_one_shot",
         lambda **kw: "# Report\n\nShort.",
     )
     r = client.post("/entities", json={"name": "Gamma LLC"})
@@ -236,64 +243,55 @@ def test_preset_run_session_message_is_artifact_card_json(client: TestClient, mo
 
     r = client.post(
         f"/entities/{entity_id}/chat/presets/red_team/run",
-        json={"resource_ids": [], "artifact_ids": [], "session_id": session_id},
+        json={"node_ids": [], "session_id": session_id},
     )
     assert r.status_code == 200
-    aid = r.json()["artifact_id"]
+    nid = r.json()["node_id"]
 
     detail = client.get(f"/entities/{entity_id}/chat/sessions/{session_id}").json()
     msgs = detail["messages"]
     assert len(msgs) == 1
     data = json.loads(msgs[0]["content"])
     assert data["_vc_chat"] == "artifact_card"
-    assert data["artifact_id"] == aid
+    assert data["node_id"] == nid
     assert data["preset_label"] == "Red team diligence"
 
 
-def test_update_artifact_json_content(client: TestClient):
+def test_workspace_file_upload_and_download(client: TestClient):
+    import io as _io
     r = client.post("/entities", json={"name": "Epsilon Co"})
     entity_id = r.json()["id"]
 
+    files = {"file": ("data.json", _io.BytesIO(b'{"a": 1}'), "application/json")}
     r = client.post(
-        f"/entities/{entity_id}/artifacts",
-        data={
-            "artifact_type": "other",
-            "content": '{"a": 1}',
-            "status": "draft",
-        },
+        f"/entities/{entity_id}/workspace/file?path=Inbox/data.json",
+        files=files,
     )
     assert r.status_code == 200
-    aid = r.json()["id"]
+    nid = r.json()["id"]
 
-    r = client.put(
-        f"/entities/{entity_id}/artifacts/{aid}/content",
-        json={"a": 2, "b": ["x", "y"]},
-    )
+    r = client.get(f"/entities/{entity_id}/workspace/file/{nid}")
     assert r.status_code == 200
-
-    r = client.get(f"/entities/{entity_id}/artifacts/{aid}/view")
-    assert r.status_code == 200
-    body = json.loads(r.json()["content"])
-    assert body["a"] == 2
-    assert body["b"] == ["x", "y"]
+    body = json.loads(r.content)
+    assert body["a"] == 1
 
 
-def test_extract_info_preset_creates_json_artifact(client: TestClient):
+def test_extract_info_preset_creates_json_deliverable(client: TestClient):
     r = client.post("/entities", json={"name": "Delta LLC", "website": "https://delta.test"})
     entity_id = r.json()["id"]
 
     r = client.post(
         f"/entities/{entity_id}/chat/presets/extract_info/run",
-        json={"resource_ids": [], "artifact_ids": []},
+        json={"node_ids": []},
     )
     assert r.status_code == 200
-    aid = r.json()["artifact_id"]
+    nid = r.json()["node_id"]
 
-    arts = client.get(f"/entities/{entity_id}/artifacts").json()
-    created = next(a for a in arts if a["id"] == aid)
-    assert created["title"] == "extract_info"
-    assert created["relative_path"].endswith(".json")
+    node = client.get(f"/entities/{entity_id}/workspace/node/{nid}").json()
+    assert node["name"].endswith(".json")
+    assert node["path"].startswith("Deliverables/")
 
-    view = client.get(f"/entities/{entity_id}/artifacts/{aid}/view").json()
-    parsed = json.loads(view["content"])
+    r = client.get(f"/entities/{entity_id}/workspace/file/{nid}")
+    assert r.status_code == 200
+    parsed = json.loads(r.content)
     assert parsed["company_name"]["value"] == "StubCo"

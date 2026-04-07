@@ -48,20 +48,32 @@ No frontend test runner is configured yet.
 
 ### Core Pattern: Entity-Canonical + Parking-Lot Ingestion
 1. All inbound content persists to parking lot (`/00000/parkinglot/{ingest_id}/`) immediately
-2. `EntityResolver` matches content to entities; `ResourceMaterializer` promotes parking lot items to canonical resources (copy → verify → write DB → delete parking)
+2. `EntityResolver` matches content to entities; `WorkspaceMaterializer` promotes parking lot items to workspace nodes (write to Inbox/ → write DB → delete parking)
 3. Normal APIs only operate on canonical records (never raw parking lot)
+
+### Workspace (Hierarchical File System per Entity)
+Each entity has a single workspace tree that replaces the old dual Resource/Artifact model. Design doc: `doc/ENTITY_WORKSPACE_DESIGN.md`.
+
+- **`workspace_nodes`** table — files, folders, bookmarks in a tree (path-based, with `parent_id`)
+- **`workspace_ops`** table — audit log for all mutations (create, overwrite, move, delete, etc.)
+- **Physical storage** — blobs at `{entity_id}/workspace/blobs/{node_id}/{filename}` (decoupled from path; moves are DB-only)
+- **Versioning** — every file overwrite snapshots old content to `.versions/{node_id}/`
+- **Provenance** — `origin_type` (upload|agent|ingest|shared|user) enforces write zones: agents cannot overwrite user uploads
+- **Template** — new entities get default folders: Inbox/, Data Room/, Technical/, Deliverables/ (Memos/Reports/Factsheets)
+- **WORKSPACE_NOTES.md** — shared file at root for cross-file context (both user and agent can edit)
 
 ### Backend Structure (`backend/app/`)
 - **`main.py`** — FastAPI app, CORS, lifespan (LangSmith guard + DB init + stuck-evaluating reset)
-- **`routers/`** — `entities`, `chat`, `ingest`, `parkinglot`, `academic`
+- **`routers/`** — `entities`, `workspace`, `chat`, `ingest`, `parkinglot`, `academic`
 - **`services/`** — Domain logic:
+  - `workspace.py` — `WorkspaceService` (tree queries, write/overwrite/version, move/rename, delete, copy, undo, provenance enforcement, template scaffolding, agent context builder)
+  - `workspace_tools.py` — `build_workspace_tools()` — 13 LangChain agent tools for workspace operations
   - `storage.py` — `StorageAdapter` abstraction (local FS, designed for future cloud swap)
-  - `parking.py` / `resolver.py` / `materializer.py` — ingestion pipeline
-  - `gemini_runner.py` / `gemini_context.py` — Gemini API calls
-  - `portfolio_deep_agent.py` — LangChain Deep Agent harness (async tools, job polling)
-  - `artifact_service.py` / `artifact_editing.py` — artifact CRUD + Option B edit pipeline with audit log
+  - `parking.py` / `resolver.py` / `materializer.py` — ingestion pipeline (materializes to workspace Inbox/)
+  - `gemini_runner.py` / `gemini_context.py` — Gemini API calls, workspace node context building
+  - `portfolio_deep_agent.py` — LangChain Deep Agent harness (workspace tools, job polling)
   - `model_profiles.py` — model wiring (Gemini, Kimi/Moonshot)
-  - `metadata_extraction.py` / `metadata_preprocess_jobs.py` — async metadata enrichment
+  - `metadata_extraction.py` / `metadata_preprocess_jobs.py` — async metadata enrichment for workspace nodes
   - `academic/` — Academic Tracking v2 module (separate from portfolio):
     - `file_utils.py` — shared dossier path, JSON/JSONL read/write helpers
     - `evaluation_service.py` — evaluation normalisation, delta computation, score extraction, background eval/refresh/comparative tasks, `running_agents` registry
@@ -75,7 +87,7 @@ No frontend test runner is configured yet.
     - `heartbeat.py` — background scheduler for stale scholar refresh, channel polling, digest generation
     - `channel_pollers.py` — Google Scholar / Semantic Scholar change detection
 - **`prompts/`** — Markdown prompt templates (extract_info, red_team, file_lookup_preprocess)
-- **`models.py`** — SQLAlchemy ORM (entities, resources, artifacts, ingest_items, conversation_sessions/messages, chat_completion_jobs, artifact_edit_events)
+- **`models.py`** — SQLAlchemy ORM (entities, workspace_nodes, workspace_ops, ingest_items, conversation_sessions/messages, chat_completion_jobs)
 - **`academic_database.py`** — Academic DB engine, sessions, `AcademicBase` (separate `data/academic.db`)
 - **`academic_models.py`** — Academic Tracking ORM using `AcademicBase` (scholars, scholar_events, channels, chat_sessions/messages/jobs)
 - **`academic_schemas.py`** — Pydantic schemas for academic endpoints (scholar CRUD, evaluations, papers, reports, events, chat, ranking, digest, custom dimensions)
@@ -84,8 +96,8 @@ No frontend test runner is configured yet.
 ### Frontend Structure (`frontend/src/`)
 - **`App.tsx`** — Root with `TabProvider` + `ToastHost`
 - **`components/Layout.tsx`** — App shell with sidebar (Portfolio + Academic tabs)
-- **`components/EntityDetail.tsx`** — Entity workspace (resources + chat + artifacts)
-- **`components/EntityConversation.tsx`** — Chat UI with presets, agent toggle, job polling
+- **`components/EntityDetail.tsx`** — Entity workspace (hierarchical file tree + chat panel)
+- **`components/EntityConversation.tsx`** — Chat UI with presets, agent toggle, job polling, workspace node selection
 - **`components/academic/`** — Academic Tracking v2 workspace:
   - `AcademicTab.tsx` — Scholar list/ranking views, signal feed, stale alerts, digest viewer, custom dimensions modal
   - `ScholarDetail.tsx` — Scholar detail with report sidebar, content tab router, auto-refresh during evaluation
@@ -96,8 +108,11 @@ No frontend test runner is configured yet.
   - `ScholarConversation.tsx` — Per-scholar chat with session management and async job polling
   - `RankingView.tsx` — Sortable ranking table with weight presets and comparative evaluation
   - `AddScholarModal.tsx` — Create/edit scholar modal
+- **`services/api.ts`** — API client (entities, workspace, chat, ingest, parking lot)
 - **`services/academicApi.ts`** — API client (scholars, chat, ranking, digests, uploads, custom dimensions)
-- **`hooks/useAcademic.ts`** — SWR hooks for all academic data (reports, papers, evaluations, events, channels, chat sessions, signal feed, ranking, weight presets, digests, custom dimensions)
+- **`hooks/useEntities.ts`** — SWR hooks: `useEntities`, `useEntity`, `useWorkspaceTree`
+- **`hooks/useAcademic.ts`** — SWR hooks for all academic data
+- **`types/index.ts`** — TypeScript interfaces (Entity, WorkspaceNode, WorkspaceTreeNode, chat types)
 - **`types/academic.ts`** — TypeScript interfaces + display constants (labels, colours, score helpers)
 - **`lib/academicRanking.ts`** — `computeWeightedRank()` for client-side ranking
 - **`context/TabContext.tsx`** — Tab state management
@@ -105,12 +120,17 @@ No frontend test runner is configured yet.
 
 ### Chat Modes
 - **One-shot** (default): synchronous Gemini call → 200 response
-- **Deep Agent** (`use_deep_agent=true`): 202 response with `job_id`, background LangChain agent with tools (list/read resources/artifacts, create/edit artifacts), client polls for completion
+- **Deep Agent** (`use_deep_agent=true`): 202 response with `job_id`, background LangChain agent with 13 workspace tools, client polls for completion. Agent receives workspace tree context (file structure + descriptions + workspace notes) on every turn.
+
+### Workspace Agent Tools (13 total)
+Browse + organize (7): `workspace_get_tree`, `workspace_list_files`, `workspace_read_file`, `workspace_search_files`, `workspace_create_folder`, `workspace_move`, `workspace_rename`
+Write + manage (6): `workspace_write_file`, `workspace_annotate`, `workspace_delete`, `workspace_file_versions`, `workspace_restore_version`, `workspace_history`
 
 ### Data Storage
 - Portfolio SQLite DB at `data/vc_portfolio.db`
 - Academic SQLite DB at `data/academic.db` (separate from portfolio)
-- Entity files at `data/entities/{entity_id}/`
+- Entity workspace files at `data/entities/{entity_id}/workspace/blobs/{node_id}/`
+- Version history at `data/entities/{entity_id}/workspace/.versions/{node_id}/`
 - Parking lot at `data/entities/00000/parkinglot/`
 - Scholar dossiers at `data/scholars/{scholar_id}/` (profile.json, papers.json, events.jsonl, channels.json, evaluations/, reports/, uploads/, agent_runs/)
 - Academic config at `data/config/` (heartbeat.json, field_archetypes.json, ranking_presets/, digests/, custom_dimensions.json)
@@ -122,7 +142,8 @@ All backend config via environment variables (see `backend/.env_sample`):
 - `GEMINI_API_KEY` / `GOOGLE_API_KEY` — required for AI features
 - `CHAT_USE_DEEP_AGENT` — enable deep agent mode (default false)
 - `CHAT_DEFAULT_MODEL_PROFILE` — `gemini_google` or `kimi_moonshot`
-- `CHAT_ARTIFACT_DEFAULT_EDIT_MODE` — `versioned` or `overwrite`
+- `WORKSPACE_MAX_FILE_BYTES` — max file size (default 50MB)
+- `WORKSPACE_VERSION_RETENTION_DAYS` — version history retention (default 30 days)
 - `LANGSMITH_TRACING` / `LANGSMITH_API_KEY` — optional tracing
 - `ACADEMIC_DATABASE_URL` — academic SQLite DB (default `data/academic.db`, separate from portfolio)
 - `ACADEMIC_GEMINI_MODEL` — model for academic tracking (default `gemini-3-flash-preview`)
@@ -172,8 +193,8 @@ One agent factory (`invoke_scholar_agent`), one toolkit (`build_scholar_tools(sc
 
 - Python: PEP 8, type hints, async/await for I/O
 - Frontend: functional React components with hooks, TypeScript strict mode
-- Key abstractions to maintain: `StorageAdapter`, `ParkingLotManager`, `EntityResolver`, `ResourceMaterializer`
+- Key abstractions to maintain: `StorageAdapter`, `WorkspaceService`, `ParkingLotManager`, `EntityResolver`, `WorkspaceMaterializer`
 
 ## Documentation
 
-Detailed docs in `docs/`: `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md`, `API_REFERENCE.md`, `TRACING.md`. Product requirements in `doc/MVP-prd.md`.
+Detailed docs in `docs/`: `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md`, `API_REFERENCE.md`, `TRACING.md`. Workspace design in `doc/ENTITY_WORKSPACE_DESIGN.md`. Product requirements in `doc/MVP-prd.md`.
