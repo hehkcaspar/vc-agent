@@ -205,11 +205,21 @@ export interface PresetInfo {
   description: string;
 }
 
-export interface PresetRunResponse {
+export interface PresetRunSyncResult {
   node_id: string;
   assistant_summary: string;
   warnings: string[];
 }
+
+export type PresetRunResponse =
+  | { kind: 'completed'; result: PresetRunSyncResult }
+  | {
+      kind: 'accepted';
+      jobId: string;
+      sessionId: string;
+      userMessage: ChatMessage;
+      warnings: string[];
+    };
 
 export interface TabState {
   viewMode: 'list' | 'grid';

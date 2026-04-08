@@ -267,7 +267,7 @@ export function EntityConversation({
   const activeAgentStatusText = humanizedAgentStatus?.trim() || 'Agent is working...';
 
   useEffect(() => {
-    if (!agentActiveHere) {
+    if (!agentActiveHere && !busy) {
       setSpinnerFrame(0);
       return undefined;
     }
@@ -275,7 +275,7 @@ export function EntityConversation({
       setSpinnerFrame((f) => (f + 1) % CLI_SPINNER_DOTS_FRAMES.length);
     }, CLI_SPINNER_DOTS_INTERVAL_MS);
     return () => window.clearInterval(id);
-  }, [agentActiveHere]);
+  }, [agentActiveHere, busy]);
 
   const humanizedWarnings = useMemo(() => {
     if (warnings.length === 0) return warnings;
@@ -414,11 +414,26 @@ export function EntityConversation({
         model_profile_id: profileId,
         use_deep_agent: chatAgentOn,
       });
-      setWarnings(res.warnings);
-      onArtifactsChanged();
-      if (sessionId) {
-        const detail = await api.chat.getSession(entityId, sessionId);
-        setMessages(detail.messages);
+      if (res.kind === 'accepted') {
+        // Deep-agent path: dispatched as background job. The polling effect
+        // drives the spinner status line; refresh messages so the synthetic
+        // user message shows up immediately.
+        setWarnings(res.warnings);
+        setAgentJob({ jobId: res.jobId, sessionId: res.sessionId });
+        setAgentStatus('Queued…');
+        try {
+          const detail = await api.chat.getSession(entityId, res.sessionId);
+          setMessages(detail.messages);
+        } catch {
+          /* non-fatal */
+        }
+      } else {
+        setWarnings(res.result.warnings);
+        onArtifactsChanged();
+        if (sessionId) {
+          const detail = await api.chat.getSession(entityId, sessionId);
+          setMessages(detail.messages);
+        }
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -611,6 +626,8 @@ export function EntityConversation({
               placeholder={
                 agentActiveHere
                   ? `${CLI_SPINNER_DOTS_FRAMES[spinnerFrame]} ${activeAgentStatusText}`
+                  : busy
+                  ? `${CLI_SPINNER_DOTS_FRAMES[spinnerFrame]} Working…`
                   : 'Message…'
               }
               rows={2}

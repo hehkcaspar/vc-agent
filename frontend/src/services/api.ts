@@ -14,6 +14,7 @@ import {
   PostChatMessageResult,
   PresetInfo,
   PresetRunResponse,
+  PresetRunSyncResult,
 } from '../types';
 
 const DIRECT_API = import.meta.env.VITE_API_URL?.trim() ?? '';
@@ -285,7 +286,7 @@ export const api = {
       fetchJson<ChatMessageJobStatus>(
         `/entities/${entityId}/chat/sessions/${sessionId}/jobs/${jobId}`,
       ),
-    runPreset: (
+    runPreset: async (
       entityId: string,
       presetId: string,
       body: {
@@ -296,14 +297,36 @@ export const api = {
         industry?: string | null;
         stage?: string | null;
       },
-    ) =>
-      fetchJson<PresetRunResponse>(
-        `/entities/${entityId}/chat/presets/${presetId}/run`,
+    ): Promise<PresetRunResponse> => {
+      const response = await fetch(
+        apiUrl(`/entities/${entityId}/chat/presets/${presetId}/run`),
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify(body),
         },
-      ),
+      );
+      const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+      if (response.status === 202) {
+        return {
+          kind: 'accepted',
+          jobId: String(data.job_id ?? ''),
+          sessionId: String(data.session_id ?? ''),
+          userMessage: data.user_message as ChatMessage,
+          warnings: (data.warnings as string[]) ?? [],
+        };
+      }
+      if (!response.ok) {
+        throw new Error(
+          typeof data?.detail === 'string'
+            ? data.detail
+            : response.statusText || `HTTP ${response.status}`,
+        );
+      }
+      return { kind: 'completed', result: data as unknown as PresetRunSyncResult };
+    },
   },
 };

@@ -25,6 +25,7 @@ from app.models import (
 from app.schemas import (
     ChatMessageCreate,
     ChatMessageJobAccepted,
+    PresetRunJobAccepted,
     ChatMessageJobStatus,
     ChatMessageResponse,
     ChatMessageResult,
@@ -308,6 +309,270 @@ async def run_chat_agent_job(job_id: str) -> None:
         job.updated_at = utc_now()
         sess.updated_at = utc_now()
         await db.commit()
+
+
+async def run_preset_agent_job(job_id: str) -> None:
+    """Background worker for deep-agent preset shortcuts (Red Team etc.).
+
+    Mirrors run_chat_agent_job: streams step_detail via on_status, and on
+    success writes the deliverable to the workspace and appends a deliverable
+    card message to the session.
+    """
+    loop = asyncio.get_event_loop()
+    status_trace: List[str] = []
+
+    def on_status(msg: str) -> None:
+        status_trace.append(msg)
+        asyncio.run_coroutine_threadsafe(_job_step_update(job_id, msg), loop)
+
+    deliverable_body = ""
+    raw: Any = None
+
+    try:
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
+            )
+            job = res.scalar_one_or_none()
+            if not job or job.status != "pending":
+                return
+            if not job.preset_payload_json:
+                job.status = "failed"
+                job.error_message = "preset_payload_missing"
+                job.updated_at = utc_now()
+                await db.commit()
+                return
+
+            payload = json.loads(job.preset_payload_json)
+            preset_id = payload.get("preset_id")
+            preset = get_preset(preset_id) if preset_id else None
+            if not preset:
+                job.status = "failed"
+                job.error_message = f"unknown_preset:{preset_id}"
+                job.updated_at = utc_now()
+                await db.commit()
+                return
+
+            entity = await _get_entity(db, job.entity_id)
+            await _get_session(db, job.entity_id, job.session_id)
+
+            res_msg = await db.execute(
+                select(ConversationMessage).where(
+                    ConversationMessage.id == job.user_message_id
+                )
+            )
+            user_row = res_msg.scalar_one_or_none()
+            if not user_row:
+                job.status = "failed"
+                job.error_message = "user_message_missing"
+                job.updated_at = utc_now()
+                await db.commit()
+                return
+
+            res_all = await db.execute(
+                select(ConversationMessage)
+                .where(ConversationMessage.session_id == job.session_id)
+                .order_by(ConversationMessage.created_at.asc())
+            )
+            all_msgs = res_all.scalars().all()
+            idx = next(
+                (i for i, m in enumerate(all_msgs) if m.id == job.user_message_id),
+                None,
+            )
+            prior = all_msgs[:idx] if idx is not None else all_msgs
+            history = _history_from_messages(
+                prior, settings.CHAT_MAX_HISTORY_MESSAGES // 2
+            )
+
+            node_ids = json.loads(job.node_ids_json or "[]")
+            nodes = await _load_nodes(db, job.entity_id, node_ids)
+            profile_id = normalize_profile_id(job.model_profile_id)
+            multimodal_parts, used_ids, _ = build_deep_agent_multimodal_parts(
+                nodes, profile_id
+            )
+            attach_preamble, _ = build_harness_user_attachment_text(
+                nodes, skip_node_ids=used_ids
+            )
+
+            workspace_context = await workspace_service.build_annotated_tree_text(
+                db, job.entity_id
+            )
+
+            if preset_id == "red_team":
+                task_body = render_red_team(
+                    startup_name=entity.name,
+                    industry=payload.get("industry"),
+                    stage=payload.get("stage"),
+                )
+            else:
+                job.status = "failed"
+                job.error_message = f"preset_not_implemented:{preset_id}"
+                job.updated_at = utc_now()
+                await db.commit()
+                return
+
+            if preset.output_kind == "json":
+                user_turn_core = (
+                    "Using only the attached materials, output one JSON object "
+                    "exactly as requested."
+                )
+            else:
+                user_turn_core = (
+                    "Execute the instructions above and output the full markdown report now."
+                )
+            preamble_parts = []
+            if workspace_context:
+                preamble_parts.append(workspace_context)
+            if attach_preamble:
+                preamble_parts.append(attach_preamble)
+            if preamble_parts:
+                user_turn = (
+                    "\n\n".join(preamble_parts)
+                    + f"\n\n--- User instruction ---\n{user_turn_core}"
+                )
+            else:
+                user_turn = user_turn_core
+
+            brief = EntityBrief(
+                entity_id=entity.id,
+                name=entity.name,
+                website=entity.website,
+            )
+            agent_run_id_snap = job.agent_run_id or str(uuid.uuid4())
+            harness_extras_snap = job.harness_extras
+            session_id_snap = job.session_id
+            model_profile_id_snap = job.model_profile_id
+
+            job.agent_run_id = agent_run_id_snap
+            job.status = "running"
+            job.step_detail = "Starting agent..."
+            job.updated_at = utc_now()
+            await db.commit()
+
+            output_kind_snap = preset.output_kind
+            preset_label_snap = preset.label
+            default_artifact_type_snap = preset.default_artifact_type
+            default_artifact_status_snap = preset.default_artifact_status
+            artifact_title_snap = preset.artifact_title
+
+        def _run_deep_agent() -> Tuple[str, Any]:
+            agent = create_portfolio_agent(
+                entity=brief,
+                system_prompt_extras=harness_extras_snap,
+                session_id=session_id_snap,
+                model_profile_id=model_profile_id_snap,
+                run_id=agent_run_id_snap,
+                initial_user_text=task_body,
+                on_status=on_status,
+            )
+            lc_messages = history_to_lc_messages(history, user_turn)
+            return invoke_portfolio_agent(
+                agent,
+                lc_messages,
+                on_status=on_status,
+                user_multimodal_parts=multimodal_parts,
+            )
+
+        deliverable_body, raw = await asyncio.to_thread(_run_deep_agent)
+
+        # Post-process JSON presets
+        if output_kind_snap == "json":
+            try:
+                parsed = parse_json_loose(deliverable_body)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"Model returned invalid JSON: {e}") from e
+            normalized = normalize_extraction_result(parsed)
+            deliverable_body = json.dumps(normalized, indent=2, ensure_ascii=False)
+
+        # Write deliverable to workspace + append card message
+        file_suffix = ".json" if output_kind_snap == "json" else ".md"
+        dtype = payload.get("deliverable_type") or default_artifact_type_snap
+        dstatus = payload.get("deliverable_status") or default_artifact_status_snap
+        title = artifact_title_snap or dtype
+        folder = {
+            "memo": "Deliverables/Memos",
+            "factsheet": "Deliverables/Factsheets",
+            "report": "Deliverables/Reports",
+        }.get(dtype, "Deliverables")
+        path = f"{folder}/{title}{file_suffix}"
+        actor = Actor(type="system", ref=f"preset:{preset_id}")
+
+        async with AsyncSessionLocal() as db:
+            node = await workspace_service.write_file(
+                db,
+                job.entity_id,
+                path,
+                deliverable_body.encode("utf-8"),
+                "application/json" if file_suffix == ".json" else "text/markdown",
+                actor,
+                metadata={"deliverable_type": dtype, "status": dstatus},
+            )
+            node.origin_type = "agent"
+            await db.commit()
+            await db.refresh(node)
+
+            sess = await _get_session(db, job.entity_id, job.session_id)
+            summary = (
+                f"Created deliverable `{node.name}` v{node.version} at {node.path}."
+            )
+            deliverable_card = {
+                "_vc_chat": "artifact_card",
+                "node_id": node.id,
+                "entity_id": job.entity_id,
+                "preset_label": preset_label_snap,
+                "deliverable_type": dtype,
+                "artifact_title": title,
+                "version": node.version,
+                "status": dstatus,
+                "summary": summary,
+                "path": node.path,
+            }
+            assistant_msg = ConversationMessage(
+                id=str(uuid.uuid4()),
+                session_id=job.session_id,
+                role="assistant",
+                content=json.dumps(deliverable_card),
+                model_profile_id=normalize_profile_id(model_profile_id_snap),
+            )
+            db.add(assistant_msg)
+            res2 = await db.execute(
+                select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
+            )
+            job2 = res2.scalar_one_or_none()
+            if job2 and job2.status not in ("succeeded", "failed"):
+                job2.assistant_message_id = assistant_msg.id
+                job2.status = "succeeded"
+                job2.step_detail = "Done"
+                tool_trace: dict = {
+                    "status_trace": status_trace[-40:],
+                    "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+                }
+                if isinstance(raw, dict):
+                    tool_trace["keys"] = list(raw.keys())
+                    tool_trace["message_count"] = len(raw.get("messages") or [])
+                job2.tool_trace_json = json.dumps(tool_trace)
+                job2.updated_at = utc_now()
+            sess.updated_at = utc_now()
+            await db.commit()
+
+    except Exception as e:
+        fail_trace = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "status_trace": status_trace[-40:],
+            "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+        }
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
+            )
+            job = res.scalar_one_or_none()
+            if job and job.status not in ("succeeded", "failed"):
+                job.status = "failed"
+                job.error_message = str(e)
+                job.tool_trace_json = json.dumps(fail_trace)
+                job.updated_at = utc_now()
+                await db.commit()
 
 
 def _history_content_for_model(content: str) -> str:
@@ -784,11 +1049,13 @@ async def post_chat_message(
 @router.post(
     "/entities/{entity_id}/chat/presets/{preset_id}/run",
     response_model=PresetRunResponse,
+    responses={202: {"model": PresetRunJobAccepted}},
 )
 async def run_chat_preset(
     entity_id: str,
     preset_id: str,
     body: PresetRunRequest,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     entity = await _get_entity(db, entity_id)
@@ -806,16 +1073,84 @@ async def run_chat_preset(
     # extract_info is a one-shot JSON extraction — never route through the agent
     if preset_id == "extract_info":
         use_deep_agent = False
-    context_parts = None
+
+    # ----- Deep-agent path: dispatch as background job, return 202 -----
     if use_deep_agent:
-        multimodal_parts, used_ids, mm_warnings = build_deep_agent_multimodal_parts(
-            nodes, profile_id
+        if not body.session_id:
+            raise HTTPException(
+                status_code=400,
+                detail="session_id is required when running a preset with the deep agent",
+            )
+        session = await _get_session(db, entity_id, body.session_id)
+
+        if preset_id == "red_team":
+            task_body = render_red_team(
+                startup_name=entity.name,
+                industry=body.industry,
+                stage=body.stage,
+            )
+        else:
+            raise HTTPException(status_code=400, detail="Preset not implemented")
+
+        _, _, mm_warnings = build_deep_agent_multimodal_parts(nodes, profile_id)
+        warnings = list(mm_warnings)
+
+        extras = (
+            f"## Preset\n{preset.label} ({preset.id})\n\n## Task\n{task_body}"
         )
-        attach_preamble, warnings = build_harness_user_attachment_text(
-            nodes, skip_node_ids=used_ids
+
+        user_msg = ConversationMessage(
+            id=str(uuid.uuid4()),
+            session_id=body.session_id,
+            role="user",
+            content=f"▶ Run preset: {preset.label}",
+            model_profile_id=profile_id,
+            node_ids_json=json.dumps(body.node_ids) if body.node_ids else None,
         )
-        warnings.extend(mm_warnings)
-    elif profile_id == "kimi_moonshot":
+        db.add(user_msg)
+        await db.flush()
+
+        preset_payload = {
+            "preset_id": preset_id,
+            "deliverable_type": body.deliverable_type,
+            "deliverable_status": body.deliverable_status,
+            "industry": body.industry,
+            "stage": body.stage,
+        }
+
+        job = ChatCompletionJob(
+            id=str(uuid.uuid4()),
+            entity_id=entity_id,
+            session_id=body.session_id,
+            user_message_id=user_msg.id,
+            status="pending",
+            step_detail="Queued...",
+            agent_run_id=str(uuid.uuid4()),
+            node_ids_json=json.dumps(body.node_ids),
+            model_profile_id=body.model_profile_id,
+            harness_extras=extras,
+            warnings_json=json.dumps(warnings),
+            preset_payload_json=json.dumps(preset_payload),
+        )
+        db.add(job)
+        session.updated_at = utc_now()
+        await db.commit()
+        await db.refresh(user_msg)
+
+        background_tasks.add_task(run_preset_agent_job, job.id)
+        return JSONResponse(
+            status_code=202,
+            content=PresetRunJobAccepted(
+                job_id=job.id,
+                session_id=body.session_id,
+                user_message=ChatMessageResponse.model_validate(user_msg),
+                warnings=warnings,
+            ).model_dump(mode="json"),
+        )
+
+    # ----- Synchronous (one-shot) path -----
+    context_parts = None
+    if profile_id == "kimi_moonshot":
         multimodal_parts = []
         attach_preamble, warnings = build_harness_user_attachment_text(nodes)
         context_parts = None
@@ -869,48 +1204,27 @@ async def run_chat_preset(
 
     try:
         if preset.output_kind == "json":
-            if use_deep_agent:
-                run_id = str(uuid.uuid4())
-                extras = f"## Preset\n{preset.label} ({preset.id})\n\n## Task\n{task_body}"
-                agent = create_portfolio_agent(
-                    entity=brief,
-                    system_prompt_extras=extras,
-                    session_id=body.session_id or f"preset-{preset.id}",
-                    model_profile_id=body.model_profile_id,
-                    run_id=run_id,
-                    initial_user_text=task_body,
-                )
-                user_turn = (
-                    "Using only the attached materials, output one JSON object exactly as requested."
-                )
+            preset_user_text = (
+                "Using only the attached materials (and Google Search when enabled), "
+                "output a single JSON object exactly as specified in the system instructions."
+            )
+            if profile_id == "kimi_moonshot":
                 if attach_preamble:
-                    user_turn = f"{attach_preamble}\n\n--- User instruction ---\n{user_turn}"
-                lc_messages = history_to_lc_messages(history, user_turn)
-                raw_json, _ = invoke_portfolio_agent(
-                    agent, lc_messages, user_multimodal_parts=multimodal_parts
+                    preset_user_text = attach_preamble + "\n\n--- User instruction ---\n" + preset_user_text
+                raw_json = await asyncio.to_thread(
+                    generate_with_kimi,
+                    system_instruction=system_prompt,
+                    history=history,
+                    user_message_text=preset_user_text,
                 )
             else:
-                preset_user_text = (
-                    "Using only the attached materials (and Google Search when enabled), "
-                    "output a single JSON object exactly as specified in the system instructions."
+                raw_json = await asyncio.to_thread(
+                    generate_json_one_shot,
+                    system_instruction=system_prompt,
+                    history=history,
+                    user_message_text=preset_user_text,
+                    context_parts=context_parts,
                 )
-                if profile_id == "kimi_moonshot":
-                    if attach_preamble:
-                        preset_user_text = attach_preamble + "\n\n--- User instruction ---\n" + preset_user_text
-                    raw_json = await asyncio.to_thread(
-                        generate_with_kimi,
-                        system_instruction=system_prompt,
-                        history=history,
-                        user_message_text=preset_user_text,
-                    )
-                else:
-                    raw_json = await asyncio.to_thread(
-                        generate_json_one_shot,
-                        system_instruction=system_prompt,
-                        history=history,
-                        user_message_text=preset_user_text,
-                        context_parts=context_parts,
-                    )
             try:
                 parsed = parse_json_loose(raw_json)
             except json.JSONDecodeError as e:
@@ -921,43 +1235,24 @@ async def run_chat_preset(
             normalized = normalize_extraction_result(parsed)
             deliverable_body = json.dumps(normalized, indent=2, ensure_ascii=False)
         else:
-            if use_deep_agent:
-                run_id = str(uuid.uuid4())
-                extras = f"## Preset\n{preset.label} ({preset.id})\n\n## Task\n{task_body}"
-                agent = create_portfolio_agent(
-                    entity=brief,
-                    system_prompt_extras=extras,
-                    session_id=body.session_id or f"preset-{preset.id}",
-                    model_profile_id=body.model_profile_id,
-                    run_id=run_id,
-                    initial_user_text=task_body,
-                )
-                user_turn = "Execute the instructions above and output the full markdown report now."
+            preset_user_text = "Execute the instructions above and output the full markdown report now."
+            if profile_id == "kimi_moonshot":
                 if attach_preamble:
-                    user_turn = f"{attach_preamble}\n\n--- User instruction ---\n{user_turn}"
-                lc_messages = history_to_lc_messages(history, user_turn)
-                deliverable_body, _ = invoke_portfolio_agent(
-                    agent, lc_messages, user_multimodal_parts=multimodal_parts
+                    preset_user_text = attach_preamble + "\n\n--- User instruction ---\n" + preset_user_text
+                deliverable_body = await asyncio.to_thread(
+                    generate_with_kimi,
+                    system_instruction=system_prompt,
+                    history=history,
+                    user_message_text=preset_user_text,
                 )
             else:
-                preset_user_text = "Execute the instructions above and output the full markdown report now."
-                if profile_id == "kimi_moonshot":
-                    if attach_preamble:
-                        preset_user_text = attach_preamble + "\n\n--- User instruction ---\n" + preset_user_text
-                    deliverable_body = await asyncio.to_thread(
-                        generate_with_kimi,
-                        system_instruction=system_prompt,
-                        history=history,
-                        user_message_text=preset_user_text,
-                    )
-                else:
-                    deliverable_body = await asyncio.to_thread(
-                        generate_one_shot,
-                        system_instruction=system_prompt,
-                        history=history,
-                        user_message_text=preset_user_text,
-                        context_parts=context_parts,
-                    )
+                deliverable_body = await asyncio.to_thread(
+                    generate_one_shot,
+                    system_instruction=system_prompt,
+                    history=history,
+                    user_message_text=preset_user_text,
+                    context_parts=context_parts,
+                )
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
     except RuntimeError as e:

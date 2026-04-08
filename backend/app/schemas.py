@@ -354,6 +354,18 @@ class PresetRunRequest(BaseModel):
 
 
 class PresetRunResponse(BaseModel):
+    """Synchronous (one-shot) preset result."""
+
     node_id: str
     assistant_summary: str
     warnings: List[str] = Field(default_factory=list)
+
+
+class PresetRunJobAccepted(BaseModel):
+    """Deep-agent preset accepted; poll the chat job endpoint until terminal."""
+
+    job_id: str
+    session_id: str
+    user_message: ChatMessageResponse
+    warnings: List[str] = Field(default_factory=list)
+    status: Literal["pending"] = "pending"

@@ -112,6 +112,11 @@ class ChatCompletionJob(Base):
     model_profile_id = Column(String, nullable=True)
     harness_extras = Column(Text, nullable=False)
 
+    # When non-null, this row is a preset shortcut run (Red Team etc.) and the
+    # worker is run_preset_agent_job. JSON: {preset_id, deliverable_type,
+    # deliverable_status, industry, stage}.
+    preset_payload_json = Column(Text, nullable=True)
+
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
