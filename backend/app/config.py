@@ -40,7 +40,9 @@ class Settings(BaseSettings):
 
     # Workspace
     WORKSPACE_MAX_FILE_BYTES: int = 50 * 1024 * 1024        # 50 MB per file
+    WORKSPACE_MAX_ZIP_BYTES: int = 500 * 1024 * 1024        # 500 MB per zip upload
     WORKSPACE_VERSION_RETENTION_DAYS: int = 30
+    WORKSPACE_INTAKE_SAMPLE_SIZE: int = 5                   # Path B needs_sampling budget
     # Kimi / Moonshot OpenAI-compatible API (/v1/chat/completions).
     # - Open Platform (console API keys): https://api.moonshot.ai/v1 or https://api.moonshot.cn/v1
     # - Kimi Code platform (/login "Kimi Code" in kimi-cli): https://api.kimi.com/coding/v1

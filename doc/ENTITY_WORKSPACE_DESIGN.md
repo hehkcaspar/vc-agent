@@ -4,6 +4,11 @@
 > **Date:** 2026-04-04
 > **Stack:** FastAPI + SQLAlchemy (async SQLite) + React 18 / TypeScript / SWR
 > **Future:** S3-compatible object storage via `StorageAdapter` swap
+>
+> **Updates after 2026-04-04** (see `docs/ARCHITECTURE.md` for current canonical reference):
+> - `DEFAULT_WORKSPACE_TEMPLATE` renamed to `WORKSPACE_TAXONOMY` and is no longer materialized at entity creation. New entities scaffold only `Inbox/` + `WORKSPACE_NOTES.md`; taxonomy folders materialize lazily via `_ensure_parents` when files land in them.
+> - Process Inbox (`POST /workspace/inbox/process`) added — batch intake with Path A (loose-file extraction + synoptic grouping) and Path B (folder routing from structure). Stamps `intake_routing` metadata block on every processed file.
+> - Zip upload (`POST /workspace/upload-zip`) added with size cap, zip-slip rejection, and single-root detection.
 
 ---
 

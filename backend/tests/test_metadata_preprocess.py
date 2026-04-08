@@ -6,19 +6,11 @@ import asyncio
 import hashlib
 import io
 import json
-import os
-import tempfile
 
 import pytest
 from fastapi.testclient import TestClient
 
-_db_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-_db_file.close()
-os.environ["DATABASE_URL"] = (
-    "sqlite+aiosqlite:///" + _db_file.name.replace("\\", "/")
-)
-
-from app.main import app  # noqa: E402
+from app.main import app
 
 _SAMPLE_LOOKUP_JSON = json.dumps(
     {

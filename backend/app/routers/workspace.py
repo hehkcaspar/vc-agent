@@ -21,7 +21,10 @@ from app.schemas import (
     WorkspaceTreeNode,
     MetadataPreprocessAccepted,
     MetadataPreprocessJobStatus,
+    InboxProcessAccepted,
+    InboxProcessJobStatus,
 )
+from app.config import settings
 from app.services.storage import storage
 from app.services.workspace import (
     Actor,
@@ -30,11 +33,10 @@ from app.services.workspace import (
     ProtectedFileError,
     ValidationError,
     WorkspaceError,
-    WorkspaceService,
+    workspace_service,
 )
 
 router = APIRouter(prefix="/entities/{entity_id}/workspace", tags=["workspace"])
-workspace_service = WorkspaceService(storage)
 
 
 async def _require_entity(db: AsyncSession, entity_id: str) -> Entity:
@@ -669,3 +671,132 @@ async def get_metadata_preprocess_job(
         status=row["status"],
         error_message=row.get("error_message"),
     )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Process Inbox (batch intake)
+# ──────────────────────────────────────────────────────────────────────
+
+@router.post("/inbox/process", response_model=InboxProcessAccepted, status_code=202)
+async def start_inbox_process(
+    entity_id: str,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
+):
+    """Schedule a Process Inbox job for the entity. One job per entity at a time."""
+    await _require_entity(db, entity_id)
+    from app.services.inbox_processing_jobs import create_inbox_job, run_inbox_job
+    job_id, scheduled = await create_inbox_job(entity_id)
+    if scheduled:
+        background_tasks.add_task(run_inbox_job, job_id)
+    return InboxProcessAccepted(job_id=job_id)
+
+
+@router.get("/inbox/process/{job_id}", response_model=InboxProcessJobStatus)
+async def get_inbox_process_job(entity_id: str, job_id: str):
+    from app.services.inbox_processing_jobs import get_inbox_job_status
+    row = await get_inbox_job_status(entity_id, job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return InboxProcessJobStatus(**row)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Zip upload
+# ──────────────────────────────────────────────────────────────────────
+
+@router.post("/upload-zip")
+async def upload_zip(
+    entity_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Upload a zip; unpack into Inbox/<zip-basename>/<tree>.
+
+    Guards: WORKSPACE_MAX_ZIP_BYTES on total zip; WORKSPACE_MAX_FILE_BYTES per
+    entry; rejects zip-slip (entries whose resolved path escapes the base dir).
+    """
+    import io
+    import os
+    import zipfile
+    from pathlib import PurePosixPath
+
+    await _require_entity(db, entity_id)
+    raw = await file.read()
+    if len(raw) > settings.WORKSPACE_MAX_ZIP_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Zip exceeds {settings.WORKSPACE_MAX_ZIP_BYTES} bytes",
+        )
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile as e:
+        raise HTTPException(status_code=400, detail=f"Invalid zip: {e}")
+
+    # Pre-pass: validate every entry path and gather normalized names.
+    entries: list[tuple[zipfile.ZipInfo, str]] = []
+    for info in zf.infolist():
+        if info.is_dir():
+            continue
+        normalized = os.path.normpath(info.filename).replace("\\", "/")
+        if normalized.startswith("/") or normalized.startswith("..") or "/../" in normalized:
+            raise HTTPException(status_code=400, detail=f"Unsafe path in zip: {info.filename}")
+        if info.file_size > settings.WORKSPACE_MAX_FILE_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Zip entry exceeds per-file limit: {info.filename}",
+            )
+        entries.append((info, normalized))
+
+    # Derive base name. If every entry shares a single root directory, use it
+    # verbatim (no double-nesting). Otherwise wrap entries under the zip filename.
+    fname = file.filename or "uploaded.zip"
+    fallback_name = os.path.basename(fname)
+    if fallback_name.lower().endswith(".zip"):
+        fallback_name = fallback_name[:-4]
+    fallback_name = fallback_name.strip() or "uploaded"
+
+    common_root: Optional[str] = None
+    if entries:
+        first_root = entries[0][1].split("/", 1)[0] if "/" in entries[0][1] else None
+        if first_root and all(
+            "/" in n and n.split("/", 1)[0] == first_root for _, n in entries
+        ):
+            common_root = first_root
+
+    if common_root:
+        base_path = f"Inbox/{common_root}"
+        strip_prefix = common_root + "/"
+    else:
+        base_path = f"Inbox/{fallback_name}"
+        strip_prefix = ""
+
+    actor = Actor(type="user")
+    created = []
+    for info, normalized in entries:
+        rel = normalized[len(strip_prefix):] if strip_prefix else normalized
+        if not rel:
+            continue
+        full_path = f"{base_path}/{rel}"
+        try:
+            entry_bytes = zf.read(info)
+        except Exception as e:
+            created.append({"path": full_path, "error": f"read: {e}"})
+            continue
+        mime = mimetypes.guess_type(normalized)[0]
+        try:
+            node = await workspace_service.write_file(
+                db, entity_id, full_path, entry_bytes, mime, actor,
+            )
+            node.origin_type = "upload"
+            created.append({"id": node.id, "path": node.path, "size": len(entry_bytes)})
+        except WorkspaceError as e:
+            created.append({"path": full_path, "error": str(e)})
+
+    await db.commit()
+    return {
+        "uploaded": len([c for c in created if "id" in c]),
+        "base_path": base_path,
+        "results": created,
+    }

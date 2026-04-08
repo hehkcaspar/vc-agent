@@ -60,6 +60,45 @@ export interface MetadataPreprocessJobStatus {
   error_message?: string | null;
 }
 
+export interface InboxProcessMovedItem {
+  from: string;
+  to: string;
+  batch_name?: string | null;
+  joined_existing?: boolean;
+}
+
+export interface InboxProcessTriageItem {
+  path: string;
+  reason: string;
+}
+
+export interface InboxProcessErrorItem {
+  path: string;
+  error: string;
+}
+
+export interface InboxProcessFolderDecision {
+  folder: string;
+  action: string;
+  destination?: string | null;
+  join_existing?: string | null;
+  rename_root_to?: string | null;
+  reason?: string | null;
+}
+
+export interface InboxProcessJobStatus {
+  job_id: string;
+  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  total_items: number;
+  processed_items: number;
+  current_item?: string | null;
+  moved: InboxProcessMovedItem[];
+  needs_triage: InboxProcessTriageItem[];
+  errors: InboxProcessErrorItem[];
+  folder_decisions: InboxProcessFolderDecision[];
+  error_message?: string | null;
+}
+
 /** Stored as assistant message content JSON when a preset or agent creates a deliverable. */
 export interface DeliverableCardPayload {
   _vc_chat: 'artifact_card';

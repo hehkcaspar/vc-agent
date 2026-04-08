@@ -159,6 +159,51 @@ class MetadataPreprocessJobStatus(BaseModel):
     error_message: Optional[str] = None
 
 
+class InboxProcessAccepted(BaseModel):
+    job_id: str
+
+
+class InboxProcessMovedItem(BaseModel):
+    from_path: str = Field(alias="from")
+    to_path: str = Field(alias="to")
+    batch_name: Optional[str] = None
+    joined_existing: bool = False
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class InboxProcessTriageItem(BaseModel):
+    path: str
+    reason: str
+
+
+class InboxProcessErrorItem(BaseModel):
+    path: str
+    error: str
+
+
+class InboxProcessFolderDecision(BaseModel):
+    folder: str
+    action: str
+    destination: Optional[str] = None
+    join_existing: Optional[str] = None
+    rename_root_to: Optional[str] = None
+    reason: Optional[str] = None
+
+
+class InboxProcessJobStatus(BaseModel):
+    job_id: str
+    status: Literal["pending", "running", "succeeded", "failed"]
+    total_items: int = 0
+    processed_items: int = 0
+    current_item: Optional[str] = None
+    moved: List[InboxProcessMovedItem] = Field(default_factory=list)
+    needs_triage: List[InboxProcessTriageItem] = Field(default_factory=list)
+    errors: List[InboxProcessErrorItem] = Field(default_factory=list)
+    folder_decisions: List[InboxProcessFolderDecision] = Field(default_factory=list)
+    error_message: Optional[str] = None
+
+
 # ============== IngestItem Schemas ==============
 
 class IngestItemResponse(BaseModel):

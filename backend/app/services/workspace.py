@@ -93,17 +93,67 @@ WRITE_VALIDATORS: dict[str, Any] = {
 }
 
 
-DEFAULT_WORKSPACE_TEMPLATE = [
-    "Inbox",
-    "Data Room",
-    "Data Room/Financials",
-    "Data Room/Legal",
-    "Technical",
-    "Deliverables",
-    "Deliverables/Memos",
-    "Deliverables/Reports",
-    "Deliverables/Factsheets",
+# Routing taxonomy for intake (Path A Pass 2, Path B Step B1).
+#
+# NOT a scaffolding list — folders materialize lazily via _ensure_parents when
+# files actually land in them. Only Inbox/ and WORKSPACE_NOTES.md exist on day 1.
+#
+# Each entry has a `description` and `examples` so the routing prompts can
+# convey VC semantics to Gemini. The critical distinction:
+#   - Data Room = INBOUND material from the portfolio company (their docs)
+#   - Deliverables = OUTBOUND artifacts produced by the VC team about the company
+# Without this, Gemini misroutes pitch decks etc. into Deliverables based on
+# the English connotation of "deliverable".
+WORKSPACE_TAXONOMY_ENTRIES: list[dict] = [
+    {
+        "path": "Data Room",
+        "description": "Inbound source materials FROM the portfolio company. Use as the default parent for company-produced documents (pitch decks, business plans, product docs, market materials) when no more specific subfolder fits.",
+        "examples": ["pitch deck", "business plan", "product overview", "market research from company", "intro materials"],
+    },
+    {
+        "path": "Data Room/Financials",
+        "description": "Financial source documents FROM the company: P&Ls, balance sheets, cap tables, financial models, projections, audit reports.",
+        "examples": ["cap table", "P&L", "financial model", "projections", "audit report", "Q4 financials"],
+    },
+    {
+        "path": "Data Room/Legal",
+        "description": "Legal source documents FROM the company: term sheets, SAFEs, SPAs, board consents, IP assignments, employment agreements, charters, by-laws.",
+        "examples": ["term sheet", "SPA", "SAFE", "board consent", "IP assignment", "incorporation docs"],
+    },
+    {
+        "path": "Technical",
+        "description": "Technical and engineering source materials FROM the company: architecture diagrams, codebases, technical specs, research papers authored by the team.",
+        "examples": ["architecture doc", "tech spec", "engineering RFC", "research paper from team"],
+    },
+    {
+        "path": "Deliverables",
+        "description": "OUTBOUND artifacts CREATED BY the VC team about this company. NOT inbound materials. Use as the default parent for VC-produced outputs when no more specific subfolder fits.",
+        "examples": ["VC team's working notes", "diligence questionnaire drafted by VC", "internal analysis"],
+    },
+    {
+        "path": "Deliverables/Memos",
+        "description": "Investment memos written BY the VC team: IC memos, recommendation memos, follow-on memos. NOT memos sent FROM the company.",
+        "examples": ["IC memo", "investment recommendation", "follow-on memo"],
+    },
+    {
+        "path": "Deliverables/Reports",
+        "description": "Diligence and analysis reports written BY the VC team: red-team reports, market analyses, competitive landscape reports, technical diligence write-ups.",
+        "examples": ["red-team report", "diligence report", "market analysis", "competitive landscape"],
+    },
+    {
+        "path": "Deliverables/Factsheets",
+        "description": "Standardized one-pagers / factsheets summarizing the company that the VC team has written.",
+        "examples": ["one-pager", "factsheet", "company summary"],
+    },
 ]
+
+# Backwards-compatible flat list (used by validation guards in
+# inbox_processing_jobs.py — `_is_under_taxonomy` only needs the path strings).
+WORKSPACE_TAXONOMY: list[str] = [e["path"] for e in WORKSPACE_TAXONOMY_ENTRIES]
+
+
+# Singleton instance — declared at module bottom after WorkspaceService is defined.
+workspace_service: "WorkspaceService"  # forward declaration for type checkers
 
 
 # ---------------------------------------------------------------------------
@@ -902,15 +952,15 @@ class WorkspaceService:
     # ── Template ──────────────────────────────────────────────────────
 
     def scaffold_workspace_sync(self, db: Session, entity_id: str) -> list[WorkspaceNode]:
-        """Create default folder structure + WORKSPACE_NOTES.md for a new entity."""
-        actor = Actor(type="system", ref="scaffold")
-        created = []
-        for folder_path in DEFAULT_WORKSPACE_TEMPLATE:
-            node = self.create_folder_sync(db, entity_id, folder_path, actor)
-            created.append(node)
+        """Minimal scaffold: only Inbox/ and WORKSPACE_NOTES.md.
 
-        # Create shared WORKSPACE_NOTES.md
-        notes_content = f"# Workspace Notes\n\n_Add cross-file context here._\n"
+        Taxonomy folders (Data Room, Deliverables, etc.) materialize lazily via
+        `_ensure_parents_sync` when files land in them during intake.
+        """
+        actor = Actor(type="system", ref="scaffold")
+        created = [self.create_folder_sync(db, entity_id, "Inbox", actor)]
+
+        notes_content = "# Workspace Notes\n\n_Add cross-file context here._\n"
         notes_node = self.write_file_sync(
             db, entity_id, "WORKSPACE_NOTES.md",
             notes_content.encode("utf-8"), "text/markdown",
@@ -918,7 +968,6 @@ class WorkspaceService:
             origin_type="shared",
         )
         created.append(notes_node)
-
         return created
 
     # ── Agent context builder ─────────────────────────────────────────
@@ -1239,13 +1288,11 @@ class WorkspaceService:
         return folder
 
     async def scaffold_workspace(self, db, entity_id: str) -> list[WorkspaceNode]:
+        """Async minimal scaffold: only Inbox/ and WORKSPACE_NOTES.md."""
         actor = Actor(type="system", ref="scaffold")
-        created = []
-        for folder_path in DEFAULT_WORKSPACE_TEMPLATE:
-            node = await self.create_folder(db, entity_id, folder_path, actor)
-            created.append(node)
+        created = [await self.create_folder(db, entity_id, "Inbox", actor)]
 
-        notes_content = f"# Workspace Notes\n\n_Add cross-file context here._\n"
+        notes_content = "# Workspace Notes\n\n_Add cross-file context here._\n"
         notes_node = await self.write_file(
             db, entity_id, "WORKSPACE_NOTES.md",
             notes_content.encode("utf-8"), "text/markdown",
@@ -1622,3 +1669,8 @@ class WorkspaceService:
         op.undone_at = utc_now()
         await db.flush()
         return undone_detail
+
+
+# Module-level singleton (imported by routers and services).
+from app.services.storage import storage as _storage  # noqa: E402
+workspace_service = WorkspaceService(_storage)

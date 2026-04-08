@@ -68,6 +68,22 @@ def load_file_lookup_preprocess_instruction() -> str:
     return path.read_text(encoding="utf-8")
 
 
+def load_inbox_grouping_instruction() -> str:
+    """Path A Pass 2: synoptic grouping + destination-aware routing for loose Inbox files."""
+    path = _PROMPTS_DIR / "inbox_grouping.md"
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt template missing: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def load_inbox_folder_routing_instruction() -> str:
+    """Path B Step B1: fast folder routing from structure signal alone."""
+    path = _PROMPTS_DIR / "inbox_folder_routing.md"
+    if not path.exists():
+        raise FileNotFoundError(f"Prompt template missing: {path}")
+    return path.read_text(encoding="utf-8")
+
+
 def render_extract_info(entity_name: str, entity_website: Optional[str]) -> str:
     preset = PRESETS["extract_info"]
     body = load_preset_body(preset)

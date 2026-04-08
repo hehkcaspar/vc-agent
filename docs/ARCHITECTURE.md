@@ -145,12 +145,59 @@ The Deep Agent system prompt is assembled from three layers so the agent underst
 
 #### Workspace node metadata and async pre-process
 
-- **`workspace_nodes.metadata_json`** stores one JSON object as SQLite **TEXT** (nullable). Contains descriptions, native file metadata, and Gemini-preprocessed summaries.
+- **`workspace_nodes.metadata_json`** stores one JSON object as SQLite **TEXT** (nullable). Contains descriptions, native file metadata, Gemini-preprocessed summaries, and `intake_routing` (set by Process Inbox).
 - **API surface:** Responses use a parsed **`metadata`** field (`dict` or `null`).
-- **Row pre-process:** `POST /entities/{id}/metadata-preprocess` enqueues a background job for metadata extraction. Successful runs **merge** into existing JSON:
-  - **`native_file_metadata`** — size/MIME-oriented hints
-  - **`gemini_preprocessed`** — Gemini JSON output for a single attached file
+- **Single-file pre-process:** `POST /entities/{id}/workspace/node/{node_id}/metadata-preprocess` enqueues a background job. Successful runs **merge** into existing JSON:
+  - **`native_file_metadata`** — local parser output (size, MIME, page count, PDF/Office headers)
+  - **`gemini_preprocessed`** — Gemini extraction (`one_liner`, `summary`, `document_kind`, etc.)
 - **Caveats (MVP):** No SQL-backed job table — status is **lost on API restart**. Idempotency: starting pre-process for the same entity + node while **pending/running** returns the existing **`job_id`**.
+
+#### Lazy folder scaffolding
+
+New entities are created with only **`Inbox/`** + **`WORKSPACE_NOTES.md`** at the root. The taxonomy folders (`Data Room/`, `Data Room/Financials/`, `Data Room/Legal/`, `Technical/`, `Deliverables/`, `Deliverables/Memos/`, `Deliverables/Reports/`, `Deliverables/Factsheets/`) are NOT pre-created — they materialize lazily via `_ensure_parents` the first time a file lands in them. The full taxonomy lives as a Python constant `WORKSPACE_TAXONOMY` in `services/workspace.py` and is consumed by the intake router (Process Inbox) for routing decisions.
+
+This keeps the workspace tree free of empty-folder noise on day 1 while giving the agent and Process Inbox a stable list of valid destinations.
+
+#### Process Inbox (batch intake)
+
+`POST /entities/{id}/workspace/inbox/process` (returns 202 with a `job_id`) walks the direct children of `Inbox/` and routes them into the taxonomy. Two paths run inside a single job:
+
+**Path A — loose files** (one file dropped directly in `Inbox/foo.pdf`):
+1. **Pass 1**: per-file metadata extraction (reuses the single-file `metadata_preprocess_jobs` runner). Merges `native_file_metadata` + `gemini_preprocessed` and surfaces `extraction.one_liner` as `metadata.description` so the agent context tree shows it immediately.
+2. **Pass 2**: one synoptic Gemini call (`prompts/inbox_grouping.md`) sees all extracted summaries plus the **live state of every taxonomy parent** (their existing subfolders) plus `WORKSPACE_NOTES.md`. Returns groups: each group either creates a new named subfolder under a taxonomy parent, joins an existing subfolder, places loose files directly under a parent, or marks a file as `needs_triage`. Filename collisions inside a group are auto-disambiguated (`memo.txt`, `memo (1).txt`, …).
+
+**Path B — user-uploaded folders** (e.g. `Inbox/Series A Closing Binder/...`):
+1. **Step B1**: one fast Gemini call (`prompts/inbox_folder_routing.md`) routes from **structure alone** — folder name + tree listing + destination state, no file bytes read. Returns one of `place_whole | join_existing | needs_sampling | unpack | needs_triage`.
+2. **`place_whole`** moves the entire folder under a taxonomy parent (optionally renaming the root). **`join_existing`** merges contents into an existing subfolder. **`needs_sampling`** triggers per-file extraction on up to `WORKSPACE_INTAKE_SAMPLE_SIZE` files (diversified across subfolders), then re-runs B1 with the samples as additional context. **`unpack`** flattens the subtree into `Inbox/` so Path A handles each file individually next iteration. **`needs_triage`** leaves the folder in place.
+3. **Background per-file extraction** is enqueued for every placed file via the existing `metadata_preprocess_jobs` queue — non-blocking, runs sequentially after placement so the user sees the binder land instantly and descriptions fill in over time.
+
+**`intake_routing` metadata block** (stamped on every processed file as a stable contract for future triage UIs / agents / algorithms):
+```json
+{
+  "intake_routing": {
+    "at": "ISO timestamp",
+    "run_id": "<job_id>",
+    "path_taken": "loose | folder_place_whole | folder_join | folder_unpacked",
+    "batch_name": "Series A Closing" | null,
+    "destination": "Data Room/Legal/Series A Closing",
+    "joined_existing": false,
+    "confidence": "high | medium | low",
+    "reason": "...",
+    "status": "routed | needs_triage | error"
+  }
+}
+```
+Files with `status: needs_triage` or `error` stay in `Inbox/` with metadata preserved so a future triage flow (manual UI, algorithmic, or agent-driven) can pick them up without re-running Gemini.
+
+**Validation guards**: routing destinations are validated against `WORKSPACE_TAXONOMY` so a misbehaving LLM cannot escape into `Inbox/`, `WORKSPACE_NOTES.md`, or arbitrary paths. Invalid `parent` / `existing_folder` / `join_existing` values trigger `needs_triage` instead.
+
+**Job state**: in-memory registry (`services/inbox_processing_jobs.py`), one active job per entity at a time, mirrors the `metadata_preprocess_jobs` pattern. Status is **lost on API restart**. Polling: `GET /entities/{id}/workspace/inbox/process/{job_id}` returns total/processed counters, current item, list of moves, list of triaged files, list of errors, and per-folder decisions.
+
+#### Structured upload (folder + zip)
+
+`POST /entities/{id}/workspace/upload` already preserves directory trees via the multipart filename field — the frontend's `api.workspace.uploadFolder` passes `webkitRelativePath` as the filename so the backend reconstructs the tree via `_ensure_parents`.
+
+`POST /entities/{id}/workspace/upload-zip` accepts a single zip and unpacks it under `Inbox/<root>/`. If every entry shares a single root directory, that root is used verbatim (no double-nesting); otherwise the zip's filename is used as the wrapper. Guards: total zip size ≤ `WORKSPACE_MAX_ZIP_BYTES` (default 500 MB), per-entry size ≤ `WORKSPACE_MAX_FILE_BYTES`, zip-slip rejection (entries with `..` or absolute paths).
 
 #### Portfolio chat (one-shot + optional Deep Agent)
 

@@ -43,7 +43,7 @@ vc-agent/
 │   │   │   ├── parkinglot.py          # Parking lot resolution
 │   │   │   └── academic.py            # Academic tracking
 │   │   └── services/
-│   │       ├── workspace.py           # WorkspaceService (tree, write, move, version, provenance)
+│   │       ├── workspace.py           # WorkspaceService (tree, write, move, version, provenance) + WORKSPACE_TAXONOMY constant
 │   │       ├── workspace_tools.py     # 13 LangChain agent tools
 │   │       ├── storage.py             # StorageAdapter (local FS)
 │   │       ├── materializer.py        # WorkspaceMaterializer (ingest → Inbox/)
@@ -51,7 +51,9 @@ vc-agent/
 │   │       ├── resolver.py            # EntityResolver
 │   │       ├── portfolio_deep_agent.py # Deep Agent harness
 │   │       ├── gemini_context.py      # Workspace node → Gemini context
-│   │       ├── gemini_runner.py       # Gemini API calls
+│   │       ├── direct_llm.py          # Gemini Interactions API + Kimi dispatch
+│   │       ├── metadata_preprocess_jobs.py # Single-file metadata extraction (in-memory job registry)
+│   │       ├── inbox_processing_jobs.py    # Process Inbox: Path A loose files + Path B folder routing
 │   │       └── academic/              # Academic tracking services
 │   └── tests/
 ├── frontend/

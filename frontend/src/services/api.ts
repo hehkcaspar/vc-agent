@@ -3,6 +3,7 @@ import {
   EntityUpdateData,
   WorkspaceNode,
   WorkspaceTreeNode,
+  InboxProcessJobStatus,
   IngestItem,
   IngestResponse,
   ChatSession,
@@ -97,12 +98,35 @@ export const api = {
     },
     uploadFolder: (entityId: string, files: File[], basePath = 'Inbox') => {
       const fd = new FormData();
-      files.forEach((f) => fd.append('files', f));
+      files.forEach((f) => {
+        // Preserve the directory tree: webkitRelativePath like
+        // "Series A Closing/Transaction Docs/SPA.pdf" becomes the multipart
+        // filename so the backend can reconstruct the tree.
+        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+        fd.append('files', f, rel);
+      });
       return fetchJson<{ uploaded: number; results: unknown[] }>(
         `/entities/${entityId}/workspace/upload?base_path=${encodeURIComponent(basePath)}`,
         { method: 'POST', body: fd },
       );
     },
+    uploadZip: (entityId: string, zipFile: File) => {
+      const fd = new FormData();
+      fd.append('file', zipFile);
+      return fetchJson<{ uploaded: number; base_path: string; results: unknown[] }>(
+        `/entities/${entityId}/workspace/upload-zip`,
+        { method: 'POST', body: fd },
+      );
+    },
+    processInbox: (entityId: string) =>
+      fetchJson<{ job_id: string }>(
+        `/entities/${entityId}/workspace/inbox/process`,
+        { method: 'POST' },
+      ),
+    getInboxProcessJob: (entityId: string, jobId: string) =>
+      fetchJson<InboxProcessJobStatus>(
+        `/entities/${entityId}/workspace/inbox/process/${jobId}`,
+      ),
     createFolder: (entityId: string, path: string) =>
       fetchJson<WorkspaceNode>(
         `/entities/${entityId}/workspace/folder?path=${encodeURIComponent(path)}`,

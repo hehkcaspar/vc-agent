@@ -454,6 +454,80 @@ Poll metadata extraction job status.
 }
 ```
 
+##### POST /entities/{entity_id}/workspace/upload-zip
+Upload a zip file; backend unpacks under `Inbox/<root>/` preserving the internal tree.
+
+**Multipart form**: `file=<zip>`
+
+**Behavior**:
+- If every zip entry shares a single top-level directory, that directory is used as the root verbatim (no double-nesting).
+- Otherwise, entries land under `Inbox/<zip-basename>/`.
+- Total zip size capped at `WORKSPACE_MAX_ZIP_BYTES` (default 500 MB) → `413` if exceeded.
+- Per-entry size capped at `WORKSPACE_MAX_FILE_BYTES` → `413` per offending entry.
+- Zip-slip protection: entries with `..` or absolute paths → `400`.
+
+**Response:** `200 OK`
+```json
+{
+  "uploaded": 12,
+  "base_path": "Inbox/Series A Closing",
+  "results": [
+    { "id": "node-uuid", "path": "Inbox/Series A Closing/SPA.pdf", "size": 234500 }
+  ]
+}
+```
+
+##### POST /entities/{entity_id}/workspace/inbox/process
+Start the **Process Inbox** batch intake job. Walks `Inbox/` direct children, extracts metadata for loose files (Path A), routes user-uploaded folders by structure (Path B), and moves everything to its destination in the workspace taxonomy.
+
+Only one job may run per entity at a time. If one is already pending/running, the existing `job_id` is returned.
+
+**Response:** `202 Accepted`
+```json
+{ "job_id": "uuid" }
+```
+
+See ARCHITECTURE.md → "Process Inbox" for the routing logic and the `intake_routing` metadata schema written on every processed file.
+
+##### GET /entities/{entity_id}/workspace/inbox/process/{job_id}
+Poll Process Inbox job status. Frontend polls at 1s intervals while running.
+
+**Response:** `200 OK`
+```json
+{
+  "job_id": "uuid",
+  "status": "pending|running|succeeded|failed",
+  "total_items": 12,
+  "processed_items": 8,
+  "current_item": "Inbox/some-folder",
+  "moved": [
+    {
+      "from": "Inbox/spa.pdf",
+      "to": "Data Room/Legal/Series A Closing/spa.pdf",
+      "batch_name": "Series A Closing",
+      "joined_existing": false
+    }
+  ],
+  "needs_triage": [
+    { "path": "Inbox/blank.png", "reason": "binary blob" }
+  ],
+  "errors": [
+    { "path": "Inbox/corrupted.pdf", "error": "extract: invalid pdf" }
+  ],
+  "folder_decisions": [
+    {
+      "folder": "Inbox/Series A Closing Binder",
+      "action": "place_whole",
+      "destination": "Data Room/Legal",
+      "join_existing": null,
+      "rename_root_to": "Series A Closing",
+      "reason": "structure indicates Series A binder"
+    }
+  ],
+  "error_message": null
+}
+```
+
 ---
 
 ### Parking Lot

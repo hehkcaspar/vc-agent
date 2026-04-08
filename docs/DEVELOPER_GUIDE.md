@@ -113,26 +113,27 @@ vc-agent/
 │   │   ├── schemas.py               # Pydantic schemas
 │   │   ├── database.py              # DB connection
 │   │   ├── routers/
-│   │   │   ├── entities.py          # Entity CRUD + metadata-preprocess jobs
-│   │   │   ├── workspace.py         # Workspace tree: upload, browse, move, rename, versions, trash, ops
+│   │   │   ├── entities.py          # Entity CRUD (workspace scaffold on create)
+│   │   │   ├── workspace.py         # Workspace tree: upload (file/folder/zip), browse, move, rename, versions, trash, ops, metadata-preprocess, Process Inbox
 │   │   │   ├── chat.py              # Gemini chat sessions, messages, presets
 │   │   │   ├── ingest.py            # Ingestion endpoint
 │   │   │   └── parkinglot.py        # Parking lot management
-│   │   ├── prompts/                 # Markdown prompts (extract_info, file_lookup_preprocess, …)
+│   │   ├── prompts/                 # Markdown prompts (extract_info, file_lookup_preprocess, inbox_grouping, inbox_folder_routing, …)
 │   │   └── services/
 │   │       ├── storage.py             # Storage adapter
-│   │       ├── workspace.py           # WorkspaceService — unified hierarchical file system per entity
+│   │       ├── workspace.py           # WorkspaceService — unified hierarchical file system per entity; WORKSPACE_TAXONOMY constant
 │   │       ├── workspace_tools.py     # 13 agent tools for workspace operations (Deep Agent)
 │   │       ├── parking.py             # Parking lot manager
 │   │       ├── resolver.py            # Entity resolver
 │   │       ├── materializer.py        # Workspace materializer (ingest → Inbox/)
-│   │       ├── gemini_runner.py       # Legacy Gemini generate + JSON extraction
+│   │       ├── direct_llm.py          # Stateful Gemini Interactions API + Kimi dispatch (replaces gemini_runner)
 │   │       ├── gemini_context.py      # Multimodal parts + harness attachment text
-│   │       ├── preset_registry.py     # Chat presets (red_team, extract_info); loads file_lookup_preprocess text
+│   │       ├── preset_registry.py     # Chat presets + loaders for file_lookup_preprocess / inbox_grouping / inbox_folder_routing
 │   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent)
 │   │       ├── metadata_extraction.py # VC-normalized JSON for extract_info preset
 │   │       ├── file_lookup_normalize.py  # Normalize Gemini file-lookup JSON (pre-process)
-│   │       ├── metadata_preprocess_jobs.py # In-memory async jobs; merge into metadata_json
+│   │       ├── metadata_preprocess_jobs.py # In-memory single-file async jobs; merge native + gemini blocks into metadata_json
+│   │       ├── inbox_processing_jobs.py    # Process Inbox: Path A (per-file extract + synoptic grouping) + Path B (folder routing); in-memory job registry
 │   │       ├── native_file_metadata.py    # Programmatic hints (mime, size, etc.)
 │   │       ├── json_loose.py          # Tolerant JSON decode for model output
 │   │       ├── model_profiles.py      # Gemini / Kimi ChatModel wiring for harness
@@ -159,7 +160,7 @@ vc-agent/
 │   │   │   └── useParkingLot.ts     # Parking lot hooks
 │   │   ├── lib/
 │   │   │   ├── appToast.ts          # showToast helper (used by EntityDetail, pre-process)
-│   │   │   └── metadataPreprocess.ts # POST + poll metadata-preprocess jobs
+│   │   │   └── metadataPreprocess.ts # (stub) reserved for legacy single-file pre-process polling — Process Inbox is the live entry point
 │   │   ├── services/
 │   │   │   └── api.ts               # API client
 │   │   ├── store/

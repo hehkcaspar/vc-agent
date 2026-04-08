@@ -59,8 +59,15 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
 - **Physical storage** — blobs at `{entity_id}/workspace/blobs/{node_id}/{filename}` (decoupled from path; moves are DB-only)
 - **Versioning** — every file overwrite snapshots old content to `.versions/{node_id}/`
 - **Provenance** — `origin_type` (upload|agent|ingest|shared|user) enforces write zones: agents cannot overwrite user uploads
-- **Template** — new entities get default folders: Inbox/, Data Room/, Technical/, Deliverables/ (Memos/Reports/Factsheets)
+- **Lazy scaffolding** — new entities get only `Inbox/` + `WORKSPACE_NOTES.md`. Taxonomy folders (`Data Room/`, `Data Room/Financials/`, `Data Room/Legal/`, `Technical/`, `Deliverables/`, `Deliverables/{Memos,Reports,Factsheets}/`) materialize lazily via `_ensure_parents` when files actually land in them. Full taxonomy lives as `WORKSPACE_TAXONOMY` constant in `services/workspace.py` and is consumed by Process Inbox for routing decisions — never pre-created.
 - **WORKSPACE_NOTES.md** — shared file at root for cross-file context (both user and agent can edit)
+- **Process Inbox** (`POST /workspace/inbox/process`) — batch intake. Walks `Inbox/` direct children:
+  - **Path A** (loose files): per-file Gemini extraction (Pass 1, reuses single-file metadata_preprocess) → one synoptic Gemini call (Pass 2, `prompts/inbox_grouping.md`) sees all summaries + live destination state → groups files into named subfolders, joins existing subfolders, or marks `needs_triage`. Filename collisions inside a group auto-disambiguated (`name (1).ext`).
+  - **Path B** (user-uploaded folders): one fast Gemini call from structure alone (`prompts/inbox_folder_routing.md`, no file bytes read) → `place_whole | join_existing | needs_sampling | unpack | needs_triage`. `needs_sampling` extracts up to `WORKSPACE_INTAKE_SAMPLE_SIZE` files and re-runs B1. After placement, per-file extraction is enqueued in the background via the existing single-file queue.
+  - Every processed file gets an `intake_routing` metadata block (`status: routed|needs_triage|error`, `run_id`, `batch_name`, `destination`, `confidence`, `reason`) — stable contract for future triage UIs / agents.
+  - Routing destinations are validated against `WORKSPACE_TAXONOMY`; LLM cannot route into `Inbox/` or arbitrary paths.
+  - Service: `services/inbox_processing_jobs.py`. In-memory job registry, one active job per entity, status lost on restart (mirrors `metadata_preprocess_jobs` pattern).
+- **Structured upload**: `POST /workspace/upload` (multipart, preserves `webkitRelativePath` from frontend) and `POST /workspace/upload-zip` (server-side `zipfile` unpack with `WORKSPACE_MAX_ZIP_BYTES` cap, zip-slip rejection, single-root detection to avoid double-nesting).
 
 ### Backend Structure (`backend/app/`)
 - **`main.py`** — FastAPI app, CORS, lifespan (LangSmith guard + DB init + stuck-evaluating reset)
@@ -70,10 +77,11 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
   - `workspace_tools.py` — `build_workspace_tools()` — 13 LangChain agent tools for workspace operations
   - `storage.py` — `StorageAdapter` abstraction (local FS, designed for future cloud swap)
   - `parking.py` / `resolver.py` / `materializer.py` — ingestion pipeline (materializes to workspace Inbox/)
-  - `gemini_runner.py` / `gemini_context.py` — Gemini API calls, workspace node context building
+  - `direct_llm.py` / `gemini_context.py` — Gemini Interactions API + Kimi dispatch, workspace node context building (replaced legacy `gemini_runner.py`)
   - `portfolio_deep_agent.py` — LangChain Deep Agent harness (workspace tools, job polling)
   - `model_profiles.py` — model wiring (Gemini, Kimi/Moonshot)
-  - `metadata_extraction.py` / `metadata_preprocess_jobs.py` — async metadata enrichment for workspace nodes
+  - `metadata_extraction.py` / `metadata_preprocess_jobs.py` — async single-file metadata enrichment for workspace nodes
+  - `inbox_processing_jobs.py` — Process Inbox batch intake (Path A loose files, Path B user-uploaded folders); reuses metadata_preprocess for per-file extraction
   - `academic/` — Academic Tracking v2 module (separate from portfolio):
     - `file_utils.py` — shared dossier path, JSON/JSONL read/write helpers
     - `evaluation_service.py` — evaluation normalisation, delta computation, score extraction, background eval/refresh/comparative tasks, `running_agents` registry
@@ -86,7 +94,7 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
     - `semantic_scholar.py` — Semantic Scholar API client (rate-limited, optional key)
     - `heartbeat.py` — background scheduler for stale scholar refresh, channel polling, digest generation
     - `channel_pollers.py` — Google Scholar / Semantic Scholar change detection
-- **`prompts/`** — Markdown prompt templates (extract_info, red_team, file_lookup_preprocess)
+- **`prompts/`** — Markdown prompt templates (extract_info, red_team, file_lookup_preprocess, inbox_grouping, inbox_folder_routing)
 - **`models.py`** — SQLAlchemy ORM (entities, workspace_nodes, workspace_ops, ingest_items, conversation_sessions/messages, chat_completion_jobs)
 - **`academic_database.py`** — Academic DB engine, sessions, `AcademicBase` (separate `data/academic.db`)
 - **`academic_models.py`** — Academic Tracking ORM using `AcademicBase` (scholars, scholar_events, channels, chat_sessions/messages/jobs)
@@ -142,8 +150,10 @@ All backend config via environment variables (see `backend/.env_sample`):
 - `GEMINI_API_KEY` / `GOOGLE_API_KEY` — required for AI features
 - `CHAT_USE_DEEP_AGENT` — enable deep agent mode (default false)
 - `CHAT_DEFAULT_MODEL_PROFILE` — `gemini_google` or `kimi_moonshot`
-- `WORKSPACE_MAX_FILE_BYTES` — max file size (default 50MB)
+- `WORKSPACE_MAX_FILE_BYTES` — max file size (default 50 MB)
+- `WORKSPACE_MAX_ZIP_BYTES` — max zip upload size (default 500 MB)
 - `WORKSPACE_VERSION_RETENTION_DAYS` — version history retention (default 30 days)
+- `WORKSPACE_INTAKE_SAMPLE_SIZE` — Path B sampling budget for ambiguous folder uploads (default 5)
 - `LANGSMITH_TRACING` / `LANGSMITH_API_KEY` — optional tracing
 - `ACADEMIC_DATABASE_URL` — academic SQLite DB (default `data/academic.db`, separate from portfolio)
 - `ACADEMIC_GEMINI_MODEL` — model for academic tracking (default `gemini-3-flash-preview`)

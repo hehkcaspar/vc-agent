@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, DragEvent } from 'react';
-import { Entity, WorkspaceTreeNode, DeliverableCardPayload } from '../types';
+import { Entity, WorkspaceTreeNode, DeliverableCardPayload, InboxProcessJobStatus } from '../types';
 import { useWorkspaceTree } from '../hooks/useEntities';
 import { api } from '../services/api';
 import {
@@ -39,6 +39,13 @@ function collectFileIds(nodes: WorkspaceTreeNode[]): string[] {
     if (n.children.length) ids.push(...collectFileIds(n.children));
   }
   return ids;
+}
+
+/** Count direct + nested children of the Inbox folder (files and folders both count). */
+function countInboxItems(nodes: WorkspaceTreeNode[]): number {
+  const inbox = nodes.find(n => n.name === 'Inbox' && n.node_type === 'folder');
+  if (!inbox) return 0;
+  return inbox.children.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +142,25 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const allSelected = allFileIds.length > 0 && allFileIds.every(id => selectedNodeIds.has(id));
   const someSelected = allFileIds.some(id => selectedNodeIds.has(id));
 
+  // Reconcile `selectedNodeIds` against the live tree on every refresh: drop
+  // any ids no longer present so a stale selection (e.g. after Process Inbox
+  // moves a file or a re-upload replaces it) can't get sent to the chat /
+  // preset endpoints. The backend filters by deleted_at IS NULL, so a stale
+  // id triggers "Unknown node ids for this entity".
+  useEffect(() => {
+    if (!tree) return;
+    const liveIds = new Set(collectFileIds(tree));
+    setSelectedNodeIds(prev => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (liveIds.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [tree]);
+
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
     if (selectAllRef.current) {
@@ -175,7 +201,14 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
                   Workspace
                   <span className="zone-count">({allFileIds.length})</span>
                 </h3>
-                <UploadButton entityId={entity.id} onSuccess={handleRefresh} />
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <ProcessInboxButton
+                    entityId={entity.id}
+                    inboxItemCount={tree ? countInboxItems(tree) : 0}
+                    onDone={handleRefresh}
+                  />
+                  <UploadButton entityId={entity.id} onSuccess={handleRefresh} />
+                </div>
               </>
             )}
           </div>
@@ -269,19 +302,37 @@ function UploadButton({ entityId, onSuccess }: { entityId: string; onSuccess: ()
   );
 }
 
+type UploadMode = 'files' | 'folder' | 'zip';
+
 function FileUploadModal({ entityId, onClose, onSuccess }: {
   entityId: string; onClose: () => void; onSuccess: () => void;
 }) {
+  const [mode, setMode] = useState<UploadMode>('files');
   const [files, setFiles] = useState<File[]>([]);
+  const [zipFile, setZipFile] = useState<File | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const zipInputRef = useRef<HTMLInputElement>(null);
   const fileDropDepthRef = useRef(0);
   const [fileDragActive, setFileDragActive] = useState(false);
 
   const fileMergeKey = (f: File) => `${f.name}\0${f.size}\0${f.lastModified}`;
 
+  // Reset selection when mode changes — input semantics differ across modes.
+  const switchMode = (next: UploadMode) => {
+    setMode(next);
+    setFiles([]);
+    setZipFile(null);
+  };
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) setFiles(Array.from(e.target.files));
+  };
+
+  const handleZipSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0] ?? null;
+    setZipFile(f);
   };
 
   const removeFile = (index: number) => setFiles(files.filter((_, i) => i !== index));
@@ -306,6 +357,11 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
     setFileDragActive(false);
     const incoming = e.dataTransfer.files;
     if (!incoming?.length) return;
+    if (mode === 'zip') {
+      const z = Array.from(incoming).find(f => f.name.toLowerCase().endsWith('.zip'));
+      if (z) setZipFile(z);
+      return;
+    }
     setFiles(prev => {
       const seen = new Set(prev.map(fileMergeKey));
       const next = [...prev];
@@ -318,13 +374,23 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
   };
 
   const handleSubmit = async () => {
-    if (files.length === 0) return;
     setIsUploading(true);
     try {
-      for (const file of files) {
-        await api.workspace.uploadFile(entityId, `Inbox/${file.name}`, file);
+      if (mode === 'files') {
+        if (files.length === 0) return;
+        for (const file of files) {
+          await api.workspace.uploadFile(entityId, `Inbox/${file.name}`, file);
+        }
+        showToast(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`, 'success');
+      } else if (mode === 'folder') {
+        if (files.length === 0) return;
+        const result = await api.workspace.uploadFolder(entityId, files, 'Inbox');
+        showToast(`Uploaded ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} from folder`, 'success');
+      } else {
+        if (!zipFile) return;
+        const result = await api.workspace.uploadZip(entityId, zipFile);
+        showToast(`Unpacked ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} into ${result.base_path}`, 'success');
       }
-      showToast(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`, 'success');
       onSuccess();
     } catch (err) {
       showToast('Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
@@ -333,49 +399,199 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
     }
   };
 
+  const canSubmit =
+    !isUploading &&
+    ((mode === 'files' && files.length > 0) ||
+      (mode === 'folder' && files.length > 0) ||
+      (mode === 'zip' && zipFile !== null));
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>Upload Files</h3>
+          <h3>Upload to Inbox</h3>
           <button className="modal-close" onClick={onClose}>x</button>
         </div>
         <div className="modal-body">
+          <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
+            {(['files', 'folder', 'zip'] as UploadMode[]).map(m => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => switchMode(m)}
+                style={{
+                  padding: '6px 12px',
+                  border: '1px solid #d1d5db',
+                  borderRadius: 4,
+                  background: mode === m ? '#2563eb' : '#fff',
+                  color: mode === m ? '#fff' : '#374151',
+                  cursor: 'pointer',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {m === 'files' ? 'Files' : m === 'folder' ? 'Folder' : 'Zip'}
+              </button>
+            ))}
+          </div>
           <div className="form-group">
             <div
               className={`file-input${fileDragActive ? ' file-input--drag-over' : ''}`}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={() => {
+                if (mode === 'files') fileInputRef.current?.click();
+                else if (mode === 'folder') folderInputRef.current?.click();
+                else zipInputRef.current?.click();
+              }}
               onDragEnter={handleFileDragEnter}
               onDragLeave={handleFileDragLeave}
               onDragOver={handleFileDragOver}
               onDrop={handleFileDrop}
             >
-              <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} />
-              <div>Click to select or drag and drop files</div>
+              {mode === 'files' && (
+                <input ref={fileInputRef} type="file" multiple onChange={handleFileSelect} />
+              )}
+              {mode === 'folder' && (
+                <input
+                  ref={folderInputRef}
+                  type="file"
+                  multiple
+                  // @ts-expect-error — webkitdirectory is non-standard but supported in Chromium/Safari
+                  webkitdirectory=""
+                  directory=""
+                  onChange={handleFileSelect}
+                />
+              )}
+              {mode === 'zip' && (
+                <input ref={zipInputRef} type="file" accept=".zip,application/zip" onChange={handleZipSelect} />
+              )}
+              <div>
+                {mode === 'files' && 'Click to select or drag and drop files'}
+                {mode === 'folder' && 'Click to select a folder (its tree will be preserved)'}
+                {mode === 'zip' && 'Click to select a zip (will unpack into Inbox/<zip name>/)'}
+              </div>
               <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
-                Files will be uploaded to Inbox/
+                {mode === 'files' && 'Files land flat in Inbox/'}
+                {mode === 'folder' && 'Folder lands at Inbox/<folder name>/, structure preserved'}
+                {mode === 'zip' && 'Zip contents land under Inbox/<basename>/, structure preserved'}
               </div>
             </div>
-            {files.length > 0 && (
+            {mode !== 'zip' && files.length > 0 && (
               <div className="file-list">
-                {files.map((file, index) => (
-                  <div key={index} className="file-tag">
-                    {file.name}
-                    <button type="button" onClick={() => removeFile(index)}>x</button>
-                  </div>
-                ))}
+                {files.map((file, index) => {
+                  const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
+                  return (
+                    <div key={index} className="file-tag">
+                      {rel && rel !== file.name ? rel : file.name}
+                      <button type="button" onClick={() => removeFile(index)}>x</button>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            {mode === 'zip' && zipFile && (
+              <div className="file-list">
+                <div className="file-tag">
+                  {zipFile.name} ({(zipFile.size / (1024 * 1024)).toFixed(1)} MB)
+                  <button type="button" onClick={() => setZipFile(null)}>x</button>
+                </div>
               </div>
             )}
           </div>
         </div>
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose} disabled={isUploading}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={isUploading || files.length === 0}>
+          <button className="btn-primary" onClick={handleSubmit} disabled={!canSubmit}>
             {isUploading ? 'Uploading...' : 'Upload'}
           </button>
         </div>
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Process Inbox button (header)
+// ---------------------------------------------------------------------------
+
+function ProcessInboxButton({
+  entityId,
+  inboxItemCount,
+  onDone,
+}: {
+  entityId: string;
+  inboxItemCount: number;
+  onDone: () => void;
+}) {
+  const [jobId, setJobId] = useState<string | null>(null);
+  const [status, setStatus] = useState<InboxProcessJobStatus | null>(null);
+  const [running, setRunning] = useState(false);
+
+  // Poll while running
+  useEffect(() => {
+    if (!jobId || !running) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const next = await api.workspace.getInboxProcessJob(entityId, jobId);
+        if (cancelled) return;
+        setStatus(next);
+        if (next.status === 'succeeded' || next.status === 'failed') {
+          setRunning(false);
+          if (next.status === 'succeeded') {
+            const movedCount = next.moved.length;
+            const triageCount = next.needs_triage.length;
+            const errCount = next.errors.length;
+            showToast(
+              `Process Inbox: moved ${movedCount}` +
+                (triageCount ? `, ${triageCount} need triage` : '') +
+                (errCount ? `, ${errCount} error${errCount === 1 ? '' : 's'}` : ''),
+              errCount ? 'error' : 'success',
+            );
+          } else {
+            showToast(`Process Inbox failed: ${next.error_message ?? 'unknown'}`, 'error');
+          }
+          onDone();
+        }
+      } catch (err) {
+        if (cancelled) return;
+        showToast(`Polling failed: ${err instanceof Error ? err.message : String(err)}`, 'error');
+        setRunning(false);
+      }
+    };
+    void tick();
+    const interval = setInterval(tick, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [jobId, running, entityId, onDone]);
+
+  const handleClick = async () => {
+    if (running || inboxItemCount === 0) return;
+    try {
+      const { job_id } = await api.workspace.processInbox(entityId);
+      setJobId(job_id);
+      setStatus(null);
+      setRunning(true);
+    } catch (err) {
+      showToast(`Failed to start: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    }
+  };
+
+  const label = running
+    ? status
+      ? `Processing ${status.processed_items}/${status.total_items}…`
+      : 'Starting…'
+    : `Process Inbox${inboxItemCount > 0 ? ` (${inboxItemCount})` : ''}`;
+
+  return (
+    <button
+      className="upload-btn"
+      onClick={handleClick}
+      disabled={running || inboxItemCount === 0}
+      title={inboxItemCount === 0 ? 'Inbox is empty' : 'Extract metadata + auto-route Inbox files'}
+    >
+      {label}
+    </button>
   );
 }
 

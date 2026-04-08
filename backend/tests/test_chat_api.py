@@ -3,23 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
-import tempfile
 import time
 import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
-_db_file = tempfile.NamedTemporaryFile(delete=False, suffix=".db")
-_db_file.close()
-os.environ["DATABASE_URL"] = (
-    "sqlite+aiosqlite:///" + _db_file.name.replace("\\", "/")
-)
-os.environ.setdefault("GEMINI_API_KEY", "test-key-for-mock")
-
-from app.config import settings  # noqa: E402
-from app.main import app  # noqa: E402
+from app.config import settings
+from app.main import app
 
 
 def _stub_gemini(**kwargs) -> str:
