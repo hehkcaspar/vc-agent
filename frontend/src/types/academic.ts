@@ -2,11 +2,15 @@
 
 // ── Scholar ──────────────────────────────────────────────────
 
+export type ScholarStatus = 'active' | 'evaluating' | 'paused' | 'archived';
+export type UserSettableStatus = Exclude<ScholarStatus, 'evaluating'>;
+export type TrackingPriority = 'high' | 'medium' | 'low';
+
 export interface Scholar {
   id: string;
   name: string;
-  status: string; // active | evaluating | paused | archived
-  tracking_priority: string; // high | medium | low
+  status: ScholarStatus;
+  tracking_priority: TrackingPriority;
   tags: string[];
   entity_id?: string | null;
   dossier_path: string;
@@ -272,6 +276,27 @@ export const PRIORITY_LABELS: Record<string, string> = {
   medium: 'Medium',
   low: 'Low',
 };
+
+export function lifecycleOptionsFor(
+  status: ScholarStatus,
+): { label: string; value: UserSettableStatus }[] {
+  switch (status) {
+    case 'active':
+      return [
+        { label: 'Pause', value: 'paused' },
+        { label: 'Archive', value: 'archived' },
+      ];
+    case 'paused':
+      return [
+        { label: 'Resume', value: 'active' },
+        { label: 'Archive', value: 'archived' },
+      ];
+    case 'archived':
+      return [{ label: 'Unarchive', value: 'active' }];
+    default:
+      return [];
+  }
+}
 
 export const DIMENSION_LABELS: Record<string, string> = {
   research_impact: 'Research Impact',

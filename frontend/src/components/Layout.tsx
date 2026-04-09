@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { Menu, ChevronLeft, ChevronRight, Briefcase, GraduationCap, Moon, Sun } from 'lucide-react';
 import { ChatModelProfileProvider } from '../context/ChatModelProfileContext';
 import { PortfolioTab } from './PortfolioTab';
 import { AcademicTab } from './academic/AcademicTab';
@@ -71,7 +72,7 @@ function LayoutShell() {
           className="mobile-toggle"
           onClick={() => setIsMobileMenuOpen(true)}
         >
-          ☰
+          <Menu size={20} />
         </button>
         <h1>VC Portfolio</h1>
       </div>
@@ -94,7 +95,7 @@ function LayoutShell() {
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
             title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            {isSidebarCollapsed ? '»' : '«'}
+            {isSidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
         </div>
         <nav className="sidebar-nav">
@@ -105,7 +106,7 @@ function LayoutShell() {
               setIsMobileMenuOpen(false);
             }}
           >
-            <span className="nav-icon">📁</span>
+            <span className="nav-icon"><Briefcase size={18} /></span>
             <span className="nav-text">Portfolio</span>
           </button>
           <button
@@ -115,14 +116,14 @@ function LayoutShell() {
               setIsMobileMenuOpen(false);
             }}
           >
-            <span className="nav-icon">🎓</span>
+            <span className="nav-icon"><GraduationCap size={18} /></span>
             <span className="nav-text">Academic</span>
           </button>
         </nav>
         <div className="sidebar-footer">
           <SidebarModelSelect />
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle Theme">
-            <span className="nav-icon">{theme === 'light' ? '🌙' : '☀️'}</span>
+            <span className="nav-icon">{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</span>
             <span className="theme-text">{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
           </button>
         </div>

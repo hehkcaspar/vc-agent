@@ -80,6 +80,11 @@
   --z-sticky: 200;
   --z-modal: 300;
   --z-tooltip: 400;
+
+  /* Modal widths — three presets, picked by content category */
+  --modal-w-narrow: 480px;      /* confirms, single-field prompts */
+  --modal-w-standard: 720px;    /* forms (default) */
+  --modal-w-wide: min(92vw, 1152px);  /* previews, viewers, dense content */
 }
 
 [data-theme="dark"] {

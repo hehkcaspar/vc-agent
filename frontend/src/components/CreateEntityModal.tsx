@@ -1,7 +1,9 @@
 import { useState, useRef, FormEvent, DragEvent } from 'react';
+import { FolderPlus, X } from 'lucide-react';
 import { api } from '../services/api';
 import { Entity, EntityUpdateData } from '../types';
 import { EntityMetadataForm } from './EntityMetadataForm';
+import { Modal } from './ui/Modal';
 import './CreateEntityModal.css';
 
 interface CreateEntityModalProps {
@@ -153,13 +155,7 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Create New Entity</h3>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-
+    <Modal isOpen onClose={onClose} title="Create New Entity">
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             {/* Metadata Section - Automatically synced with EditEntityModal */}
@@ -194,7 +190,9 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
                     multiple
                     onChange={handleFileSelect}
                   />
-                  <div>📁 Click to select or drag and drop files</div>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <FolderPlus size={16} /> Click to select or drag and drop files
+                  </div>
                   <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
                     PDF, images, text files
                   </div>
@@ -204,11 +202,12 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
                     {files.map((file, index) => (
                       <div key={index} className="file-tag">
                         {file.name}
-                        <button 
+                        <button
                           type="button"
+                          aria-label={`Remove ${file.name}`}
                           onClick={() => removeFile(index)}
                         >
-                          ×
+                          <X size={12} />
                         </button>
                       </div>
                     ))}
@@ -260,7 +259,6 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

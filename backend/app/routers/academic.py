@@ -1007,50 +1007,47 @@ async def list_scholar_uploads(
 
 
 # ═══════════════════════════════════════════════════════════════
-#  CUSTOM DIMENSIONS
+#  DIMENSIONS — unified (built-in + custom), file-backed, all editable
 # ═══════════════════════════════════════════════════════════════
 
-CUSTOM_DIMS_PATH = settings.ACADEMIC_CONFIG_DIR / "custom_dimensions.json"
-
-
-def _read_custom_dims() -> list[dict]:
-    if CUSTOM_DIMS_PATH.exists():
-        try:
-            data = json.loads(CUSTOM_DIMS_PATH.read_text(encoding="utf-8"))
-            return data.get("dimensions", [])
-        except Exception:
-            pass
-    return []
-
-
-def _write_custom_dims(dims: list[dict]) -> None:
-    CUSTOM_DIMS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    CUSTOM_DIMS_PATH.write_text(
-        json.dumps({"dimensions": dims}, indent=2), encoding="utf-8"
-    )
+from ..services.academic.dimensions import read_dimensions, write_dimensions
 
 
 @router.get("/custom-dimensions", response_model=list[CustomDimensionResponse])
-async def list_custom_dimensions():
-    return _read_custom_dims()
+async def list_dimensions():
+    return read_dimensions()
 
 
 @router.post("/custom-dimensions", response_model=CustomDimensionResponse)
-async def create_custom_dimension(body: CustomDimensionRequest):
-    dims = _read_custom_dims()
+async def create_dimension(body: CustomDimensionRequest):
+    dims = read_dimensions()
     if any(d["key"] == body.key for d in dims):
         raise HTTPException(409, f"Dimension key '{body.key}' already exists")
     new_dim = {"name": body.name, "key": body.key, "prompt": body.prompt}
     dims.append(new_dim)
-    _write_custom_dims(dims)
+    write_dimensions(dims)
     return new_dim
 
 
+@router.put("/custom-dimensions/{key}", response_model=CustomDimensionResponse)
+async def update_dimension(key: str, body: CustomDimensionRequest):
+    dims = read_dimensions()
+    idx = next((i for i, d in enumerate(dims) if d["key"] == key), -1)
+    if idx == -1:
+        raise HTTPException(404, "Dimension not found")
+    if body.key != key and any(d["key"] == body.key for d in dims):
+        raise HTTPException(409, f"Dimension key '{body.key}' already exists")
+    updated = {"name": body.name, "key": body.key, "prompt": body.prompt}
+    dims[idx] = updated
+    write_dimensions(dims)
+    return updated
+
+
 @router.delete("/custom-dimensions/{key}")
-async def delete_custom_dimension(key: str):
-    dims = _read_custom_dims()
+async def delete_dimension(key: str):
+    dims = read_dimensions()
     new_dims = [d for d in dims if d["key"] != key]
     if len(new_dims) == len(dims):
         raise HTTPException(404, "Dimension not found")
-    _write_custom_dims(new_dims)
+    write_dimensions(new_dims)
     return {"ok": True}

@@ -1,8 +1,4 @@
-/* Parking Lot Modal - Refined Financial Tech Aesthetic */
-
-.parking-lot-modal {
-  max-width: 640px;
-}
+/* Parking Lot Modal - uses standard modal width from primitives.css */
 
 .parking-item {
   background: var(--color-bg-tertiary);
@@ -111,43 +107,7 @@
   box-shadow: 0 0 0 1px var(--color-brand-primary);
 }
 
-.btn-small {
-  padding: var(--space-2) var(--space-4);
-  font-family: var(--font-body);
-  font-size: var(--text-xs);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: all var(--transition-fast);
-}
-
-.btn-small.btn-primary {
-  background: var(--color-brand-primary);
-  color: #FFFFFF;
-  border-color: var(--color-brand-primary);
-}
-
-.btn-small.btn-primary:hover {
-  background: var(--color-brand-secondary);
-  border-color: var(--color-brand-secondary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
-}
-
-.btn-small.btn-secondary {
-  background: transparent;
-  color: var(--color-text-secondary);
-  border-color: var(--color-border);
-}
-
-.btn-small.btn-secondary:hover {
-  background: var(--color-bg-elevated);
-  border-color: var(--color-border-hover);
-  color: var(--color-text-primary);
-}
+/* .btn-primary / .btn-secondary / .btn-sm live in src/styles/primitives.css. */
 
 .resolve-section {
   background: var(--color-bg-secondary);

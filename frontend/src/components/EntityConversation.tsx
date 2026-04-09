@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { Plus, Trash2, Bot, ArrowUp, ChevronDown, FileText, ArrowUpRight } from 'lucide-react';
+import { Modal } from './ui/Modal';
 import { useChatModelProfile } from '../context/ChatModelProfileContext';
 import { parseDeliverableCardMessage } from '../lib/chatArtifactCard';
 import {
@@ -9,6 +11,23 @@ import {
 } from '../lib/cliSpinnerDots';
 import { api } from '../services/api';
 import type { ChatMessage, ChatSession, DeliverableCardPayload, PresetInfo } from '../types';
+
+function formatSessionTimestamp(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return 'Chat';
+    const now = new Date();
+    const sameDay =
+      d.getFullYear() === now.getFullYear() &&
+      d.getMonth() === now.getMonth() &&
+      d.getDate() === now.getDate();
+    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    if (sameDay) return `Today ${time}`;
+    return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`;
+  } catch {
+    return 'Chat';
+  }
+}
 
 function roleLabel(role: string): string {
   const r = role.toLowerCase();
@@ -465,10 +484,13 @@ export function EntityConversation({
               }
             >
               <span className="entity-chat-session-trigger-label">
-                {sessions.find((s) => s.id === sessionId)?.title ||
-                  (sessionId ? `Chat ${sessionId.slice(0, 8)}…` : 'Select chat')}
+                {(() => {
+                  const s = sessions.find((x) => x.id === sessionId);
+                  if (!s) return 'Select chat';
+                  return s.title || formatSessionTimestamp(s.created_at);
+                })()}
               </span>
-              <span aria-hidden="true">▾</span>
+              <ChevronDown size={14} aria-hidden="true" />
             </button>
             {sessionMenuOpen && (
               <div className="entity-chat-session-dropdown" role="menu" aria-label="Chat sessions">
@@ -487,24 +509,16 @@ export function EntityConversation({
                         setSessionMenuOpen(false);
                       }}
                     >
-                      {s.title || `Chat ${s.id.slice(0, 8)}…`}
+                      {s.title || formatSessionTimestamp(s.created_at)}
                     </button>
                     <button
                       type="button"
                       className="entity-chat-session-delete"
                       onClick={() => requestDeleteSession(s)}
-                      aria-label={`Delete ${s.title || `Chat ${s.id.slice(0, 8)}`}`}
+                      aria-label={`Delete ${s.title || formatSessionTimestamp(s.created_at)}`}
                       title="Delete chat"
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                        <path
-                          d="M4 7h16M10 11v6M14 11v6M9 4h6l1 2H8l1-2Zm-3 3 1 12h10l1-12"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
+                      <Trash2 size={14} strokeWidth={1.8} aria-hidden="true" />
                     </button>
                   </div>
                 ))}
@@ -513,20 +527,13 @@ export function EntityConversation({
           </div>
           <button
             type="button"
-            className="entity-chat-new-icon"
+            className="zone-header-icon-btn"
             onClick={() => void handleNewSession()}
             disabled={busy}
             aria-label="New conversation"
             title="New conversation"
           >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-              <path
-                d="M12 5v14M5 12h14"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-              />
-            </svg>
+            <Plus size={16} strokeWidth={2} aria-hidden="true" />
           </button>
         </div>
       </header>
@@ -564,7 +571,7 @@ export function EntityConversation({
                     onClick={() => onViewDeliverable(artifactCard)}
                   >
                     <span className="entity-conversation-artifact-card-icon" aria-hidden>
-                      📝
+                      <FileText size={16} />
                     </span>
                     <span className="entity-conversation-artifact-card-body">
                       <span className="entity-conversation-artifact-card-title">
@@ -577,7 +584,7 @@ export function EntityConversation({
                       </span>
                     </span>
                     <span className="entity-conversation-artifact-card-chevron" aria-hidden>
-                      ↗
+                      <ArrowUpRight size={14} />
                     </span>
                   </button>
                 ) : side === 'assistant' ? (
@@ -646,14 +653,7 @@ export function EntityConversation({
                   title="Add context: select files in the workspace to include as sources with this message."
                   aria-label="Context: select files in workspace"
                 >
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M12 5v14M5 12h14"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                  </svg>
+                  <Plus size={18} strokeWidth={2} aria-hidden />
                 </button>
                 <button
                   type="button"
@@ -674,21 +674,7 @@ export function EntityConversation({
                   }
                 >
                   <span className="entity-conversation-agent-pill__icon" aria-hidden>
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.75"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <rect x="4" y="8" width="16" height="11" rx="2" />
-                      <circle cx="9.5" cy="13.5" r="1.25" fill="currentColor" stroke="none" />
-                      <circle cx="14.5" cy="13.5" r="1.25" fill="currentColor" stroke="none" />
-                      <path d="M9 8V5M15 8V5M12 4v2" />
-                    </svg>
+                    <Bot size={16} strokeWidth={1.75} aria-hidden />
                   </span>
                   <span className="entity-conversation-agent-pill__label">Agent</span>
                   <span
@@ -712,15 +698,7 @@ export function EntityConversation({
                   }
                   aria-label="Send message"
                 >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden>
-                    <path
-                      d="M12 19V6m0 0l-6.5 6.5M12 6l6.5 6.5"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+                  <ArrowUp size={20} strokeWidth={2} aria-hidden />
                 </button>
               </div>
             </div>
@@ -733,24 +711,18 @@ export function EntityConversation({
         </div>
       </div>
       {deleteTarget && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Delete chat session">
-          <div className="modal entity-chat-delete-modal">
-            <div className="modal-header">
-              <h3>{deleteStep === 1 ? 'Delete chat?' : 'Final confirmation'}</h3>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={closeDeleteModal}
-                disabled={Boolean(deletingSessionId)}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
+        <Modal
+          isOpen
+          onClose={closeDeleteModal}
+          size="narrow"
+          title={deleteStep === 1 ? 'Delete chat?' : 'Final confirmation'}
+          ariaLabel="Delete chat session"
+          className="entity-chat-delete-modal"
+        >
             <div className="modal-body">
               {deleteStep === 1 ? (
                 <p>
-                  Delete <strong>{deleteTarget.title || `Chat ${deleteTarget.id.slice(0, 8)}…`}</strong>?
+                  Delete <strong>{deleteTarget.title || formatSessionTimestamp(deleteTarget.created_at)}</strong>?
                   This will permanently remove all messages in this chat.
                 </p>
               ) : (
@@ -789,26 +761,20 @@ export function EntityConversation({
                 </button>
               )}
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
       {showModelSwapConfirm && (
-        <div className="modal-overlay" role="dialog" aria-modal="true" aria-label="Switch model">
-          <div className="modal entity-chat-delete-modal">
-            <div className="modal-header">
-              <h3>Switch to Kimi?</h3>
-              <button
-                type="button"
-                className="modal-close"
-                onClick={() => {
-                  setShowModelSwapConfirm(false);
-                  pendingSendRef.current = null;
-                }}
-                aria-label="Close"
-              >
-                ×
-              </button>
-            </div>
+        <Modal
+          isOpen
+          onClose={() => {
+            setShowModelSwapConfirm(false);
+            pendingSendRef.current = null;
+          }}
+          size="narrow"
+          title="Switch to Kimi?"
+          ariaLabel="Switch model"
+          className="entity-chat-delete-modal"
+        >
             <div className="modal-body">
               <p>
                 This will end the current Gemini session. Multimodal context (images, PDFs)
@@ -839,8 +805,7 @@ export function EntityConversation({
                 Switch &amp; Send
               </button>
             </div>
-          </div>
-        </div>
+        </Modal>
       )}
     </div>
   );

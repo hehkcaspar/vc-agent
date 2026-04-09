@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { ArrowLeft, ArrowRight, X } from 'lucide-react';
+import { TagMenu } from './TagMenu';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
@@ -15,12 +17,15 @@ import { TimelineTab } from './TimelineTab';
 import { EvaluationTab } from './EvaluationTab';
 import { PublicationsTab } from './PublicationsTab';
 import { ProfilesTab } from './ProfilesTab';
-import type { Scholar, Report } from '../../types/academic';
+import type { Scholar, Report, TrackingPriority, UserSettableStatus } from '../../types/academic';
 import {
   SCHOLAR_STATUS_LABELS,
+  PRIORITY_LABELS,
   DIMENSION_LABELS,
   getScoreColor,
+  lifecycleOptionsFor,
 } from '../../types/academic';
+import { useScholars } from '../../hooks/useAcademic';
 
 interface ScholarDetailProps {
   scholar: Scholar;
@@ -29,7 +34,9 @@ interface ScholarDetailProps {
 
 type ContentTab = 'report' | 'timeline' | 'evaluation' | 'publications' | 'profiles' | 'chat';
 
-export function ScholarDetail({ scholar, onBack }: ScholarDetailProps) {
+export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailProps) {
+  const { scholars: allScholars, mutate: mutateScholars } = useScholars();
+  const scholar = allScholars.find((s) => s.id === scholarProp.id) ?? scholarProp;
   const { reports, mutate: mutateReports } = useScholarReports(scholar.id);
   const { papersData, mutate: mutatePapers } = useScholarPapers(scholar.id);
   const { evaluations, mutate: mutateEvaluations } = useScholarEvaluations(scholar.id);
@@ -71,6 +78,30 @@ export function ScholarDetail({ scholar, onBack }: ScholarDetailProps) {
   if (identity.semantic_scholar?.url) profileLinks.push({ label: 'Semantic Scholar', url: identity.semantic_scholar.url });
   if (identity.linkedin?.url) profileLinks.push({ label: 'LinkedIn', url: identity.linkedin.url });
   if (identity.homepage?.url) profileLinks.push({ label: 'Homepage', url: identity.homepage.url });
+
+  const handlePriorityChange = useCallback(
+    async (priority: TrackingPriority) => {
+      try {
+        await academicApi.scholars.setPriority(scholar.id, priority);
+        mutateScholars();
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'Update failed', 'error');
+      }
+    },
+    [scholar.id, mutateScholars],
+  );
+
+  const handleLifecycle = useCallback(
+    async (next: UserSettableStatus) => {
+      try {
+        await academicApi.scholars.setLifecycle(scholar.id, next);
+        mutateScholars();
+      } catch (err) {
+        showToast(err instanceof Error ? err.message : 'Update failed', 'error');
+      }
+    },
+    [scholar.id, mutateScholars],
+  );
 
   const handleEvaluate = async () => {
     setIsEvaluating(true);
@@ -116,15 +147,29 @@ export function ScholarDetail({ scholar, onBack }: ScholarDetailProps) {
     <div className="academic-detail">
       {/* ── Header ── */}
       <div className="academic-detail-header">
-        <button className="btn-back" onClick={onBack}>&larr; Back</button>
+        <button className="btn-back" onClick={onBack}><ArrowLeft size={14} /> Back</button>
         <div className="academic-detail-title">
           <div className="header-top-row">
             <h2>{scholar.name}</h2>
-            <span className={`status-badge status-${scholar.status}`}>
-              {scholar.status === 'evaluating' && <span className="pulse-dot" />}
-              {SCHOLAR_STATUS_LABELS[scholar.status] ?? scholar.status}
-            </span>
-            <span className="meta-tag">{scholar.tracking_priority}</span>
+            <TagMenu<UserSettableStatus>
+              label={SCHOLAR_STATUS_LABELS[scholar.status] ?? scholar.status}
+              toneClass={`status-${scholar.status}`}
+              disabled={scholar.status === 'evaluating'}
+              leading={scholar.status === 'evaluating' ? <span className="pulse-dot" /> : null}
+              options={lifecycleOptionsFor(scholar.status)}
+              onSelect={handleLifecycle}
+            />
+            <TagMenu<TrackingPriority>
+              label={PRIORITY_LABELS[scholar.tracking_priority] ?? scholar.tracking_priority}
+              toneClass={`priority-${scholar.tracking_priority}`}
+              title="Tracking priority"
+              options={[
+                { label: 'High', value: 'high' },
+                { label: 'Medium', value: 'medium' },
+                { label: 'Low', value: 'low' },
+              ]}
+              onSelect={handlePriorityChange}
+            />
           </div>
 
           {scholar.affiliation && (
@@ -182,7 +227,7 @@ export function ScholarDetail({ scholar, onBack }: ScholarDetailProps) {
             <div className="profile-links-inline">
               {profileLinks.map((link) => (
                 <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="profile-link-inline">
-                  {link.label} &rarr;
+                  {link.label} <ArrowRight size={12} />
                 </a>
               ))}
             </div>
@@ -198,8 +243,8 @@ export function ScholarDetail({ scholar, onBack }: ScholarDetailProps) {
             <button
               className="btn-icon"
               onClick={handleEvaluate}
-              disabled={isEvaluating || scholar.status === 'evaluating'}
-              title="Run Evaluation"
+              disabled={isEvaluating || scholar.status === 'evaluating' || scholar.status === 'archived'}
+              title={scholar.status === 'archived' ? 'Unarchive to run evaluations' : 'Run Evaluation'}
             >
               {isEvaluating || scholar.status === 'evaluating' ? '...' : '+'}
             </button>
@@ -227,7 +272,7 @@ export function ScholarDetail({ scholar, onBack }: ScholarDetailProps) {
                 title="Delete report"
                 style={{ fontSize: '0.8em' }}
               >
-                &times;
+                <X size={14} />
               </button>
             </div>
           ))}

@@ -660,37 +660,45 @@ Run a preset and **create a new workspace file** (markdown or JSON, depending on
 ```json
 {
   "node_ids": [],
-  "session_id": "optional — if set, appends assistant note to that session",
+  "session_id": "required when use_deep_agent=true",
   "industry": "optional",
   "stage": "optional",
   "deliverable_type": "optional override",
-  "deliverable_status": "optional override"
-}
-```
-
-Response (`PresetRunResponse`):
-```json
-{
-  "node_id": "uuid",
-  "assistant_summary": "...",
-  "warnings": []
-}
-```
-
-`PresetRunRequest` supports:
-
-```json
-{
-  "node_ids": ["..."],
-  "session_id": "...",
+  "deliverable_status": "optional override",
   "model_profile_id": "gemini_google",
   "use_deep_agent": true
 }
 ```
 
+**Response varies with `use_deep_agent`:**
+
+- **`use_deep_agent: false`** (synchronous one-shot) — returns **`200 OK`** with `PresetRunResponse`:
+  ```json
+  { "node_id": "uuid", "assistant_summary": "...", "warnings": [] }
+  ```
+
+- **`use_deep_agent: true`** (background deep-agent run) — returns **`202 Accepted`** with `PresetRunJobAccepted`:
+  ```json
+  {
+    "job_id": "uuid",
+    "session_id": "uuid",
+    "user_message": { "...": "synthetic '▶ Run preset: <label>' message" },
+    "warnings": [],
+    "status": "pending"
+  }
+  ```
+  The handler inserts a synthetic user message into the session, creates a `ChatCompletionJob` row (with `preset_payload_json` set so the worker knows to run the preset flow), and schedules `run_preset_agent_job(job_id)` as a FastAPI `BackgroundTasks`. The worker writes `step_detail` exactly like `run_chat_agent_job`, and on success writes the deliverable to the workspace and appends the deliverable-card assistant message.
+
+  **Poll the existing chat-job endpoint** to track progress — no separate preset-job endpoint:
+
+      GET /entities/{entity_id}/chat/sessions/{session_id}/jobs/{job_id}
+
+  The frontend reuses its `agentJob` polling loop and spinner status line verbatim for preset runs.
+
 Notes:
-- `use_deep_agent: false` -> one-shot preset generation path.
-- `use_deep_agent: true` -> deep-agent preset execution path.
+- `session_id` is **required** when `use_deep_agent=true` (the job + assistant card message attach to a session).
+- `extract_info` is force-pinned to `use_deep_agent=false` server-side (always one-shot).
+- `red_team` honors the client toggle exactly — it does NOT auto-promote to agent mode.
 - `extract_info` applies tolerant JSON parsing (raw JSON, fenced JSON, or prose-wrapped JSON object) before normalization.
 
 ---
@@ -916,16 +924,25 @@ Upload files to scholar's dossier. Triggers agent processing in background.
 #### GET /academic/scholars/{scholar_id}/uploads
 List uploaded files with size and modification time.
 
-### Custom Dimensions
+### Evaluation Dimensions
+
+All evaluation dimensions — both the original defaults (`research_impact`, `commercialization`, `career_trajectory`, `collaboration_strength`, `field_position`, `founder_potential`, `public_profile`) and any user-added ones — live in a single file-backed config at `data/config/dimensions.json` and are treated uniformly by the CRUD endpoints below. The file is auto-seeded with the defaults on first read (see `backend/app/services/academic/dimensions.py`). The scholar agent prompt reads the list at runtime and interpolates it into the evaluation JSON schema and the scoring rubric, so adding, editing, or deleting a dimension takes effect on the next evaluation with no code changes.
+
+> **Route name note**: the route path is still `/academic/custom-dimensions` for backwards compatibility, but the endpoint now manages the **full** dimension list, not just user-added ones. All dimensions are fully editable and deletable.
 
 #### GET /academic/custom-dimensions
-List custom evaluation dimensions.
+List all evaluation dimensions (defaults + user-added). Returns `[{ name, key, prompt }, ...]`.
 
 #### POST /academic/custom-dimensions
-Create custom dimension. `{ "name": "Patent Quality", "key": "patent_quality", "prompt": "Evaluate..." }`
+Create a new dimension. Body: `{ "name": "Patent Quality", "key": "patent_quality", "prompt": "Assess patent filing activity, prosecution quality, and commercial licensing." }`. Returns `409` if `key` already exists.
+
+#### PUT /academic/custom-dimensions/{key}
+Update an existing dimension (including rename). Body matches POST. If `body.key != {key}` and the new key already exists, returns `409`.
 
 #### DELETE /academic/custom-dimensions/{key}
-Delete a custom dimension.
+Delete a dimension. Returns `404` if the key doesn't exist.
+
+> **Operator warning**: ranking-preset weights in `backend/app/routers/academic.py` hardcode the default dimension keys. Deleting a default (e.g. `research_impact`) won't crash the API but will leave the built-in ranking presets referencing a missing key. Only delete defaults if you're aware of this.
 
 ### Academic Data Models
 
@@ -948,7 +965,7 @@ Delete a custom dimension.
 |-------|------|-------------|
 | id | string | Filename stem |
 | type | string | full, comparative, refresh |
-| dimensions | object | 7 dimension scores (research_impact, commercialization, career_trajectory, collaboration_strength, field_position, founder_potential, public_profile) |
+| dimensions | object | Map of `{dimension_key: { score, explanation, evidence }}` for every dimension defined in `data/config/dimensions.json`. Default keys: `research_impact`, `commercialization`, `career_trajectory`, `collaboration_strength`, `field_position`, `founder_potential`, `public_profile`. Users can add/remove/rename dimensions via the `/academic/custom-dimensions` endpoints, and the agent prompt updates accordingly on the next run. |
 | computed_metrics | object | Bibliometric data |
 | commercialization_signals | object | Patents, startups |
 | delta | object | Changes vs previous evaluation |

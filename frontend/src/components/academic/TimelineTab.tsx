@@ -1,20 +1,8 @@
+import { Check } from 'lucide-react';
 import { academicApi } from '../../services/academicApi';
 import type { ScholarEvent } from '../../types/academic';
 import { useState } from 'react';
-
-const EVENT_ICONS: Record<string, string> = {
-  new_paper: '\u{1F4C4}',
-  new_preprint: '\u{1F4C4}',
-  patent_filed: '\u{1F512}',
-  news_mention: '\u{1F4F0}',
-  metric_snapshot: '\u{1F4CA}',
-  website_updated: '\u{1F310}',
-  career_change: '\u{1F3AF}',
-  identity_discovered: '\u{1F50D}',
-  evaluation_completed: '\u{2705}',
-  channel_deactivated: '\u{26A0}',
-  user_note_added: '\u{1F4DD}',
-};
+import { EventIcon } from '../../lib/eventIcons';
 
 interface TimelineTabProps {
   scholarId: string;
@@ -50,7 +38,7 @@ export function TimelineTab({ scholarId, events, mutateEvents }: TimelineTabProp
             .map((evt) => (
               <div key={evt.id} className={`timeline-event ${evt.is_read ? 'read' : 'unread'}`}>
                 <span className={`event-type-icon event-type-${evt.event_type}`}>
-                  {EVENT_ICONS[evt.event_type] ?? '?'}
+                  <EventIcon type={evt.event_type} />
                 </span>
                 <div className="event-body">
                   <span className="event-title">{evt.title ?? evt.event_type}</span>
@@ -88,7 +76,7 @@ export function TimelineTab({ scholarId, events, mutateEvents }: TimelineTabProp
                       } catch { /* ignore */ }
                     }}
                   >
-                    &#10003;
+                    <Check size={14} />
                   </button>
                 )}
               </div>

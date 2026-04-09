@@ -76,30 +76,7 @@
   text-align: center;
 }
 
-/* Primary Button */
-.btn-primary {
-  padding: var(--space-2) var(--space-5);
-  background: var(--color-brand-primary);
-  color: #FFFFFF;
-  border: 1px solid var(--color-brand-primary);
-  border-radius: var(--radius-sm);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  transition: all var(--transition-fast);
-}
-
-.btn-primary:hover {
-  background: var(--color-brand-secondary);
-  border-color: var(--color-brand-secondary);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-md);
-}
-
-.btn-primary:active {
-  transform: translateY(0);
-}
+/* .btn-primary is defined in src/styles/primitives.css. */
 
 .portfolio-view-toggle {
   margin-bottom: var(--space-6);

@@ -127,12 +127,16 @@ export function EvaluationTab({ latestEval, evaluations }: EvaluationTabProps) {
               <div>
                 <h5>Patents</h5>
                 <ul>
-                  {latestEval.commercialization_signals.patents.map((p: any, i: number) => (
-                    <li key={i}>
-                      {p.title} ({p.year})
-                      {p.url && <> — <a href={p.url} target="_blank" rel="noopener noreferrer">link</a></>}
-                    </li>
-                  ))}
+                  {latestEval.commercialization_signals.patents.map((p: any, i: number) => {
+                    if (typeof p === 'string') return <li key={i}>{p}</li>;
+                    const label = [p.title, p.id].filter(Boolean).join(' · ') || p.id || 'Patent';
+                    return (
+                      <li key={i}>
+                        {label}{p.year ? ` (${p.year})` : ''}
+                        {p.url && <> — <a href={p.url} target="_blank" rel="noopener noreferrer">link</a></>}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}
@@ -140,9 +144,15 @@ export function EvaluationTab({ latestEval, evaluations }: EvaluationTabProps) {
               <div>
                 <h5>Startups</h5>
                 <ul>
-                  {latestEval.commercialization_signals.startups.map((s: any, i: number) => (
-                    <li key={i}>{s.name} — {s.role}</li>
-                  ))}
+                  {latestEval.commercialization_signals.startups.map((s: any, i: number) => {
+                    if (typeof s === 'string') return <li key={i}>{s}</li>;
+                    return (
+                      <li key={i}>
+                        {s.name}{s.role ? ` — ${s.role}` : ''}
+                        {s.url && <> — <a href={s.url} target="_blank" rel="noopener noreferrer">link</a></>}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             )}

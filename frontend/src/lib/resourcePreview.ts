@@ -86,6 +86,12 @@ export function isTextLike(mime: string, filename: string): boolean {
   return ext === 'txt' || ext === 'md' || ext === 'markdown' || ext === 'json' || ext === 'csv' || ext === 'log';
 }
 
+export function isMarkdown(mime: string, filename: string): boolean {
+  if (mime.toLowerCase().includes('markdown')) return true;
+  const ext = getExtension(filename);
+  return ext === 'md' || ext === 'markdown';
+}
+
 export function isPdf(mime: string, filename: string): boolean {
   return mime.toLowerCase().includes('pdf') || getExtension(filename) === 'pdf';
 }

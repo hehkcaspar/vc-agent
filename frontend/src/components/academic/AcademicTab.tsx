@@ -1,25 +1,40 @@
 import { useState } from 'react';
+import { ChevronUp, ChevronDown, AlertTriangle, Play, Square, Pencil, Trash2 } from 'lucide-react';
+import { EventIcon } from '../../lib/eventIcons';
+import { TagMenu } from './TagMenu';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useScholars, useSignalFeed, useDigests, useRanking, useCustomDimensions } from '../../hooks/useAcademic';
 import { showToast } from '../../lib/appToast';
 import { academicApi } from '../../services/academicApi';
 import { AddScholarModal } from './AddScholarModal';
+import { Modal } from '../ui/Modal';
 import { RankingView } from './RankingView';
 import { ScholarDetail } from './ScholarDetail';
-import type { Scholar } from '../../types/academic';
-import { SCHOLAR_STATUS_LABELS, PRIORITY_LABELS } from '../../types/academic';
-import './AcademicTab.css';
+import type { Scholar, UserSettableStatus } from '../../types/academic';
+import { SCHOLAR_STATUS_LABELS, PRIORITY_LABELS, lifecycleOptionsFor } from '../../types/academic';
 
-const FEED_EVENT_ICONS: Record<string, string> = {
-  new_paper: '\u{1F4C4}',
-  patent_filed: '\u{1F512}',
-  news_mention: '\u{1F4F0}',
-  metric_snapshot: '\u{1F4CA}',
-  website_updated: '\u{1F310}',
-  career_change: '\u{1F3AF}',
-  evaluation_completed: '\u{2705}',
-};
+type StatusFilter = 'all' | 'active' | 'paused' | 'archived';
+
+function StatusMenu({
+  scholar,
+  onChange,
+}: {
+  scholar: Scholar;
+  onChange: (next: UserSettableStatus) => void;
+}) {
+  return (
+    <TagMenu<UserSettableStatus>
+      label={SCHOLAR_STATUS_LABELS[scholar.status] ?? scholar.status}
+      toneClass={`status-${scholar.status}`}
+      disabled={scholar.status === 'evaluating'}
+      leading={scholar.status === 'evaluating' ? <span className="pulse-dot" /> : null}
+      options={lifecycleOptionsFor(scholar.status)}
+      onSelect={onChange}
+    />
+  );
+}
+import './AcademicTab.css';
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -37,6 +52,7 @@ export function AcademicTab() {
   const [editingScholar, setEditingScholar] = useState<Scholar | null>(null);
   const [feedOpen, setFeedOpen] = useState(false);
   const [viewMode, setViewMode] = useState<'list' | 'ranking'>('list');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [digestOpen, setDigestOpen] = useState(false);
   const [digestContent, setDigestContent] = useState<string | null>(null);
 
@@ -44,6 +60,11 @@ export function AcademicTab() {
   const [newDimName, setNewDimName] = useState('');
   const [newDimKey, setNewDimKey] = useState('');
   const [newDimPrompt, setNewDimPrompt] = useState('');
+  const [editingDimKey, setEditingDimKey] = useState<string | null>(null);
+  const [editDimName, setEditDimName] = useState('');
+  const [editDimKey, setEditDimKey] = useState('');
+  const [editDimPrompt, setEditDimPrompt] = useState('');
+  const [dimBusy, setDimBusy] = useState(false);
 
   const { scholars, isLoading, mutate } = useScholars();
   const { events: feedEvents, mutate: mutateFeed } = useSignalFeed();
@@ -84,7 +105,9 @@ export function AcademicTab() {
   };
 
   const handleAddDimension = async () => {
+    if (dimBusy) return;
     if (!newDimName.trim() || !newDimKey.trim() || !newDimPrompt.trim()) return;
+    setDimBusy(true);
     try {
       await academicApi.customDimensions.create({
         name: newDimName.trim(),
@@ -98,6 +121,39 @@ export function AcademicTab() {
       showToast('Custom dimension added', 'success');
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Failed to add dimension', 'error');
+    } finally {
+      setDimBusy(false);
+    }
+  };
+
+  const startEditDimension = (d: { name: string; key: string; prompt: string }) => {
+    setEditingDimKey(d.key);
+    setEditDimName(d.name);
+    setEditDimKey(d.key);
+    setEditDimPrompt(d.prompt);
+  };
+
+  const cancelEditDimension = () => {
+    setEditingDimKey(null);
+  };
+
+  const handleSaveDimension = async () => {
+    if (dimBusy) return;
+    if (!editingDimKey || !editDimName.trim() || !editDimKey.trim() || !editDimPrompt.trim()) return;
+    setDimBusy(true);
+    try {
+      await academicApi.customDimensions.update(editingDimKey, {
+        name: editDimName.trim(),
+        key: editDimKey.trim(),
+        prompt: editDimPrompt.trim(),
+      });
+      mutateDims();
+      setEditingDimKey(null);
+      showToast('Dimension updated', 'success');
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Update failed', 'error');
+    } finally {
+      setDimBusy(false);
     }
   };
 
@@ -146,6 +202,27 @@ export function AcademicTab() {
       setSelectedScholar(s);
     }
   };
+
+  const handleLifecycle = async (
+    e: React.MouseEvent,
+    scholar: Scholar,
+    next: UserSettableStatus,
+  ) => {
+    e.stopPropagation();
+    try {
+      await academicApi.scholars.setLifecycle(scholar.id, next);
+      mutate();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Update failed', 'error');
+    }
+  };
+
+  const visibleScholars =
+    statusFilter === 'all'
+      ? scholars
+      : statusFilter === 'active'
+        ? scholars.filter((s) => s.status === 'active' || s.status === 'evaluating')
+        : scholars.filter((s) => s.status === statusFilter);
 
   const handleStop = async (e: React.MouseEvent, scholar: Scholar) => {
     e.stopPropagation();
@@ -217,7 +294,7 @@ export function AcademicTab() {
               >
                 Mark all read
               </button>
-              <span style={{ fontSize: '0.7em' }}>{feedOpen ? '\u25B2' : '\u25BC'}</span>
+              {feedOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </span>
           </div>
           {feedOpen && (
@@ -229,7 +306,7 @@ export function AcademicTab() {
                   onClick={() => handleFeedEventClick(evt.scholar_id)}
                 >
                   <span className="signal-feed-icon">
-                    {FEED_EVENT_ICONS[evt.event_type] || '\u{1F514}'}
+                    <EventIcon type={evt.event_type} />
                   </span>
                   <span className="signal-feed-body">
                     <span className="signal-feed-scholar">{evt.scholar_name}</span>
@@ -274,7 +351,7 @@ export function AcademicTab() {
       {/* Stale alerts */}
       {staleScholars.length > 0 && viewMode === 'list' && (
         <div className="stale-alerts-bar">
-          <span className="stale-alerts-icon">{'\u26A0'}</span>
+          <span className="stale-alerts-icon"><AlertTriangle size={14} /></span>
           <span className="stale-alerts-text">
             {staleScholars.length} scholar{staleScholars.length > 1 ? 's' : ''} overdue for refresh:{' '}
             {staleScholars.slice(0, 3).map((s) => s.name).join(', ')}
@@ -299,6 +376,19 @@ export function AcademicTab() {
       )}
 
       {viewMode === 'list' && scholars.length > 0 && (
+        <>
+        <div className="list-filter-bar">
+          <label className="text-muted" style={{ fontSize: '0.85em' }}>Status:</label>
+          {(['all', 'active', 'paused', 'archived'] as const).map((f) => (
+            <button
+              key={f}
+              className={`filter-chip ${statusFilter === f ? 'active' : ''}`}
+              onClick={() => setStatusFilter(f)}
+            >
+              {f === 'all' ? 'All' : SCHOLAR_STATUS_LABELS[f]}
+            </button>
+          ))}
+        </div>
         <div className="task-table">
           <div className="task-table-header">
             <span className="col-name">Name</span>
@@ -308,7 +398,7 @@ export function AcademicTab() {
             <span className="col-date">Updated</span>
             <span className="col-actions">Actions</span>
           </div>
-          {scholars.map((scholar) => (
+          {visibleScholars.map((scholar) => (
             <div
               key={scholar.id}
               className="task-row"
@@ -327,11 +417,8 @@ export function AcademicTab() {
                   {PRIORITY_LABELS[scholar.tracking_priority] ?? scholar.tracking_priority}
                 </span>
               </span>
-              <span className="col-status">
-                <span className={`status-badge status-${scholar.status}`}>
-                  {scholar.status === 'evaluating' && <span className="pulse-dot" />}
-                  {SCHOLAR_STATUS_LABELS[scholar.status] ?? scholar.status}
-                </span>
+              <span className="col-status" onClick={(e) => e.stopPropagation()}>
+                <StatusMenu scholar={scholar} onChange={(next) => handleLifecycle({ stopPropagation: () => {} } as React.MouseEvent, scholar, next)} />
               </span>
               <span className="col-reports">
                 {scholar.h_index ?? '—'}
@@ -342,11 +429,16 @@ export function AcademicTab() {
               <span className="col-actions" onClick={(e) => e.stopPropagation()}>
                 {scholar.status === 'evaluating' ? (
                   <button className="btn-icon" onClick={(e) => handleStop(e, scholar)} title="Stop">
-                    &#9632;
+                    <Square size={14} />
                   </button>
                 ) : (
-                  <button className="btn-icon" onClick={(e) => handleEvaluate(e, scholar)} title="Evaluate">
-                    &#9654;
+                  <button
+                    className="btn-icon"
+                    onClick={(e) => handleEvaluate(e, scholar)}
+                    title={scholar.status === 'archived' ? 'Unarchive to run evaluations' : 'Evaluate'}
+                    disabled={scholar.status === 'archived'}
+                  >
+                    <Play size={14} />
                   </button>
                 )}
                 <button
@@ -354,15 +446,16 @@ export function AcademicTab() {
                   onClick={(e) => { e.stopPropagation(); setEditingScholar(scholar); }}
                   title="Edit"
                 >
-                  &#9998;
+                  <Pencil size={14} />
                 </button>
                 <button className="btn-icon btn-icon-danger" onClick={(e) => handleDelete(e, scholar)} title="Delete">
-                  &#128465;
+                  <Trash2 size={14} />
                 </button>
               </span>
             </div>
           ))}
         </div>
+        </>
       )}
 
       {isCreateOpen && (
@@ -381,32 +474,86 @@ export function AcademicTab() {
       )}
 
       {/* Custom dimensions modal */}
-      {showDimModal && (
-        <div className="modal-overlay" onClick={() => setShowDimModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <h3>Custom Dimensions</h3>
-              <button className="btn-text" onClick={() => setShowDimModal(false)}>Close</button>
-            </div>
+      <Modal
+        isOpen={showDimModal}
+        onClose={() => setShowDimModal(false)}
+        title="Custom Dimensions"
+      >
             <div className="modal-body">
+              <p className="text-muted" style={{ marginTop: 0, fontSize: '0.85em' }}>
+                Dimensions define how scholars are scored. All are editable — changes apply to the next evaluation.
+              </p>
+              {customDims.length === 0 && (
+                <p className="text-muted" style={{ fontSize: '0.9em' }}>No dimensions defined.</p>
+              )}
               {customDims.length > 0 && (
                 <div className="custom-dims-list">
-                  {customDims.map((d) => (
-                    <div key={d.key} className="custom-dim-item">
-                      <div className="custom-dim-info">
-                        <span className="custom-dim-name">{d.name}</span>
-                        <span className="custom-dim-key">{d.key}</span>
-                        <span className="custom-dim-prompt">{d.prompt}</span>
+                  {customDims.map((d) =>
+                    editingDimKey === d.key ? (
+                      <div key={d.key} className="custom-dim-item custom-dim-editing">
+                        <div className="custom-dim-form">
+                          <input
+                            type="text"
+                            placeholder="Display name"
+                            value={editDimName}
+                            onChange={(e) => setEditDimName(e.target.value)}
+                          />
+                          <input
+                            type="text"
+                            placeholder="Key"
+                            value={editDimKey}
+                            onChange={(e) =>
+                              setEditDimKey(
+                                e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
+                              )
+                            }
+                          />
+                          <textarea
+                            placeholder="Guiding prompt"
+                            value={editDimPrompt}
+                            onChange={(e) => setEditDimPrompt(e.target.value)}
+                            rows={3}
+                          />
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button
+                              className="btn-primary"
+                              onClick={handleSaveDimension}
+                              disabled={dimBusy || !editDimName.trim() || !editDimKey.trim() || !editDimPrompt.trim()}
+                            >
+                              {dimBusy ? 'Saving…' : 'Save'}
+                            </button>
+                            <button className="btn-secondary" onClick={cancelEditDimension} disabled={dimBusy}>
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
                       </div>
-                      <button
-                        className="btn-icon btn-icon-danger"
-                        onClick={() => handleDeleteDimension(d.key)}
-                        title="Delete"
-                      >
-                        &#128465;
-                      </button>
-                    </div>
-                  ))}
+                    ) : (
+                      <div key={d.key} className="custom-dim-item">
+                        <div className="custom-dim-info">
+                          <span className="custom-dim-name">{d.name}</span>
+                          <span className="custom-dim-key">{d.key}</span>
+                          <span className="custom-dim-prompt">{d.prompt}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            className="btn-icon"
+                            onClick={() => startEditDimension(d)}
+                            title="Edit"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            className="btn-icon btn-icon-danger"
+                            onClick={() => handleDeleteDimension(d.key)}
+                            title="Delete"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ),
+                  )}
                 </div>
               )}
               <div className="custom-dim-form">
@@ -432,15 +579,13 @@ export function AcademicTab() {
                 <button
                   className="btn-primary"
                   onClick={handleAddDimension}
-                  disabled={!newDimName.trim() || !newDimKey.trim() || !newDimPrompt.trim()}
+                  disabled={dimBusy || !newDimName.trim() || !newDimKey.trim() || !newDimPrompt.trim()}
                 >
-                  Add Dimension
+                  {dimBusy ? 'Adding…' : 'Add Dimension'}
                 </button>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+      </Modal>
     </div>
   );
 }

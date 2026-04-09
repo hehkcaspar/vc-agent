@@ -7,6 +7,12 @@ by the goal type and scholar context.  See design doc §4.4.
 
 from datetime import datetime, timezone
 
+from .dimensions import (
+    read_dimensions,
+    render_dimensions_rubric,
+    render_dimensions_schema_block,
+)
+
 
 _BASE_PROMPT = """\
 You are an Academic Tracking Agent for a venture capital firm. Your job is to \
@@ -49,36 +55,36 @@ evaluations/, reports/, channels.json, uploads/)
 When you update /dossier/profile.json, use EXACTLY this structure:
 
 ```json
-{{
+{
   "id": "existing-id",
   "name": "Scholar Name",
   "aliases": ["Name Variant 1"],
-  "identity": {{
-    "google_scholar": {{
+  "identity": {
+    "google_scholar": {
       "id": "THE_GS_USER_ID",
       "url": "https://scholar.google.com/citations?user=THE_GS_USER_ID",
       "confidence": "verified"
-    }},
-    "semantic_scholar": {{
+    },
+    "semantic_scholar": {
       "id": "NUMERIC_SS_AUTHOR_ID",
       "url": "https://www.semanticscholar.org/author/NUMERIC_SS_AUTHOR_ID",
       "confidence": "high"
-    }},
-    "linkedin": {{ "url": "https://linkedin.com/in/...", "confidence": "medium" }},
-    "homepage": {{ "url": "https://...", "confidence": "verified" }}
-  }},
-  "affiliation": {{
+    },
+    "linkedin": { "url": "https://linkedin.com/in/...", "confidence": "medium" },
+    "homepage": { "url": "https://...", "confidence": "verified" }
+  },
+  "affiliation": {
     "current": "University Name",
     "department": "Department",
     "role": "Professor"
-  }},
-  "metrics": {{
+  },
+  "metrics": {
     "h_index": 47,
     "i10_index": 120,
     "total_citations": 8200,
     "source": "google_scholar",
     "updated_at": "{today}"
-  }},
+  },
   "research_areas": ["area1", "area2"],
   "field_archetype": "stem_applied",
   "user_notes": "...",
@@ -86,7 +92,7 @@ When you update /dossier/profile.json, use EXACTLY this structure:
   "input_urls": ["url1", "url2"],
   "created_at": "...",
   "updated_at": "{today}"
-}}
+}
 ```
 
 **IMPORTANT**: The `identity.google_scholar.id` field MUST contain the `user=` parameter \
@@ -95,44 +101,44 @@ The `identity.semantic_scholar.id` MUST contain the numeric SS author ID.
 
 ## CRITICAL: Evaluation JSON Schema
 
-Write evaluations to `/dossier/evaluations/{{date}}_full.json` with EXACTLY this structure:
+Write evaluations to `/dossier/evaluations/{DATE}_full.json` with EXACTLY this structure:
 
 ```json
-{{
+{
   "id": "eval-unique-id",
   "type": "full",
   "trigger": "manual",
   "model": "gemini-3-flash-preview",
   "created_at": "{today}T00:00:00Z",
-  "dimensions": {{
-    "research_impact": {{
-      "score": 82,
-      "explanation": "Strong h-index for career stage...",
-      "evidence": ["h_index=47", "3 top-venue papers"]
-    }},
-    "commercialization": {{
-      "score": 65,
-      "explanation": "...",
-      "evidence": ["1 patent filed"]
-    }},
-    "career_trajectory": {{ "score": 78, "explanation": "...", "evidence": ["..."] }},
-    "collaboration_strength": {{ "score": 71, "explanation": "...", "evidence": ["..."] }},
-    "field_position": {{ "score": 85, "explanation": "...", "evidence": ["..."] }},
-    "founder_potential": {{ "score": 55, "explanation": "...", "evidence": ["..."] }},
-    "public_profile": {{ "score": 40, "explanation": "...", "evidence": ["..."] }}
-  }},
-  "computed_metrics": {{}},
-  "field_context": {{
+{dimensions_schema_block},
+  "computed_metrics": {},
+  "field_context": {
     "primary_field": "...",
     "percentile_estimate": 92
-  }},
-  "commercialization_signals": {{
-    "patents": [],
-    "startups": [],
-    "industry_collabs": []
-  }}
-}}
+  },
+  "commercialization_signals": {
+    "patents": [
+      {"title": "...", "year": 2023, "url": "...", "id": "US1234567B2"}
+    ],
+    "startups": [
+      {"name": "...", "role": "founder|advisor|cofounder", "url": "..."}
+    ],
+    "industry_collabs": [
+      {"partner": "...", "description": "..."}
+    ]
+  }
+  // NOTE: every item in patents/startups/industry_collabs MUST be an object
+  // with the fields shown above — never a bare string.
+}
 ```
+
+## Evaluation Dimensions
+
+Score every dimension below (0-100). Use the guidance as the scoring rubric.
+The `dimensions` object in the evaluation JSON MUST include ONE entry for each
+dimension listed here, keyed exactly as shown:
+
+{dimensions_rubric}
 
 ## Key Principles
 
@@ -145,10 +151,22 @@ Write evaluations to `/dossier/evaluations/{{date}}_full.json` with EXACTLY this
 
 
 def build_scholar_system_prompt(goal: str) -> str:
-    """Assemble the full system prompt with goal-specific instructions."""
+    """Assemble the full system prompt with goal-specific instructions.
+
+    The dimensions rubric and schema block are interpolated from the
+    file-backed dimensions config so they remain editable at runtime.
+    """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    prompt = _BASE_PROMPT.replace("{today}", today)
-    return f"{prompt}\n\n## Your Goal\n\n{goal}"
+    dims = read_dimensions()
+    prompt = (
+        _BASE_PROMPT
+        .replace("{today}", today)
+        .replace("{dimensions_schema_block}", render_dimensions_schema_block(dims))
+        .replace("{dimensions_rubric}", render_dimensions_rubric(dims))
+    )
+    # Substitute dimension count into the goal text.
+    goal_text = goal.replace("{n_dimensions}", str(len(dims)))
+    return f"{prompt}\n\n## Your Goal\n\n{goal_text}"
 
 
 # ── Common goals ──────────────────────────────────────────────
@@ -192,7 +210,7 @@ is already there, use it directly instead of searching.
 8. Search for commercialization signals: `search_patents(name=..., affiliation=...)` \
    and `search_web(query="SCHOLAR_NAME startup company advisory role")`.
 9. Read `/config/field_archetypes.json`, select the best archetype for this scholar.
-10. Score all 7 dimensions (0-100). Write evaluation JSON to \
+10. Score all {n_dimensions} dimensions (0-100). Write evaluation JSON to \
     `/dossier/evaluations/{DATE}_full.json` using the EXACT schema above.
 11. Write a markdown report to `/dossier/reports/{DATE}_full.md` with sections: \
     Executive Summary, Research Profile, Impact Analysis, Key Publications, \

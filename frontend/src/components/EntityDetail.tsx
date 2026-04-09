@@ -1,4 +1,8 @@
-import { useState, useRef, useEffect, useCallback, DragEvent } from 'react';
+import { useState, useRef, useEffect, useCallback, DragEvent, ReactNode } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Plus, Sparkles, Loader2, Copy, Maximize2, X, ChevronDown, ChevronRight, MoreVertical, Folder } from 'lucide-react';
+import { Modal } from './ui/Modal';
 import { Entity, WorkspaceTreeNode, DeliverableCardPayload, InboxProcessJobStatus } from '../types';
 import { useWorkspaceTree } from '../hooks/useEntities';
 import { api } from '../services/api';
@@ -6,6 +10,7 @@ import {
   resolveEffectiveMime,
   isImageType,
   isTextLike,
+  isMarkdown,
   isPdf,
   isXlsx,
   isDocx,
@@ -75,24 +80,24 @@ function nodeIconKind(node: WorkspaceTreeNode): FileIconKind {
 }
 
 const ICON_PALETTE: Record<FileIconKind, { bg: string; fg: string; label: string }> = {
-  pdf:   { bg: '#B42318', fg: '#FFF', label: 'PDF' },
-  docx:  { bg: '#185ABD', fg: '#FFF', label: 'DOC' },
-  xlsx:  { bg: '#107C41', fg: '#FFF', label: 'XLS' },
-  pptx:  { bg: '#C43E1C', fg: '#FFF', label: 'PPT' },
+  pdf: { bg: '#B42318', fg: '#FFF', label: 'PDF' },
+  docx: { bg: '#185ABD', fg: '#FFF', label: 'DOC' },
+  xlsx: { bg: '#107C41', fg: '#FFF', label: 'XLS' },
+  pptx: { bg: '#C43E1C', fg: '#FFF', label: 'PPT' },
   image: { bg: '#7A5AF8', fg: '#FFF', label: 'IMG' },
   video: { bg: '#0E7490', fg: '#FFF', label: 'VID' },
   audio: { bg: '#7C3AED', fg: '#FFF', label: 'AUD' },
-  zip:   { bg: '#475467', fg: '#FFF', label: 'ZIP' },
-  url:   { bg: '#175CD3', fg: '#FFF', label: 'WEB' },
-  text:  { bg: '#344054', fg: '#FFF', label: 'TXT' },
-  folder:{ bg: '#F59E0B', fg: '#FFF', label: 'DIR' },
-  file:  { bg: '#667085', fg: '#FFF', label: 'FILE' },
+  zip: { bg: '#475467', fg: '#FFF', label: 'ZIP' },
+  url: { bg: '#175CD3', fg: '#FFF', label: 'WEB' },
+  text: { bg: '#344054', fg: '#FFF', label: 'TXT' },
+  folder: { bg: '#F59E0B', fg: '#FFF', label: 'DIR' },
+  file: { bg: '#667085', fg: '#FFF', label: 'FILE' },
 };
 
 function NodeIcon({ node }: { node: WorkspaceTreeNode }) {
   const kind = nodeIconKind(node);
   if (kind === 'folder') {
-    return <span className="resource-icon" style={{ fontSize: 16 }}>📁</span>;
+    return <Folder size={16} className="resource-icon" />;
   }
   const { bg, fg, label } = ICON_PALETTE[kind];
   return (
@@ -191,7 +196,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             {previewNode ? (
               <>
                 <button className="back-btn" onClick={() => setPreviewNode(null)}>
-                  ← Back to tree
+                  ←
                 </button>
                 <div className="preview-title-header">{previewNode.name}</div>
               </>
@@ -201,7 +206,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
                   Workspace
                   <span className="zone-count">({allFileIds.length})</span>
                 </h3>
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', gap: 6 }}>
                   <ProcessInboxButton
                     entityId={entity.id}
                     inboxItemCount={tree ? countInboxItems(tree) : 0}
@@ -290,7 +295,14 @@ function UploadButton({ entityId, onSuccess }: { entityId: string; onSuccess: ()
 
   return (
     <>
-      <button className="upload-btn" onClick={() => setShowModal(true)}>+ Upload</button>
+      <button
+        className="zone-header-icon-btn"
+        onClick={() => setShowModal(true)}
+        title="Upload files, folder, or zip"
+        aria-label="Upload"
+      >
+        <Plus size={16} strokeWidth={2} aria-hidden="true" />
+      </button>
       {showModal && (
         <FileUploadModal
           entityId={entityId}
@@ -302,7 +314,10 @@ function UploadButton({ entityId, onSuccess }: { entityId: string; onSuccess: ()
   );
 }
 
-type UploadMode = 'files' | 'folder' | 'zip';
+type UploadMode = 'files' | 'folder' | 'zip' | 'text';
+
+const sanitizeFilename = (s: string) =>
+  s.trim().replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 120) || 'note';
 
 function FileUploadModal({ entityId, onClose, onSuccess }: {
   entityId: string; onClose: () => void; onSuccess: () => void;
@@ -310,6 +325,8 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
   const [mode, setMode] = useState<UploadMode>('files');
   const [files, setFiles] = useState<File[]>([]);
   const [zipFile, setZipFile] = useState<File | null>(null);
+  const [textContent, setTextContent] = useState('');
+  const [textTitle, setTextTitle] = useState('');
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -324,6 +341,8 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
     setMode(next);
     setFiles([]);
     setZipFile(null);
+    setTextContent('');
+    setTextTitle('');
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -386,10 +405,18 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
         if (files.length === 0) return;
         const result = await api.workspace.uploadFolder(entityId, files, 'Inbox');
         showToast(`Uploaded ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} from folder`, 'success');
-      } else {
+      } else if (mode === 'zip') {
         if (!zipFile) return;
         const result = await api.workspace.uploadZip(entityId, zipFile);
         showToast(`Unpacked ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} into ${result.base_path}`, 'success');
+      } else {
+        const body = textContent.trim();
+        if (!body) return;
+        const base = sanitizeFilename(textTitle || `note-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`);
+        const name = /\.[a-z0-9]{1,8}$/i.test(base) ? base : `${base}.md`;
+        const file = new File([body], name, { type: 'text/markdown' });
+        await api.workspace.uploadFile(entityId, `Inbox/${name}`, file);
+        showToast(`Saved ${name} to Inbox`, 'success');
       }
       onSuccess();
     } catch (err) {
@@ -403,18 +430,14 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
     !isUploading &&
     ((mode === 'files' && files.length > 0) ||
       (mode === 'folder' && files.length > 0) ||
-      (mode === 'zip' && zipFile !== null));
+      (mode === 'zip' && zipFile !== null) ||
+      (mode === 'text' && textContent.trim().length > 0));
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={e => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Upload to Inbox</h3>
-          <button className="modal-close" onClick={onClose}>x</button>
-        </div>
+    <Modal isOpen onClose={onClose} title="Upload to Inbox">
         <div className="modal-body">
           <div style={{ display: 'flex', gap: 4, marginBottom: 12 }}>
-            {(['files', 'folder', 'zip'] as UploadMode[]).map(m => (
+            {(['files', 'folder', 'zip', 'text'] as UploadMode[]).map(m => (
               <button
                 key={m}
                 type="button"
@@ -429,11 +452,33 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
                   textTransform: 'capitalize',
                 }}
               >
-                {m === 'files' ? 'Files' : m === 'folder' ? 'Folder' : 'Zip'}
+                {m === 'files' ? 'Files' : m === 'folder' ? 'Folder' : m === 'zip' ? 'Zip' : 'Text'}
               </button>
             ))}
           </div>
           <div className="form-group">
+            {mode === 'text' && (
+              <>
+                <input
+                  type="text"
+                  value={textTitle}
+                  onChange={e => setTextTitle(e.target.value)}
+                  placeholder="Filename (optional, .md by default)"
+                  style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: 4, marginBottom: 8, fontSize: 14 }}
+                />
+                <textarea
+                  value={textContent}
+                  onChange={e => setTextContent(e.target.value)}
+                  placeholder="Paste email, IM message, or any free-form text…"
+                  rows={12}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 13, fontFamily: 'inherit', resize: 'vertical' }}
+                />
+                <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>
+                  Saved as a file in Inbox/, then processed like any other upload.
+                </div>
+              </>
+            )}
+            {mode !== 'text' && (
             <div
               className={`file-input${fileDragActive ? ' file-input--drag-over' : ''}`}
               onClick={() => {
@@ -474,7 +519,8 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
                 {mode === 'zip' && 'Zip contents land under Inbox/<basename>/, structure preserved'}
               </div>
             </div>
-            {mode !== 'zip' && files.length > 0 && (
+            )}
+            {mode !== 'zip' && mode !== 'text' && files.length > 0 && (
               <div className="file-list">
                 {files.map((file, index) => {
                   const rel = (file as File & { webkitRelativePath?: string }).webkitRelativePath;
@@ -503,8 +549,7 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
             {isUploading ? 'Uploading...' : 'Upload'}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -542,8 +587,8 @@ function ProcessInboxButton({
             const errCount = next.errors.length;
             showToast(
               `Process Inbox: moved ${movedCount}` +
-                (triageCount ? `, ${triageCount} need triage` : '') +
-                (errCount ? `, ${errCount} error${errCount === 1 ? '' : 's'}` : ''),
+              (triageCount ? `, ${triageCount} need triage` : '') +
+              (errCount ? `, ${errCount} error${errCount === 1 ? '' : 's'}` : ''),
               errCount ? 'error' : 'success',
             );
           } else {
@@ -577,20 +622,30 @@ function ProcessInboxButton({
     }
   };
 
-  const label = running
+  const tooltip = running
     ? status
       ? `Processing ${status.processed_items}/${status.total_items}…`
       : 'Starting…'
-    : `Process Inbox${inboxItemCount > 0 ? ` (${inboxItemCount})` : ''}`;
+    : inboxItemCount === 0
+    ? 'Inbox is empty'
+    : `Process Inbox (${inboxItemCount}) — extract metadata + auto-route`;
 
   return (
     <button
-      className="upload-btn"
+      className="zone-header-icon-btn"
       onClick={handleClick}
       disabled={running || inboxItemCount === 0}
-      title={inboxItemCount === 0 ? 'Inbox is empty' : 'Extract metadata + auto-route Inbox files'}
+      title={tooltip}
+      aria-label="Process Inbox"
     >
-      {label}
+      {running ? (
+        <Loader2 size={16} className="zone-header-icon-btn-spin" aria-hidden />
+      ) : (
+        <Sparkles size={16} aria-hidden />
+      )}
+      {!running && inboxItemCount > 0 && (
+        <span className="zone-header-icon-btn-badge">{inboxItemCount}</span>
+      )}
     </button>
   );
 }
@@ -677,7 +732,7 @@ function TreeNode({ node, depth, entityId, selectedNodeIds, onToggle, onOpen, on
           <div className="resource-icon compact-row-logo">
             {isFolder ? (
               <span style={{ fontSize: 14, cursor: 'pointer' }}>
-                {expanded ? '▾' : '▸'}
+                {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </span>
             ) : (
               <NodeIcon node={node} />
@@ -689,7 +744,7 @@ function TreeNode({ node, depth, entityId, selectedNodeIds, onToggle, onOpen, on
             aria-label="Actions"
             onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
           >
-            &#x22EE;
+            <MoreVertical size={14} />
           </button>
           {menuOpen && (
             <div className="compact-row-actions-menu" onClick={e => e.stopPropagation()}>
@@ -747,15 +802,57 @@ function TreeNode({ node, depth, entityId, selectedNodeIds, onToggle, onOpen, on
 // File preview panel (replaces ArtifactViewerModal + resource preview)
 // ---------------------------------------------------------------------------
 
+type PreviewType =
+  | 'text'
+  | 'markdown'
+  | 'image'
+  | 'pdf'
+  | 'html'
+  | 'pptx'
+  | 'unsupported'
+  | null;
+
+function MarkdownView({ content }: { content: string }) {
+  return (
+    <div className="markdown-viewer">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children, ...props }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" {...props}>
+              {children}
+            </a>
+          ),
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+type VersionEntry = {
+  version: number;
+  timestamp?: string | null;
+  size?: number | null;
+  current?: boolean;
+};
+
 function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTreeNode }) {
   const [content, setContent] = useState<string | null>(null);
-  const [previewType, setPreviewType] = useState<
-    'text' | 'image' | 'pdf' | 'html' | 'pptx' | 'unsupported' | null
-  >(null);
+  const [previewType, setPreviewType] = useState<PreviewType>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [pptxBuffer, setPptxBuffer] = useState<ArrayBuffer | null>(null);
   const [pptxRenderLoading, setPptxRenderLoading] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const pptxHostRef = useRef<HTMLDivElement | null>(null);
+  const pptxModalHostRef = useRef<HTMLDivElement | null>(null);
+
+  // Version history (loaded lazily when the popup opens)
+  const [versions, setVersions] = useState<VersionEntry[] | null>(null);
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
+  const [modalContent, setModalContent] = useState<string | null>(null);
+  const [modalVersionLoading, setModalVersionLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -763,6 +860,7 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
     setContent(null);
     setPreviewType(null);
     setPptxBuffer(null);
+    setExpanded(false);
 
     const mime = resolveEffectiveMime(node.mime_type || '', node.name);
 
@@ -779,7 +877,7 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
         } else if (isTextLike(mime, node.name)) {
           const text = await response.text();
           setContent(text);
-          setPreviewType('text');
+          setPreviewType(isMarkdown(mime, node.name) ? 'markdown' : 'text');
         } else if (isPdf(mime, node.name)) {
           const blob = await response.blob();
           const url = window.URL.createObjectURL(blob);
@@ -830,6 +928,99 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
     return () => { cancelled = true; previewer.destroy(); host.innerHTML = ''; };
   }, [previewType, pptxBuffer]);
 
+  // Re-render pptx into the modal host when the popup opens
+  useEffect(() => {
+    if (!expanded || previewType !== 'pptx' || !pptxBuffer || !pptxModalHostRef.current) return;
+    const host = pptxModalHostRef.current;
+    host.innerHTML = '';
+    const previewer = initPptxPreview(host, { width: 1280, height: 720 });
+    let cancelled = false;
+    previewer.preview(pptxBuffer).catch(() => { /* non-fatal */ });
+    return () => { cancelled = true; void cancelled; previewer.destroy(); host.innerHTML = ''; };
+  }, [expanded, previewType, pptxBuffer]);
+
+  // Escape closes the popup
+  useEffect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setExpanded(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [expanded]);
+
+  // Reset version state whenever the previewed node changes
+  useEffect(() => {
+    setVersions(null);
+    setSelectedVersion(null);
+    setModalContent(null);
+  }, [node.id]);
+
+  // Load version list the first time the popup opens for a text/markdown file
+  useEffect(() => {
+    if (!expanded) return;
+    if (previewType !== 'text' && previewType !== 'markdown') return;
+    if (versions !== null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = (await api.workspace.fileVersions(entityId, node.id)) as {
+          versions: VersionEntry[];
+        };
+        if (cancelled) return;
+        const sorted = [...(res.versions ?? [])].sort(
+          (a, b) => (b.version ?? 0) - (a.version ?? 0),
+        );
+        setVersions(sorted);
+        setSelectedVersion((prev) => prev ?? (node.version ?? 1));
+      } catch {
+        if (!cancelled) setVersions([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, previewType, versions, entityId, node.id, (node.version ?? 1)]);
+
+  // When the user picks a historical version inside the popup, fetch its body
+  useEffect(() => {
+    if (!expanded) return;
+    if (selectedVersion == null) return;
+    // Current version: reuse the content already fetched for the inline panel
+    if (selectedVersion === (node.version ?? 1)) {
+      setModalContent(null);
+      return;
+    }
+    if (previewType !== 'text' && previewType !== 'markdown') return;
+    let cancelled = false;
+    setModalVersionLoading(true);
+    (async () => {
+      try {
+        const response = await api.workspace.downloadFileVersion(
+          entityId,
+          node.id,
+          selectedVersion,
+        );
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        if (!cancelled) setModalContent(text);
+      } catch (e) {
+        if (!cancelled) {
+          showToast(
+            `Failed to load v${selectedVersion}: ${e instanceof Error ? e.message : String(e)}`,
+            'error',
+          );
+          setSelectedVersion((node.version ?? 1));
+        }
+      } finally {
+        if (!cancelled) setModalVersionLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, selectedVersion, previewType, entityId, node.id, (node.version ?? 1)]);
+
   const handleDownload = async () => {
     try {
       const response = await api.workspace.downloadFile(entityId, node.id);
@@ -847,31 +1038,120 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
     }
   };
 
+  const renderPreviewBody = (variant: 'inline' | 'modal'): ReactNode => {
+    if (isLoading) return <div className="preview-loading">Loading...</div>;
+    if (variant === 'modal' && modalVersionLoading) {
+      return <div className="preview-loading">Loading version…</div>;
+    }
+    const displayContent =
+      variant === 'modal' && modalContent !== null ? modalContent : content;
+    if (previewType === 'markdown') return <MarkdownView content={displayContent ?? ''} />;
+    if (previewType === 'text') return <pre className="preview-text">{displayContent}</pre>;
+    if (previewType === 'image') return <img src={content!} alt={node.name} className="preview-image" />;
+    if (previewType === 'pdf') return <iframe src={content!} title={node.name} className="preview-pdf" />;
+    if (previewType === 'html') return <div className="preview-html" dangerouslySetInnerHTML={{ __html: content! }} />;
+    if (previewType === 'pptx') {
+      return (
+        <div className="preview-pptx-wrap">
+          {pptxRenderLoading && variant === 'inline' && (
+            <div className="preview-loading preview-pptx-loading">Loading presentation...</div>
+          )}
+          <div
+            ref={variant === 'inline' ? pptxHostRef : pptxModalHostRef}
+            className="preview-pptx-host"
+          />
+        </div>
+      );
+    }
+    return (
+      <div className="preview-unsupported">
+        <p>Preview not available for this file type.</p>
+        <button className="btn-primary" onClick={() => void handleDownload()}>Download File</button>
+      </div>
+    );
+  };
+
+  const canExpand = !isLoading && previewType !== null && previewType !== 'unsupported';
+
   return (
     <div className="resource-preview">
-      <div className="preview-content">
-        {isLoading ? (
-          <div className="preview-loading">Loading...</div>
-        ) : previewType === 'text' ? (
-          <pre className="preview-text">{content}</pre>
-        ) : previewType === 'image' ? (
-          <img src={content!} alt={node.name} className="preview-image" />
-        ) : previewType === 'pdf' ? (
-          <iframe src={content!} title={node.name} className="preview-pdf" />
-        ) : previewType === 'html' ? (
-          <div className="preview-html" dangerouslySetInnerHTML={{ __html: content! }} />
-        ) : previewType === 'pptx' ? (
-          <div className="preview-pptx-wrap">
-            {pptxRenderLoading && <div className="preview-loading preview-pptx-loading">Loading presentation...</div>}
-            <div ref={pptxHostRef} className="preview-pptx-host" />
-          </div>
-        ) : (
-          <div className="preview-unsupported">
-            <p>Preview not available for this file type.</p>
-            <button className="btn-primary" onClick={() => void handleDownload()}>Download File</button>
-          </div>
-        )}
-      </div>
+      {canExpand && (
+        <button
+          type="button"
+          className="preview-expand-btn"
+          onClick={() => setExpanded(true)}
+          title="Expand preview"
+          aria-label="Expand preview"
+        >
+          <Maximize2 size={14} aria-hidden />
+        </button>
+      )}
+      <div className="preview-content">{renderPreviewBody('inline')}</div>
+      {expanded && (
+        <Modal
+          isOpen
+          onClose={() => setExpanded(false)}
+          size="wide"
+          ariaLabel={`Preview: ${node.name}`}
+          className="viewer-modal preview-modal"
+        >
+            <div className="modal-header">
+              <div className="preview-modal-title-row">
+                <h3 className="preview-modal-title" title={node.name}>{node.name}</h3>
+                {(previewType === 'text' || previewType === 'markdown') &&
+                  versions &&
+                  versions.length > 1 && (
+                    <select
+                      className="preview-version-select"
+                      value={selectedVersion ?? (node.version ?? 1)}
+                      onChange={(e) => setSelectedVersion(Number(e.target.value))}
+                      title="Switch version"
+                    >
+                      {versions.map((v) => (
+                        <option key={v.version} value={v.version}>
+                          v{v.version}
+                          {v.version === (node.version ?? 1) ? ' (current)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+              </div>
+              <div className="preview-modal-actions">
+                {(previewType === 'text' || previewType === 'markdown') && (
+                  <button
+                    type="button"
+                    className="preview-modal-icon-btn"
+                    title="Copy to clipboard"
+                    aria-label="Copy to clipboard"
+                    onClick={async () => {
+                      const text =
+                        (modalContent !== null ? modalContent : content) ?? '';
+                      try {
+                        await navigator.clipboard.writeText(text);
+                        showToast('Copied', 'success');
+                      } catch {
+                        showToast('Copy failed', 'error');
+                      }
+                    }}
+                  >
+                    <Copy size={16} aria-hidden />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="modal-close"
+                  onClick={() => setExpanded(false)}
+                  aria-label="Close"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+            <div className="modal-body preview-modal-body">
+              {renderPreviewBody('modal')}
+            </div>
+        </Modal>
+      )}
     </div>
   );
 }

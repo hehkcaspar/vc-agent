@@ -2,6 +2,7 @@ import { useState, FormEvent } from 'react';
 import { api } from '../services/api';
 import { Entity, EntityUpdateData } from '../types';
 import { EntityMetadataForm } from './EntityMetadataForm';
+import { Modal } from './ui/Modal';
 import './CreateEntityModal.css';
 
 interface EditEntityModalProps {
@@ -60,13 +61,7 @@ export function EditEntityModal({ entity, onClose, onSuccess }: EditEntityModalP
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Edit Entity</h3>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-
+    <Modal isOpen onClose={onClose} title="Edit Entity">
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
             {/* This form automatically renders all fields from ENTITY_METADATA_FIELDS */}
@@ -97,7 +92,6 @@ export function EditEntityModal({ entity, onClose, onSuccess }: EditEntityModalP
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

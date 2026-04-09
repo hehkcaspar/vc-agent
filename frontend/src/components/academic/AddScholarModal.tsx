@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { academicApi } from '../../services/academicApi';
+import { Modal } from '../ui/Modal';
 import type { Scholar } from '../../types/academic';
 
 interface AddScholarModalProps {
@@ -63,12 +64,7 @@ export function AddScholarModal({ onClose, onCreated, initialData }: AddScholarM
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
-        <div className="modal-header">
-          <h3>{isEdit ? 'Edit Scholar' : 'Add Scholar'}</h3>
-          <button className="modal-close" onClick={onClose}>&times;</button>
-        </div>
+    <Modal isOpen onClose={onClose} title={isEdit ? 'Edit Scholar' : 'Add Scholar'}>
         <form onSubmit={handleSubmit}>
           <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-4)' }}>
             {/* Name */}
@@ -157,7 +153,6 @@ export function AddScholarModal({ onClose, onCreated, initialData }: AddScholarM
             </button>
           </div>
         </form>
-      </div>
-    </div>
+    </Modal>
   );
 }

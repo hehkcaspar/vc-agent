@@ -1,3 +1,4 @@
+import { ArrowRight } from 'lucide-react';
 import { showToast } from '../../lib/appToast';
 import { academicApi } from '../../services/academicApi';
 import type { Channel } from '../../types/academic';
@@ -37,7 +38,7 @@ export function ProfilesTab({ scholarId, profileLinks, channels, mutateChannels 
               <a href={link.url} target="_blank" rel="noopener noreferrer" className="profile-card-link">
                 <span className="profile-card-label">{link.label}</span>
                 <span className="profile-card-url">{link.url}</span>
-                <span className="profile-card-arrow">&rarr;</span>
+                <span className="profile-card-arrow"><ArrowRight size={14} /></span>
               </a>
               {ch && (
                 <div className="channel-controls">

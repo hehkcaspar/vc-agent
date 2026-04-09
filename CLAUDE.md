@@ -67,7 +67,7 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
   - Every processed file gets an `intake_routing` metadata block (`status: routed|needs_triage|error`, `run_id`, `batch_name`, `destination`, `confidence`, `reason`) — stable contract for future triage UIs / agents.
   - Routing destinations are validated against `WORKSPACE_TAXONOMY`; LLM cannot route into `Inbox/` or arbitrary paths.
   - Service: `services/inbox_processing_jobs.py`. In-memory job registry, one active job per entity, status lost on restart (mirrors `metadata_preprocess_jobs` pattern).
-- **Structured upload**: `POST /workspace/upload` (multipart, preserves `webkitRelativePath` from frontend) and `POST /workspace/upload-zip` (server-side `zipfile` unpack with `WORKSPACE_MAX_ZIP_BYTES` cap, zip-slip rejection, single-root detection to avoid double-nesting).
+- **Structured upload**: `POST /workspace/upload` (multipart, preserves `webkitRelativePath` from frontend) and `POST /workspace/upload-zip` (server-side `zipfile` unpack with `WORKSPACE_MAX_ZIP_BYTES` cap, zip-slip rejection, single-root detection to avoid double-nesting). Frontend `FileUploadModal` (in `EntityDetail.tsx`) exposes four modes — **Files / Folder / Zip / Text**. Text mode wraps pasted free-form content (email, IM, notes) into a synthetic `File` and submits through the same `POST /workspace/upload` endpoint so it flows through Process Inbox identically to regular uploads; filename defaults to `note-<ISO timestamp>.md`.
 
 ### Backend Structure (`backend/app/`)
 - **`main.py`** — FastAPI app, CORS, lifespan (LangSmith guard + DB init + stuck-evaluating reset)
@@ -88,7 +88,8 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
     - `chat_service.py` — background chat job execution
     - `digest_service.py` — weekly portfolio digest generation via Gemini
     - `scholar_agent.py` — goal-driven Deep Agents harness (invoke_scholar_agent, invoke_scholar_chat); `_extract_text()` normalises Gemini content blocks to plain strings
-    - `scholar_prompts.py` — goal prompt templates (initial eval, refresh, chat, comparative, upload processing)
+    - `scholar_prompts.py` — goal prompt templates (initial eval, refresh, chat, comparative, upload processing). `build_scholar_system_prompt()` interpolates dimensions from `dimensions.py` at every invocation
+    - `dimensions.py` — file-backed evaluation dimensions at `data/config/dimensions.json` (`DEFAULT_DIMENSIONS` seed, `read/write_dimensions()`, `render_dimensions_schema_block()`, `render_dimensions_rubric()`)
     - `domain_tools.py` — 12 scholar-scoped tools built via `build_scholar_tools(scholar_id)` closure pattern
     - `tool_utils.py` — pure utility functions (URL classification, name matching, title normalisation)
     - `semantic_scholar.py` — Semantic Scholar API client (rate-limited, optional key)
@@ -123,12 +124,24 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
 - **`types/index.ts`** — TypeScript interfaces (Entity, WorkspaceNode, WorkspaceTreeNode, chat types)
 - **`types/academic.ts`** — TypeScript interfaces + display constants (labels, colours, score helpers)
 - **`lib/academicRanking.ts`** — `computeWeightedRank()` for client-side ranking
+- **`lib/eventIcons.tsx`** — unified `EVENT_ICONS` map + `<EventIcon>` component (lucide) shared by `AcademicTab` signal feed and `TimelineTab`
+- **Icons** — all UI chrome uses [`lucide-react`](https://lucide.dev). No emoji or HTML-entity glyphs (▶ ✏ 🗑 ▼ ×) in JSX; emoji is reserved for content (user text, LLM output, persisted event payloads). When adding an icon, import from `lucide-react` and pick a size matching nearby usage (12–20px)
+
+### UI primitives (styles + modal wrapper)
+- **`styles/variables.css`** — design tokens: colors, typography, spacing, radii, shadows, z-index, and modal widths (`--modal-w-narrow: 480px`, `--modal-w-standard: 720px`, `--modal-w-wide: min(92vw, 1152px)`)
+- **`styles/primitives.css`** — single source of truth for `.modal*`, `.btn-primary|secondary|text|icon|icon-danger|sm`, `.form-group`, `.form-input`, `.form-label`, `.radio-group`. Imported once from `main.tsx`. **Do not redefine these classes in component CSS files** — add component-scoped classes instead
+- **`components/ui/Modal.tsx`** — the only modal primitive. Handles overlay, Esc key, body scroll lock, header (title + `X` close), `size` prop (`narrow` | `standard` | `wide`). Every popup in the app flows through it. Children render directly inside `.modal` so `<form>` callers can wrap body+footer together
+- **Adding a new popup**: import `Modal`, pass `isOpen` / `onClose` / `title` / optional `size`, and put `<div className="modal-body">…</div>` + `<div className="modal-footer">…</div>` as children. Never hand-roll `<div className="modal-overlay">`, never set inline `maxWidth`, never duplicate `.modal*` rules in component CSS
 - **`context/TabContext.tsx`** — Tab state management
 - Data fetching via SWR with automatic revalidation
 
 ### Chat Modes
 - **One-shot** (default): synchronous Gemini call → 200 response
 - **Deep Agent** (`use_deep_agent=true`): 202 response with `job_id`, background LangChain agent with 13 workspace tools, client polls for completion. Agent receives workspace tree context (file structure + descriptions + workspace notes) on every turn.
+- **Preset shortcuts** (`POST /chat/presets/{id}/run`) share the same two modes. In deep-agent mode, the endpoint returns **202 + `PresetRunJobAccepted`**, persists a synthetic `▶ Run preset: <label>` user message, creates a `chat_completion_jobs` row with `preset_payload_json` populated, and runs `run_preset_agent_job` as a background task. **Poll the same chat-job endpoint** — no separate preset job endpoint. The frontend's `agentJob` polling loop + spinner status line are reused verbatim, so Red Team / Extract Info runs get the same live tool-step progress as a chat send. `extract_info` is force-pinned to one-shot; `red_team` honors the toggle.
+
+### File preview
+`FilePreview` in `components/EntityDetail.tsx` renders files in the side panel and supports an **expand-to-popup** modal (lucide `Maximize2`). Markdown files (`.md`, `text/markdown`) render via `react-markdown` + `remark-gfm`, not as raw text. The popup header has filename + **version picker dropdown** on the left (text/markdown only, fetched lazily from `GET /workspace/file/{id}/versions`; historical blob via `GET /workspace/file/{id}/versions/{version}`) and **copy-to-clipboard** + close on the right. Versions in the modal are view-only — no re-fetch on expand, modalContent overrides content when a historical version is selected. The inline side panel always shows the current version.
 
 ### Workspace Agent Tools (13 total)
 Browse + organize (7): `workspace_get_tree`, `workspace_list_files`, `workspace_read_file`, `workspace_search_files`, `workspace_create_folder`, `workspace_move`, `workspace_rename`
@@ -141,7 +154,7 @@ Write + manage (6): `workspace_write_file`, `workspace_annotate`, `workspace_del
 - Version history at `data/entities/{entity_id}/workspace/.versions/{node_id}/`
 - Parking lot at `data/entities/00000/parkinglot/`
 - Scholar dossiers at `data/scholars/{scholar_id}/` (profile.json, papers.json, events.jsonl, channels.json, evaluations/, reports/, uploads/, agent_runs/)
-- Academic config at `data/config/` (heartbeat.json, field_archetypes.json, ranking_presets/, digests/, custom_dimensions.json)
+- Academic config at `data/config/` (heartbeat.json, field_archetypes.json, ranking_presets/, digests/, dimensions.json)
 - `data/` is gitignored
 
 ## Key Configuration
@@ -174,7 +187,7 @@ Separate from portfolio — scholar-centric tracking with goal-driven Deep Agent
 One agent factory (`invoke_scholar_agent`), one toolkit (`build_scholar_tools(scholar_id)` — 12 closure-bound tools), different goals. Initial evaluation, refresh, signal investigation, chat, comparative evaluation, and upload processing are all the same agent with different system prompts.
 
 **Goals (background tasks via FastAPI BackgroundTasks):**
-- **Initial evaluation** — identity extraction (URL-first, deterministic pre-classification), paper fetching (SS API), bibliometrics, 7-dimension scoring, report generation
+- **Initial evaluation** — identity extraction (URL-first, deterministic pre-classification), paper fetching (SS API), bibliometrics, N-dimension scoring (list lives in `data/config/dimensions.json`, editable at runtime — see "Dimensions config" below), report generation
 - **Refresh** — re-fetch papers, update metrics, rescore, compute delta vs previous evaluation
 - **Chat** — multi-turn conversation with scholar context and tools
 - **Comparative** — side-by-side evaluation of two scholars
@@ -196,6 +209,7 @@ One agent factory (`invoke_scholar_agent`), one toolkit (`build_scholar_tools(sc
 - Startup hook resets stuck "evaluating" scholars to "active" (handles server restart mid-evaluation)
 - **Event date vs discovery date**: `append_event` tool accepts optional `event_date` for when the event actually occurred (e.g., a company founding); `created_at` records when the system discovered it. Timeline UI shows both when they differ
 - **Gemini content block handling**: `_extract_text()` in `scholar_agent.py` normalises list-of-blocks content (`[{"type": "text", "text": "..."}]`) from Gemini models into plain strings before storing in DB
+- **Dimensions config (dynamic, file-backed)**: evaluation dimensions are NOT hardcoded in prompts. `services/academic/dimensions.py` owns `data/config/dimensions.json`, auto-seeded on first read with seven defaults. `scholar_prompts.build_scholar_system_prompt()` calls `read_dimensions()` every invocation and interpolates `{dimensions_schema_block}` (the JSON schema example) and `{dimensions_rubric}` (the scoring guidance) into `_BASE_PROMPT`, plus `{n_dimensions}` into goal text. CRUD exposed via `GET/POST/PUT/DELETE /academic/custom-dimensions` (route name kept for backward compatibility; the endpoint now manages the full list — there is no distinction between "built-in" and "custom"). Changes take effect on the next agent run; no restart. Caveat: ranking-preset weights in `routers/academic.py` still reference default keys by name, so deleting a default leaves that preset partially dead
 - Frontend auto-refreshes (5s polling) while scholar status is "evaluating"
 - Frontend is an independent tab/workspace with 6 content tabs (Report, Timeline, Evaluation, Publications, Profiles, Chat) plus list/ranking views, signal feed, and digest
 

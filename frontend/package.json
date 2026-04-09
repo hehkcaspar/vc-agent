@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "lucide-react": "^1.0.0",
     "mammoth": "^1.12.0",
     "pptx-preview": "^1.0.7",
     "react": "^18.2.0",

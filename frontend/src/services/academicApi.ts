@@ -20,6 +20,8 @@ import type {
   WeightPreset,
   Digest,
   CustomDimension,
+  TrackingPriority,
+  UserSettableStatus,
 } from '../types/academic';
 
 const DIRECT_API = import.meta.env.VITE_API_URL?.trim() ?? '';
@@ -62,6 +64,20 @@ export const academicApi = {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
+      }),
+
+    setPriority: (id: string, priority: TrackingPriority) =>
+      fetchJson<Scholar>(`/academic/scholars/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tracking_priority: priority }),
+      }),
+
+    setLifecycle: (id: string, status: UserSettableStatus) =>
+      fetchJson<Scholar>(`/academic/scholars/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
       }),
 
     delete: (id: string) =>
@@ -244,6 +260,13 @@ export const academicApi = {
     create: (body: { name: string; key: string; prompt: string }) =>
       fetchJson<CustomDimension>('/academic/custom-dimensions', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+
+    update: (key: string, body: { name: string; key: string; prompt: string }) =>
+      fetchJson<CustomDimension>(`/academic/custom-dimensions/${key}`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }),

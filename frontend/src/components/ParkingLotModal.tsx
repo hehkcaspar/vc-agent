@@ -1,7 +1,9 @@
 import { useState } from 'react';
+import { ParkingSquare } from 'lucide-react';
 import { useParkingLot, resolveParkingLotItem } from '../hooks/useParkingLot';
 import { useEntities } from '../hooks/useEntities';
 import { IngestItem, Entity } from '../types';
+import { Modal } from './ui/Modal';
 import './CreateEntityModal.css';
 import './ParkingLotModal.css';
 
@@ -47,19 +49,18 @@ export function ParkingLotModal({ onClose, onResolved }: ParkingLotModalProps) {
   };
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal parking-lot-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header">
-          <h3>Parking Lot ({pendingItems.length})</h3>
-          <button className="modal-close" onClick={onClose}>×</button>
-        </div>
-
+    <Modal
+      isOpen
+      onClose={onClose}
+      title={`Parking Lot (${pendingItems.length})`}
+      className="parking-lot-modal"
+    >
         <div className="modal-body">
           {isLoading ? (
             <div className="loading">Loading...</div>
           ) : pendingItems.length === 0 ? (
             <div className="empty-parking">
-              <div className="empty-parking-icon">🅿️</div>
+              <div className="empty-parking-icon"><ParkingSquare size={32} strokeWidth={1.5} /></div>
               <p>No items in parking lot</p>
               <p style={{ fontSize: 13, color: '#9ca3af' }}>
                 All items have been resolved
@@ -86,8 +87,7 @@ export function ParkingLotModal({ onClose, onResolved }: ParkingLotModalProps) {
             Close
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -156,14 +156,14 @@ function ParkingItem({
             ))}
           </select>
           <button
-            className="btn-small btn-primary"
+            className="btn-primary btn-sm"
             onClick={() => selectedEntityId && onResolve(selectedEntityId)}
             disabled={!selectedEntityId || isResolving}
           >
             {isResolving ? '...' : 'Attach'}
           </button>
           <button
-            className="btn-small btn-secondary"
+            className="btn-secondary btn-sm"
             onClick={() => setShowCreateNew(true)}
             disabled={isResolving}
           >
@@ -182,14 +182,14 @@ function ParkingItem({
               disabled={isResolving}
             />
             <button
-              className="btn-small btn-primary"
+              className="btn-primary btn-sm"
               onClick={onCreateAndResolve}
               disabled={!newEntityName.trim() || isResolving}
             >
               {isResolving ? '...' : 'Create & Attach'}
             </button>
             <button
-              className="btn-small btn-secondary"
+              className="btn-secondary btn-sm"
               onClick={() => setShowCreateNew(false)}
               disabled={isResolving}
             >

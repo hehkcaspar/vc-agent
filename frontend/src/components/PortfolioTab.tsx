@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ParkingSquare, Building2, Pencil, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
 import { useEntities } from '../hooks/useEntities';
 import { useTabContext } from '../store/TabContext';
 import { Entity } from '../types';
@@ -111,7 +112,7 @@ export function PortfolioTab() {
             className={`parking-lot-button ${parkingLotCount > 0 ? 'has-items' : ''}`}
             onClick={() => setIsParkingLotOpen(true)}
           >
-            <span>🅿️</span>
+            <ParkingSquare size={16} />
             Parking Lot
             {parkingLotCount > 0 && (
               <span className="parking-lot-badge">{parkingLotCount}</span>
@@ -217,7 +218,7 @@ export function PortfolioTab() {
                 disabled={isDeletingEntity}
                 aria-label="Close"
               >
-                ×
+                <X size={16} />
               </button>
             </div>
             <div className="portfolio-delete-modal-body">
@@ -270,7 +271,7 @@ function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: E
   const isArchived = entity.status === 'archived';
   return (
     <div className={`entity-row ${isArchived ? 'archived' : ''}`} onClick={onClick}>
-      <div className="entity-row-icon">🏢</div>
+      <div className="entity-row-icon"><Building2 size={20} /></div>
       <div className="entity-row-info">
         <div className="entity-row-name">
           {entity.name}
@@ -286,21 +287,21 @@ function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: E
           onClick={onEdit}
           title="Edit entity"
         >
-          ✏️
+          <Pencil size={14} />
         </button>
-        <button 
-          className="btn-icon archive-btn" 
+        <button
+          className="btn-icon archive-btn"
           onClick={onArchive}
           title={isArchived ? 'Unarchive entity' : 'Archive entity'}
         >
-          {isArchived ? '📂' : '📥'}
+          {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </button>
         <button
           className="btn-icon delete-btn"
           onClick={onDelete}
           title="Delete entity"
         >
-          🗑️
+          <Trash2 size={14} />
         </button>
       </div>
     </div>
@@ -317,25 +318,25 @@ function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: 
           onClick={onEdit}
           title="Edit entity"
         >
-          ✏️
+          <Pencil size={14} />
         </button>
-        <button 
-          className="btn-icon card-archive-btn" 
+        <button
+          className="btn-icon card-archive-btn"
           onClick={onArchive}
           title={isArchived ? 'Unarchive entity' : 'Archive entity'}
         >
-          {isArchived ? '📂' : '📥'}
+          {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </button>
         <button
           className="btn-icon card-delete-btn"
           onClick={onDelete}
           title="Delete entity"
         >
-          🗑️
+          <Trash2 size={14} />
         </button>
       </div>
       {isArchived && <div className="archived-overlay">Archived</div>}
-      <div className="entity-card-icon">🏢</div>
+      <div className="entity-card-icon"><Building2 size={32} /></div>
       <div className="entity-card-name">
         {entity.name}
       </div>

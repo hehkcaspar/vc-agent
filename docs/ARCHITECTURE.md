@@ -204,7 +204,7 @@ Files with `status: needs_triage` or `error` stay in `Inbox/` with metadata pres
 - **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings.
 - **One-shot path:** synchronous model call (`generate_with_context`); response **`200`** with `ChatMessageResult` (no tools; no file writes from chat in this path).
 - **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → status callback). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages.
-- **Presets follow the same mode switch:** `PresetRunRequest.use_deep_agent` (falling back to `CHAT_USE_DEEP_AGENT`). The UI sends Agent On/Off into preset runs.
+- **Presets follow the same mode switch:** `PresetRunRequest.use_deep_agent` (falling back to `CHAT_USE_DEEP_AGENT`). When `true`, the preset endpoint now returns **`202 Accepted`** with `PresetRunJobAccepted` (mirrors chat send): a synthetic `▶ Run preset: <label>` user message is persisted, a `chat_completion_jobs` row is created with `preset_payload_json` populated, and `run_preset_agent_job` drains in the background. The client polls the **existing** chat-job endpoint (`GET .../chat/sessions/{id}/jobs/{job_id}`) — the frontend's `agentJob` polling loop + spinner status line are reused verbatim. `extract_info` is force-pinned to one-shot; `red_team` honors the toggle (no auto-promotion).
 - **Tools** (`workspace_tools.build_workspace_tools`): 13 workspace tools:
 
 | Tool | Purpose |
@@ -642,7 +642,7 @@ All goals use the same agent factory and toolkit. The goal prompt determines beh
 
 | Goal | Trigger | What It Does |
 |------|---------|--------------|
-| Initial evaluation | POST /scholars/{id}/evaluate | Identity extraction, paper fetch, bibliometrics, 7-dimension scoring, report |
+| Initial evaluation | POST /scholars/{id}/evaluate | Identity extraction, paper fetch, bibliometrics, N-dimension scoring (list lives in `data/config/dimensions.json`, editable via `/academic/custom-dimensions` CRUD; prompt interpolates it at runtime), report |
 | Refresh | POST /scholars/{id}/refresh | Re-fetch papers, update metrics, rescore, compute delta |
 | Chat | POST /scholars/{id}/chat/sessions/{sid}/messages | Multi-turn conversation with scholar context |
 | Comparative | POST /scholars/{id}/compare/{other_id} | Side-by-side evaluation of two scholars |
@@ -658,6 +658,7 @@ All goals use the same agent factory and toolkit. The goal prompt determines beh
 | `services/academic/evaluation_service.py` | Eval normalisation, delta computation, score extraction, background eval/refresh/comparative tasks |
 | `services/academic/chat_service.py` | Background chat job execution |
 | `services/academic/digest_service.py` | Weekly digest generation |
+| `services/academic/dimensions.py` | File-backed dimensions config (`data/config/dimensions.json`), `DEFAULT_DIMENSIONS` seed, `read/write_dimensions()`, and `render_dimensions_schema_block()` / `render_dimensions_rubric()` — consumed by `scholar_prompts.build_scholar_system_prompt()` at every agent invocation |
 | `services/academic/scholar_agent.py` | Deep Agents harness — `invoke_scholar_agent()`, `invoke_scholar_chat()`, `_extract_text()` for Gemini content normalisation |
 | `services/academic/domain_tools.py` | 12 tools built via `build_scholar_tools(scholar_id)` closure |
 | `services/academic/heartbeat.py` | Background scheduler (stale refresh, channel polling, scheduled digest) |
@@ -676,6 +677,8 @@ All goals use the same agent factory and toolkit. The goal prompt determines beh
 5. **`@tool` docstring rule**: The `@tool` decorator requires the docstring as the FIRST statement in the function body. Logger calls or any other code before the docstring breaks the decorator.
 
 6. **Stuck-evaluating recovery**: Server startup resets all scholars with status "evaluating" back to "active" (handles server restart mid-background-task).
+
+7. **File-backed, modular dimensions**: Evaluation dimensions are **not** hardcoded in the prompt. `services/academic/dimensions.py` owns `data/config/dimensions.json`, seeded on first read with seven defaults (`research_impact`, `commercialization`, `career_trajectory`, `collaboration_strength`, `field_position`, `founder_potential`, `public_profile`). `scholar_prompts.build_scholar_system_prompt()` reads the current list and interpolates two rendered blocks into the base prompt — the JSON schema (`{dimensions_schema_block}`) and the scoring rubric (`{dimensions_rubric}`) — plus `{n_dimensions}` into goal text. CRUD over `/academic/custom-dimensions` modifies the file and takes effect on the next agent run with no code changes or restart.
 
 7. **Hard delete**: Deleting a scholar removes its dossier directory and cascades to all SQL rows (events, channels, chat sessions/messages/jobs).
 

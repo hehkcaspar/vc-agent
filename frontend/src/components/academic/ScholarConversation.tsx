@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { academicApi } from '../../services/academicApi';
@@ -259,7 +260,7 @@ export function ScholarConversation({ scholarId }: ScholarConversationProps) {
             title="Chat sessions"
           >
             {sessions.find((s) => s.id === sessionId)?.title || 'Chat'}{' '}
-            <span style={{ fontSize: '0.7em' }}>&#9660;</span>
+            <ChevronDown size={12} />
           </button>
           {sessionMenuOpen && (
             <div className="entity-conversation-session-dropdown">

@@ -87,6 +87,8 @@ export const api = {
       ),
     downloadFile: (entityId: string, nodeId: string) =>
       fetch(apiUrl(`/entities/${entityId}/workspace/file/${nodeId}`)),
+    downloadFileVersion: (entityId: string, nodeId: string, version: number) =>
+      fetch(apiUrl(`/entities/${entityId}/workspace/file/${nodeId}/versions/${version}`)),
     downloadFileByPath: (entityId: string, path: string) =>
       fetch(apiUrl(`/entities/${entityId}/workspace/file?path=${encodeURIComponent(path)}`)),
     uploadFile: (entityId: string, path: string, file: File) => {

@@ -152,7 +152,9 @@ vc-agent/
 │   │   │   ├── CreateEntityModal.tsx
 │   │   │   ├── EditEntityModal.tsx  # Edit entity metadata
 │   │   │   ├── EntityMetadataForm.tsx
-│   │   │   └── ParkingLotModal.tsx
+│   │   │   ├── ParkingLotModal.tsx
+│   │   │   └── ui/
+│   │   │       └── Modal.tsx        # Shared modal primitive — every popup uses this
 │   │   ├── context/
 │   │   │   └── ChatModelProfileContext.tsx  # Persisted harness profile id
 │   │   ├── hooks/
@@ -166,9 +168,10 @@ vc-agent/
 │   │   ├── store/
 │   │   │   └── TabContext.tsx       # Tab state persistence
 │   │   ├── styles/
-│   │   │   ├── variables.css        # Design system tokens
+│   │   │   ├── variables.css        # Design tokens (colors, spacing, radii, modal widths)
+│   │   │   ├── primitives.css       # Shared .modal*, .btn-*, .form-* rules (single source of truth)
 │   │   │   ├── segmented-toggle.css # Shared list/grid and Form/Raw JSON toggle styling
-│   │   │   └── global.css           # Global styles (imports segmented-toggle)
+│   │   │   └── global.css           # Global baseline (imports segmented-toggle)
 │   │   └── types/
 │   │       └── index.ts             # TypeScript types + field config
 │   ├── index.html                   # Google Fonts loaded here
@@ -204,6 +207,37 @@ Located in `frontend/src/styles/`:
 - **Cormorant Garamond** (`--font-display`) — Headings and prominent titles
 - **Manrope** (`--font-body`) — Body and UI
 - **JetBrains Mono** (`--font-mono`) — Code, JSON, metadata lines
+
+### UI Primitives
+
+Single source of truth for modal chrome, buttons, and form controls lives in `frontend/src/styles/primitives.css`, imported once from `main.tsx` after `global.css`. **Never redeclare these classes in component CSS files.** Add component-scoped classes instead.
+
+- **Modal widths** are driven by three tokens in `variables.css`: `--modal-w-narrow: 480px`, `--modal-w-standard: 720px`, `--modal-w-wide: min(92vw, 1152px)`. Pick by content: confirms → narrow, forms → standard (default), previews/viewers → wide. No inline `maxWidth` anywhere.
+- **Modal component** — `frontend/src/components/ui/Modal.tsx` is the only modal wrapper. It renders the overlay + outer shell and handles click-to-close, Escape key, body scroll lock, and `aria-labelledby` linkage when a string title is passed. Children are responsible for `.modal-body` / `.modal-footer` structure so `<form>` callers can wrap body + footer together. API:
+  ```tsx
+  <Modal
+    isOpen={showX}
+    onClose={() => setShowX(false)}
+    title="Create New Entity"      // string → auto-rendered h3 + aria-labelledby
+    size="standard"                 // "narrow" | "standard" | "wide"
+  >
+    <form onSubmit={…}>
+      <div className="modal-body">…fields…</div>
+      <div className="modal-footer">
+        <button className="btn-secondary" onClick={onClose}>Cancel</button>
+        <button type="submit" className="btn-primary">Save</button>
+      </div>
+    </form>
+  </Modal>
+  ```
+  Does **not** implement a focus trap. If you need one, wrap children with a focus-trap library.
+- **Buttons** — `.btn-primary`, `.btn-secondary`, `.btn-text`, `.btn-icon`, `.btn-icon-danger`, plus `.btn-sm` size modifier. All in `primitives.css`. Primary and secondary share an uppercase, letter-spaced editorial style.
+- **Form controls** — `primitives.css` supports both conventions side by side:
+  - `.form-group > label` / `.form-group > input` (nested selector style) — used by `CreateEntityModal`, `EditEntityModal`, `FileUploadModal`
+  - `.form-label` + `.form-input` classes — used by `AddScholarModal`, `AcademicTab` Custom Dimensions
+  Use whichever fits; don't mix in a single form.
+- **Icons** — all UI chrome uses [`lucide-react`](https://lucide.dev). No emoji or HTML-entity glyphs (▶ ✏ 🗑 ▼ × ← →) in JSX. Emoji is reserved for content (user text, LLM output, persisted event payloads). Sizes 12–20 px typical; match nearby usage.
+- **Shared event icon map** — `frontend/src/lib/eventIcons.tsx` exports `EVENT_ICONS` and `<EventIcon type={…} />`, used by both the academic `AcademicTab` signal feed and `TimelineTab`.
 
 ### State Management
 
@@ -248,7 +282,7 @@ On **Entity detail**, the layout is a two-column **notebook**: Workspace Tree | 
 The workspace tree replaces the old separate Resources and Artifacts side columns.
 
 - **Hierarchical folder browser:** files are organised into a tree with default folders (Inbox, Deliverables, etc.). Users can create arbitrary sub-folders.
-- **Upload to Inbox:** files dropped or selected land in `/Inbox` by default; they can be moved to any folder afterwards.
+- **Upload to Inbox:** files dropped or selected land in `/Inbox` by default; they can be moved to any folder afterwards. The upload modal supports four modes — **Files**, **Folder** (preserves tree), **Zip** (server-side unpack), and **Text** (paste free-form content from email/IM; saved as a markdown file under `Inbox/`).
 - **Versions:** each file tracks version history. Old versions are retained for `WORKSPACE_VERSION_RETENTION_DAYS` (default 30 days). Users can view diffs and restore previous versions.
 - **Trash:** deleted nodes go to trash (soft delete) and can be restored or permanently purged.
 - **Operations log and undo:** workspace mutations are logged as ops; recent ops can be undone.
@@ -540,7 +574,7 @@ curl -X POST http://localhost:8000/entities/{id}/workspace/trash/{node_id}/resto
 - [ ] Ranking view: toggle from list view, weight preset selector, sortable columns
 - [ ] Comparative evaluation: select 2 scholars in ranking, run comparison
 - [ ] Generate digest: weekly summary via Gemini
-- [ ] Custom dimensions: add/delete custom evaluation dimensions
+- [ ] Evaluation dimensions modal: add / edit / delete dimensions (defaults and custom treated uniformly — all editable; file-backed at `data/config/dimensions.json`; changes take effect on next evaluation)
 - [ ] Upload files to scholar dossier
 - [ ] Multiple reports in sidebar, switch between them, delete a report
 - [ ] Stale alerts bar: scholars needing refresh
