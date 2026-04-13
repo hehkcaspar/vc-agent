@@ -150,6 +150,8 @@ The Deep Agent system prompt is assembled from three layers so the agent underst
 - **Single-file pre-process:** `POST /entities/{id}/workspace/node/{node_id}/metadata-preprocess` enqueues a background job. Successful runs **merge** into existing JSON:
   - **`native_file_metadata`** — local parser output (size, MIME, page count, PDF/Office headers)
   - **`gemini_preprocessed`** — Gemini extraction (`one_liner`, `summary`, `document_kind`, etc.)
+  - **`description`** — promoted from `gemini_preprocessed.extraction.one_liner` (top-level key, consumed by tree endpoint, agent context, and frontend). Only set if not already present (manual annotations via `workspace_annotate` take precedence).
+- **File format support:** PDFs are compressed via ghostscript (`/ebook` 150 DPI → `/screen` 72 DPI fallback) then sent as native binary to Gemini; oversized PDFs fall back to pypdf text extraction. OOXML (docx/pptx/xlsx) extracted via zipfile XML parsing. Legacy office (doc/ppt/xls) converted via LibreOffice headless then extracted. All extraction flows through `office_extractors.extract_office_text()` and `document_text.extract_pdf_text()` / `compress_pdf()`.
 - **Caveats (MVP):** No SQL-backed job table — status is **lost on API restart**. Idempotency: starting pre-process for the same entity + node while **pending/running** returns the existing **`job_id`**.
 
 #### Lazy folder scaffolding
@@ -211,7 +213,7 @@ Files with `status: needs_triage` or `error` stay in `Inbox/` with metadata pres
 |------|---------|
 | `workspace_get_tree` | Browse the workspace tree structure |
 | `workspace_list_files` | List files and folders at a specific path |
-| `workspace_read_file` | Read text content of a file (with PDF/Office extraction) |
+| `workspace_read_file` | Read file content: PDFs sent as compressed native binary (Gemini) or extracted text (Kimi); Office/text files as extracted text |
 | `workspace_search_files` | Search for files by name and path |
 | `workspace_create_folder` | Create a folder (with parent auto-creation) |
 | `workspace_move` | Move a file or folder to a new location |
@@ -225,7 +227,8 @@ Files with `status: needs_triage` or `error` stay in `Inbox/` with metadata pres
 
 - **Write zones (guardrail):** Agent tools enforce provenance-based write protection. User uploads are read-only to agents; agents create derivative files instead. See "Workspace provenance enforcement" above.
 - **Profiles:** `model_profiles.py` — `gemini_google`, `kimi_moonshot`. **`CHAT_DEFAULT_MODEL_PROFILE`** when `model_profile_id` omitted.
-- **Attachment materialization:** `gemini_context.py` + `deep_agent_office_extractors.py`. PDFs and Office formats become text for preamble / one-shot; multimodal parts where the profile supports it.
+- **File context in agent mode:** User-selected files are passed as a **pointer list** (path, type, size, description) — no file content is pre-injected. The agent triages by metadata and reads files on demand via `workspace_read_file`. No file count limit (was 8 in the old pre-injection model).
+- **File context in one-shot mode:** `gemini_context.py` — Gemini receives native binary (PDFs compressed via ghostscript); Kimi receives pypdf-extracted text. Office formats extracted via `office_extractors.py` (OOXML direct + legacy via LibreOffice).
 - **Frontend:** `EntityDetail` passes workspace mutation callbacks into `EntityConversation`. After a **successful** deep-agent job, the chat panel triggers workspace revalidation so new or updated files appear without a full page reload.
 
 ## Data Flow
@@ -482,6 +485,10 @@ The shell and entity detail view are wired so **long file previews** (for exampl
 
 - PDF iframes (`.preview-pdf`) use `min-height: 0` so they respect the constrained preview stack instead of forcing a large minimum height.
 
+**Workspace Tree State**
+
+- In `EntityDetail.tsx`, the workspace browser (`.resource-list`) uses CSS toggling (`display: none`) instead of React conditional unmounting when visualizing a file preview. This allows deeply nested folders to inherently preserve their `expanded` toggle state when the user navigates back to the root workspace browser view.
+
 Relevant files: `frontend/src/components/Layout.css`, `frontend/src/components/EntityDetail.css`, `frontend/src/components/EntityDetail.tsx`.
 
 ## Security Considerations
@@ -588,7 +595,7 @@ The architecture supports these future extensions:
 
 ## Academic Tracking Module (v2)
 
-Scholar-centric tracking with goal-driven Deep Agents. Separate from portfolio — own SQLite DB (`data/academic.db`), own models/schemas/router/services. Full design spec: `doc/ACADEMIC_TRACKING_V2_DESIGN.md`.
+Scholar-centric tracking with 3-layer continuous monitoring. Separate from portfolio — own SQLite DB (`data/academic.db`), own models/schemas/router/services. Full design spec: `design/SCHOLAR_EVALUATION_FRAMEWORK.md`.
 
 ### Architecture
 

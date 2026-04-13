@@ -1,3 +1,5 @@
+> **Status:** Implemented. The unified Workspace model replaced the original Resources/Artifacts dual model — see `ENTITY_WORKSPACE_DESIGN.md`. Parking-lot ingestion, resolver isolation, and StorageAdapter abstraction remain as designed.
+
 ## MVP PRD — VC Portfolio Manager (Entity-Canonical, Parking-Lot Ingestion)
 
 ### 0. Goal

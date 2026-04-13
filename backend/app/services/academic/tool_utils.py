@@ -1,12 +1,10 @@
 """
-Shared utility functions for Academic Tracking v2 domain tools.
+Pure utility functions for Academic Tracking v2.
 
-All functions here are pure (no DB, no LLM, no I/O) and extracted from
-the v1 pipeline (academic_pipeline.py) and Gemini helpers (academic_gemini.py).
-Algorithms are preserved exactly — see doc/ACADEMIC_TRACKING_V2_DESIGN.md §4.3.1.
+No DB, no LLM, no I/O. Functions here are imported by
+identity_resolver, channel_pollers, and attributed_metrics.
 """
 
-import json
 import logging
 import re
 import unicodedata
@@ -19,18 +17,15 @@ logger = logging.getLogger(__name__)
 # ── Name matching ────────────────────────────────────────────────
 
 
-def normalize_name(name: str) -> str:
-    """NFKD Unicode normalization — strips accents, cedillas, etc.
-
-    Handles: Schölkopf → Scholkopf, de Rham → de Rham (unchanged ASCII).
-    """
+def _normalize_name(name: str) -> str:
+    """NFKD Unicode normalization — strips accents, cedillas, etc."""
     nfkd = unicodedata.normalize("NFKD", name)
     return "".join(c for c in nfkd if not unicodedata.combining(c))
 
 
-def name_tokens(name: str) -> list[str]:
-    """Extract lowercase name tokens, ignoring short particles (len ≤ 1)."""
-    normalized = normalize_name(name.lower())
+def _name_tokens(name: str) -> list[str]:
+    """Extract lowercase name tokens, ignoring short particles (len <= 1)."""
+    normalized = _normalize_name(name.lower())
     return [t for t in normalized.split() if len(t) > 1]
 
 
@@ -48,8 +43,8 @@ def names_match(name_a: str, name_b: str) -> bool:
     Known limitation: "Bronstein" vs "Brown" false-positive on "bro" prefix —
     acceptable because metric verification is the real gate.
     """
-    tokens_a = name_tokens(name_a)
-    tokens_b = name_tokens(name_b)
+    tokens_a = _name_tokens(name_a)
+    tokens_b = _name_tokens(name_b)
 
     if not tokens_a or not tokens_b:
         return False
@@ -107,12 +102,31 @@ def verify_ss_metrics(
     expected_h_index: Optional[int] = None,
     expected_citations: Optional[int] = None,
 ) -> bool:
-    """Check if Semantic Scholar metrics are plausible vs expected (from GS).
+    """Cheap pre-filter: is this SS candidate plausibly the same person?
 
-    h-index ratio ≥ 0.3 (3x divergence gate, only if expected_h > 10).
-    Citation ratio ≥ 0.1 (10x divergence gate, only if expected_citations > 1000).
+    Used to reject obvious mismatches before the LLM verifier runs. A
+    stronger semantic check (`identity_verifier.verify_source_candidate`)
+    is the final gate; this is only here to avoid wasting LLM calls on
+    candidates that fail a trivial numeric sanity check.
+
+    Rules:
+    - If no anchor is provided, pass through (no filtering). The LLM
+      verifier will make the call.
+    - With a strong anchor (`expected_h_index > 10` OR
+      `expected_citations > 1000`), a candidate reporting **zero**
+      on the corresponding axis is a mismatch. Zero metrics against a
+      renowned scholar means either a wrong author or a stale SS profile
+      — either way we don't trust it without the LLM reconfirming.
+    - With nonzero candidate metrics, apply the ratio gates: h-index
+      ratio ≥ 0.3, citation ratio ≥ 0.1.
     """
-    if expected_h_index and expected_h_index > 10 and ss_h_index > 0:
+    if expected_h_index and expected_h_index > 10:
+        if ss_h_index <= 0:
+            logger.warning(
+                "Metric mismatch: expected h~%d but candidate reports zero h-index",
+                expected_h_index,
+            )
+            return False
         ratio = min(ss_h_index, expected_h_index) / max(ss_h_index, expected_h_index)
         if ratio < 0.3:
             logger.warning(
@@ -121,7 +135,13 @@ def verify_ss_metrics(
             )
             return False
 
-    if expected_citations and expected_citations > 1000 and ss_citation_count > 0:
+    if expected_citations and expected_citations > 1000:
+        if ss_citation_count <= 0:
+            logger.warning(
+                "Metric mismatch: expected ~%d citations but candidate reports zero",
+                expected_citations,
+            )
+            return False
         ratio = min(ss_citation_count, expected_citations) / max(ss_citation_count, expected_citations)
         if ratio < 0.1:
             logger.warning(
@@ -133,54 +153,200 @@ def verify_ss_metrics(
     return True
 
 
+# ── Known identity source types ─────────────────────────────────
+#
+# Canonical set of source_id values the resolver understands. Mirrors
+# the shapes parsed by `classify_urls` below. Used by the API router
+# to validate user upserts and by the frontend as an enum.
+KNOWN_IDENTITY_SOURCES: frozenset[str] = frozenset(
+    {
+        "google_scholar",
+        "semantic_scholar",
+        "orcid",
+        "dblp",
+        "arxiv",
+        "openreview",
+        "linkedin",
+        "github",
+        "twitter",
+        "homepage",
+    }
+)
+
+# Sources that get LLM-verified during identity resolution. Other
+# sources are committed with heuristic confidence and flagged in the
+# UI for user review. Keep this in sync with
+# `identity_verifier.HIGH_SIGNAL_SOURCES`.
+HIGH_SIGNAL_IDENTITY_SOURCES: frozenset[str] = frozenset(
+    {"google_scholar", "semantic_scholar", "orcid", "homepage"}
+)
+
+
 # ── URL classification ───────────────────────────────────────────
+
+
+_STATIC_ASSET_SUFFIXES = (
+    ".css",
+    ".js",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".svg",
+    ".webp",
+    ".ico",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".mp4",
+    ".webm",
+    ".mov",
+    ".pdf",
+    ".zip",
+)
 
 
 def classify_urls(urls: list[str]) -> dict[str, Any]:
     """Deterministic URL→ID extraction. Ground truth — overrides LLM output.
 
-    Extracts:
-    - Google Scholar user ID from scholar.google.* URLs (any TLD)
-    - Semantic Scholar author ID (trailing numeric) from semanticscholar.org
-    - LinkedIn and DBLP URLs
+    Extracts credible-source identifiers from any URL shape we know.
+    Returns a dict where the first URL seen for a given kind wins
+    (subsequent ones of the same kind are ignored).
+
+    Supported sources:
+    - Google Scholar (`scholar.google.*/citations?user=...`)
+    - Semantic Scholar author page (trailing numeric id)
+    - ORCID (`orcid.org/XXXX-XXXX-XXXX-XXXX`)
+    - DBLP (`dblp.org/pid/...` or `/pers/...`)
+    - arXiv author page (`arxiv.org/a/surname_i_Y`)
+    - OpenReview (`openreview.net/profile?id=~Name`)
+    - LinkedIn (`linkedin.com/in/...`)
+    - GitHub user (`github.com/username`)
+    - Twitter / X (`twitter.com/handle`, `x.com/handle`)
+    - Homepage (any other http(s) URL — kept as `homepage_url`
+      fallback if no stronger category matches)
     """
+    import re
+
     known: dict[str, Any] = {}
+    homepage_fallback: str | None = None
+
     for url in urls:
+        if not url:
+            continue
         lower = url.lower()
         parsed = urlparse(url)
+        host = (parsed.netloc or "").lower()
+
+        matched = False
 
         # Google Scholar profile (handles scholar.google.fr, .co.uk, etc.)
         if "scholar.google" in lower and "/citations" in lower:
             qs = parse_qs(parsed.query)
             user_ids = qs.get("user", [])
-            if user_ids:
+            if user_ids and "google_scholar_id" not in known:
                 known["google_scholar_id"] = user_ids[0]
                 known["google_scholar_url"] = url
+            matched = True
 
         # Semantic Scholar author page
         elif "semanticscholar.org/author/" in lower:
             parts = parsed.path.rstrip("/").split("/")
-            if len(parts) >= 3 and parts[-1].isdigit():
-                known["semantic_scholar_id"] = parts[-1]
-                known["semantic_scholar_url"] = url
+            # Accept /author/Name/12345 or /author/12345
+            for part in reversed(parts):
+                if part.isdigit():
+                    if "semantic_scholar_id" not in known:
+                        known["semantic_scholar_id"] = part
+                        known["semantic_scholar_url"] = url
+                    matched = True
+                    break
+
+        # ORCID — canonical 19-char form XXXX-XXXX-XXXX-XXXX (16 digits + 3 dashes)
+        elif "orcid.org/" in lower:
+            m = re.search(r"\b(\d{4}-\d{4}-\d{4}-\d{3}[\dxX])\b", url)
+            if m and "orcid_id" not in known:
+                known["orcid_id"] = m.group(1).upper()
+                known["orcid_url"] = f"https://orcid.org/{m.group(1).upper()}"
+            matched = True
+
+        # DBLP — /pid/NN/NNNN[-S] or /pers/hd/*
+        # NOTE: the trailing `-S` disambiguates between multiple
+        # authors sharing the same numeric id (e.g. `80/806-3` is a
+        # different person than `80/806`). Preserving the suffix is
+        # critical for common names like "Song Han".
+        elif "dblp.org/" in lower:
+            m = re.search(r"/pid/(\d+/\d+(?:-\d+)?)", parsed.path) or re.search(
+                r"/pers/hd/[a-z]/([^/.]+)", parsed.path
+            )
+            if m and "dblp_id" not in known:
+                known["dblp_id"] = m.group(1)
+            if "dblp_url" not in known:
+                known["dblp_url"] = url
+            matched = True
+
+        # arXiv author page (arxiv.org/a/surname_i_Y)
+        elif "arxiv.org/a/" in lower:
+            slug = parsed.path.rstrip("/").split("/")[-1]
+            if slug and "arxiv_author" not in known:
+                known["arxiv_author"] = slug
+                known["arxiv_url"] = url
+            matched = True
+
+        # OpenReview
+        elif "openreview.net" in lower and "profile" in lower:
+            qs = parse_qs(parsed.query)
+            pid = (qs.get("id") or [None])[0]
+            if pid and "openreview_id" not in known:
+                known["openreview_id"] = pid
+                known["openreview_url"] = url
+            matched = True
 
         # LinkedIn
         elif "linkedin.com/in/" in lower:
-            known["linkedin_url"] = url
+            handle = parsed.path.rstrip("/").split("/")[-1]
+            if handle and "linkedin_handle" not in known:
+                known["linkedin_handle"] = handle
+                known["linkedin_url"] = url
+            matched = True
 
-        # DBLP
-        elif "dblp.org/" in lower:
-            known["dblp_url"] = url
+        # GitHub user (not a repo)
+        elif host.endswith("github.com"):
+            parts = [p for p in parsed.path.split("/") if p]
+            if len(parts) == 1 and "github_user" not in known:
+                known["github_user"] = parts[0]
+                known["github_url"] = url
+            matched = True
+
+        # Twitter / X handle
+        elif "twitter.com" in host or host == "x.com" or host.endswith(".x.com"):
+            parts = [p for p in parsed.path.split("/") if p]
+            if len(parts) == 1 and "twitter_handle" not in known:
+                handle = parts[0].lstrip("@")
+                if handle and handle not in {"home", "search", "i"}:
+                    known["twitter_handle"] = handle
+                    known["twitter_url"] = url
+            matched = True
+
+        # Homepage fallback (first unmatched http URL, but only if the
+        # URL looks like an actual page — not a static asset, not a
+        # CDN, and path is reasonable).
+        if not matched and parsed.scheme in ("http", "https"):
+            path_lower = (parsed.path or "").lower()
+            if path_lower.endswith(_STATIC_ASSET_SUFFIXES):
+                continue
+            if any(x in host for x in ("cdn.", "fonts.", "googleapis.com", "cloudfront", "jsdelivr", "unpkg")):
+                continue
+            # Skip mailto:, tel:, javascript:, etc. (already filtered
+            # by scheme check) and anchor-only fragments.
+            if parsed.path in ("", "/") and not parsed.netloc:
+                continue
+            if homepage_fallback is None:
+                homepage_fallback = url
+
+    if homepage_fallback and "homepage_url" not in known:
+        known["homepage_url"] = homepage_fallback
 
     return known
-
-
-# ── Title normalization + dedup ──────────────────────────────────
-
-
-def norm_title(title: str) -> str:
-    """Normalize title for deduplication: lowercase + collapse whitespace."""
-    return " ".join(title.lower().split())
 
 
 # ── Venue quality ────────────────────────────────────────────────
@@ -216,100 +382,3 @@ def is_top_venue(venue: Optional[str], publication: Optional[str]) -> bool:
                 if top in v_lower:
                     return True
     return False
-
-
-# ── Author position ──────────────────────────────────────────────
-
-
-def compute_author_position(
-    authors: list[Any],
-    scholar_ss_id: Optional[str],
-) -> tuple[Optional[str], Optional[int]]:
-    """Determine the scholar's position on a paper's author list.
-
-    Returns (position, total_authors) where position is
-    "sole", "first", "last", or "middle".
-    """
-    if not authors:
-        return None, None
-
-    total = len(authors)
-    if total == 1:
-        return "sole", 1
-
-    if not scholar_ss_id:
-        return None, total
-
-    # Authors may be dicts with authorId or plain strings
-    if isinstance(authors[0], dict):
-        ids = [a.get("authorId") for a in authors]
-    else:
-        return None, total
-
-    try:
-        idx = ids.index(scholar_ss_id)
-    except ValueError:
-        return None, total
-
-    if idx == 0:
-        return "first", total
-    elif idx == total - 1:
-        return "last", total
-    else:
-        return "middle", total
-
-
-# ── JSON parsing ─────────────────────────────────────────────────
-
-
-def parse_json(text: str) -> dict[str, Any]:
-    """Tolerantly parse JSON from LLM output (handles markdown fences, etc.)."""
-    # Strip markdown fences
-    cleaned = re.sub(r"```(?:json)?\s*", "", text)
-    cleaned = cleaned.strip().rstrip("`")
-
-    # Try full text first
-    try:
-        return json.loads(cleaned)
-    except json.JSONDecodeError:
-        pass
-
-    # Find the outermost { ... } by brace matching (handles nested objects)
-    start = cleaned.find("{")
-    if start >= 0:
-        depth = 0
-        for i in range(start, len(cleaned)):
-            if cleaned[i] == "{":
-                depth += 1
-            elif cleaned[i] == "}":
-                depth -= 1
-                if depth == 0:
-                    candidate = cleaned[start : i + 1]
-                    try:
-                        return json.loads(candidate)
-                    except json.JSONDecodeError:
-                        break
-
-    # Last resort: greedy regex
-    m = re.search(r"\{.*\}", cleaned, re.DOTALL)
-    if m:
-        try:
-            return json.loads(m.group())
-        except json.JSONDecodeError:
-            pass
-
-    logger.warning("Could not parse JSON from LLM response: %s", text[:200])
-    return {}
-
-
-# ── Safe type conversion ─────────────────────────────────────────
-
-
-def safe_int(val: Any) -> Optional[int]:
-    """Safely convert a value to int, returning None on failure."""
-    if val is None:
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None

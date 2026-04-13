@@ -1,13 +1,10 @@
-"""Digest generation service — weekly portfolio digest via Gemini."""
+"""Digest generation service — weekly scholar digest via Gemini."""
 
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timedelta, timezone
 
-from langchain_core.messages import HumanMessage
-from langchain_google_genai import ChatGoogleGenerativeAI
 from sqlalchemy import select
 
 from app.academic_database import AcademicAsyncSessionLocal
@@ -16,6 +13,8 @@ from app.config import settings
 
 from .evaluation_service import get_latest_eval_scores
 from .file_utils import dossier_path, read_json
+from .llm_client import genai_client
+from google.genai import types as genai_types
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +73,8 @@ async def run_digest_generation() -> None:
         )
 
     prompt = f"""\
-Generate a concise weekly portfolio digest for a VC firm tracking academic scholars.
+Generate a concise weekly scholar digest for a VC firm tracking academic scholars.
+Title the digest "Weekly Scholar Digest" (do not use "Portfolio").
 Date: {today.strftime('%Y-%m-%d')}
 
 ## Tracked Scholars ({len(scholars)} total)
@@ -93,13 +93,13 @@ Write a markdown digest with these sections:
 Be concise and actionable. Focus on investment-relevant insights."""
 
     try:
-        api_key = settings.GEMINI_API_KEY or os.getenv("GOOGLE_API_KEY") or ""
-        model = ChatGoogleGenerativeAI(
+        client = genai_client()
+        response = await client.aio.models.generate_content(
             model=settings.ACADEMIC_GEMINI_MODEL,
-            google_api_key=api_key,
+            contents=[{"role": "user", "parts": [{"text": prompt}]}],
+            config=genai_types.GenerateContentConfig(),
         )
-        result = await model.ainvoke([HumanMessage(content=prompt)])
-        digest_content = result.content if hasattr(result, "content") else str(result)
+        digest_content = getattr(response, "text", "") or ""
 
         digest_path = DIGESTS_DIR / f"{today.strftime('%Y-%m-%d')}_weekly.md"
         digest_path.write_text(digest_content, encoding="utf-8")

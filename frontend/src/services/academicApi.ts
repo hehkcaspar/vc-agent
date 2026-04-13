@@ -7,10 +7,11 @@ import type {
   ScholarList,
   ScholarEvent,
   Channel,
-  EvaluationList,
+  ContinuousTaskKind,
+  ContinuousTasksResponse,
+  EvaluationsResponse,
+  NarrativeReport,
   PapersResponse,
-  Report,
-  ReportList,
   AcademicChatSession,
   AcademicChatSessionDetail,
   AcademicChatJobAccepted,
@@ -83,6 +84,30 @@ export const academicApi = {
     delete: (id: string) =>
       fetchJson<{ ok: boolean }>(`/academic/scholars/${id}`, { method: 'DELETE' }),
 
+    upsertIdentity: (
+      id: string,
+      body: { source_id: string; url: string; id?: string },
+    ) =>
+      fetchJson<Scholar>(`/academic/scholars/${id}/identity`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+
+    deleteIdentity: (
+      id: string,
+      sourceId: string,
+      options?: { blacklist?: boolean },
+    ) =>
+      fetchJson<Scholar>(
+        `/academic/scholars/${id}/identity/${sourceId}`,
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blacklist: !!options?.blacklist }),
+        },
+      ),
+
     evaluate: (id: string) =>
       fetchJson<{ ok: boolean; status: string }>(`/academic/scholars/${id}/evaluate`, { method: 'POST' }),
 
@@ -99,19 +124,15 @@ export const academicApi = {
     },
 
     evaluations: (id: string) =>
-      fetchJson<EvaluationList>(`/academic/scholars/${id}/evaluations`),
+      fetchJson<EvaluationsResponse>(`/academic/scholars/${id}/evaluations`),
 
-    reports: (id: string) =>
-      fetchJson<ReportList>(`/academic/scholars/${id}/reports`),
+    narrativeHistory: (id: string) =>
+      fetchJson<{ narratives: NarrativeReport[] }>(
+        `/academic/scholars/${id}/narrative-history`,
+      ),
 
-    report: (scholarId: string, reportId: string) =>
-      fetchJson<Report>(`/academic/scholars/${scholarId}/reports/${reportId}`),
-
-    deleteReport: (scholarId: string, reportId: string) =>
-      fetchJson<{ ok: boolean }>(`/academic/scholars/${scholarId}/reports/${reportId}`, { method: 'DELETE' }),
-
-    events: (id: string, limit = 50) =>
-      fetchJson<ScholarEvent[]>(`/academic/scholars/${id}/events?limit=${limit}`),
+    events: (id: string, limit = 50, sortBy: 'discovered' | 'event_date' = 'discovered') =>
+      fetchJson<ScholarEvent[]>(`/academic/scholars/${id}/events?limit=${limit}&sort_by=${sortBy}`),
 
     updateEvent: (scholarId: string, eventId: string, data: { is_read?: boolean; significance?: string }) =>
       fetchJson<ScholarEvent>(`/academic/scholars/${scholarId}/events/${eventId}`, {
@@ -216,6 +237,62 @@ export const academicApi = {
     fetchJson<{ ok: boolean; status: string }>(`/academic/scholars/${scholarId}/compare/${otherId}`, {
       method: 'POST',
     }),
+
+  // ── Continuous Tasks (heartbeat catalog + health) ────────
+
+  continuousTasks: {
+    get: () => fetchJson<ContinuousTasksResponse>('/academic/continuous-tasks'),
+
+    patch: (
+      kind: ContinuousTaskKind,
+      taskId: string,
+      body: {
+        enabled?: boolean;
+        default_cadence_days?: number;
+        priority_overrides?: Record<string, number>;
+      },
+    ) =>
+      fetchJson<ContinuousTasksResponse>(
+        `/academic/continuous-tasks/${kind}/${taskId}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      ),
+
+    runNow: (
+      kind: ContinuousTaskKind,
+      taskId: string,
+      scholarId?: string,
+    ) => {
+      const qs = scholarId ? `?scholar_id=${encodeURIComponent(scholarId)}` : '';
+      return fetchJson<{ ok: boolean; queued: number }>(
+        `/academic/continuous-tasks/${kind}/${taskId}/run-now${qs}`,
+        { method: 'POST' },
+      );
+    },
+  },
+
+  // ── Evaluation Log ───────────────────────────────────────
+
+  evalLog: {
+    list: (limit = 200, scholarId?: string) => {
+      const params = new URLSearchParams({ limit: String(limit) });
+      if (scholarId) params.set('scholar_id', scholarId);
+      return fetchJson<
+        Array<{
+          ts: string;
+          scholar_id: string;
+          scholar_name?: string;
+          step: string;
+          status: 'start' | 'ok' | 'done' | 'error' | 'cancelled' | 'skipped';
+          duration_s?: number;
+          detail?: unknown;
+        }>
+      >(`/academic/eval-log?${params.toString()}`);
+    },
+  },
 
   // ── Digest ───────────────────────────────────────────────
 

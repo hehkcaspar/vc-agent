@@ -6,6 +6,7 @@ import json
 import mimetypes
 from typing import Any, Callable, Optional
 
+from app.config import settings
 from app.database import SyncSessionLocal
 from app.services.workspace import (
     Actor,
@@ -37,6 +38,7 @@ def build_workspace_tools(
     run_id: Optional[str],
     workspace_service: WorkspaceService,
     on_status: Optional[Callable[[str], None]] = None,
+    model_profile_id: Optional[str] = None,
 ) -> list:
     from langchain_core.tools import tool
 
@@ -71,8 +73,8 @@ def build_workspace_tools(
         return _json({"ok": True, "items": items})
 
     @tool
-    def workspace_read_file(path: str) -> str:
-        """Read the text content of a file. Returns content and checksum (for CAS writes).
+    def workspace_read_file(path: str) -> str | list:
+        """Read a file's content. PDFs are sent as native binary; other files as extracted text.
         - path: file path in workspace"""
         _notify(on_status, f"Reading {path}...")
         with SyncSessionLocal() as db:
@@ -94,10 +96,28 @@ def build_workspace_tools(
 
             mime = node.mime_type or ""
 
-            # PDF extraction
+            # PDF handling
             if mime == "application/pdf":
+                from app.services.document_text import compress_pdf, extract_pdf_text
+                # Gemini: compress and send native binary (preserves layout, tables, OCR)
+                if model_profile_id != "kimi_moonshot":
+                    pdf_bytes = compress_pdf(raw, target_bytes=settings.CHAT_MAX_ATTACHMENT_BYTES)
+                    if pdf_bytes is None and len(raw) <= settings.CHAT_MAX_ATTACHMENT_BYTES:
+                        pdf_bytes = raw  # gs unavailable but file fits
+                    if pdf_bytes is not None:
+                        import base64 as _b64
+                        return [
+                            {"type": "text", "text": _json({
+                                "ok": True, "path": path, "checksum": node.checksum,
+                                "mime_type": mime, "size_bytes": len(raw),
+                                "note": "PDF attached as native binary below.",
+                            })},
+                            {"type": "file",
+                             "mime_type": "application/pdf",
+                             "base64": _b64.b64encode(pdf_bytes).decode()},
+                        ]
+                # Kimi or compression failed: text extraction fallback
                 try:
-                    from app.services.document_text import extract_pdf_text
                     text = extract_pdf_text(raw, max_chars=120_000)
                     return _json({
                         "ok": True, "path": path, "checksum": node.checksum,
@@ -106,8 +126,26 @@ def build_workspace_tools(
                 except Exception as e:
                     return _json({"ok": False, "error": f"PDF extraction failed: {e}"})
 
+            # Image handling — send native binary to Gemini (OCR, visual understanding)
+            if mime.startswith("image/") and model_profile_id != "kimi_moonshot":
+                if len(raw) > settings.CHAT_MAX_ATTACHMENT_BYTES:
+                    return _json({
+                        "ok": False, "error": f"Image too large ({len(raw)} bytes).",
+                    })
+                import base64 as _b64
+                return [
+                    {"type": "text", "text": _json({
+                        "ok": True, "path": path, "checksum": node.checksum,
+                        "mime_type": mime, "size_bytes": len(raw),
+                        "note": "Image attached as native binary below.",
+                    })},
+                    {"type": "file",
+                     "mime_type": "image/jpeg" if mime == "image/jpg" else mime,
+                     "base64": _b64.b64encode(raw).decode()},
+                ]
+
             # Office extraction
-            from app.services.deep_agent_office_extractors import extract_office_text
+            from app.services.office_extractors import extract_office_text
             office = extract_office_text(raw, mime_type=mime, max_chars=120_000)
             if office is not None:
                 return _json({

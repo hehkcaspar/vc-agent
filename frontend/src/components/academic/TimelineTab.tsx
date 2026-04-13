@@ -1,4 +1,4 @@
-import { Check } from 'lucide-react';
+import { Check, ExternalLink } from 'lucide-react';
 import { academicApi } from '../../services/academicApi';
 import type { ScholarEvent } from '../../types/academic';
 import { useState } from 'react';
@@ -8,9 +8,11 @@ interface TimelineTabProps {
   scholarId: string;
   events: ScholarEvent[];
   mutateEvents: () => void;
+  sortBy: 'discovered' | 'event_date';
+  onSortChange: (sort: 'discovered' | 'event_date') => void;
 }
 
-export function TimelineTab({ scholarId, events, mutateEvents }: TimelineTabProps) {
+export function TimelineTab({ scholarId, events, mutateEvents, sortBy, onSortChange }: TimelineTabProps) {
   const [sigFilter, setSigFilter] = useState<string | null>(null);
 
   return (
@@ -27,6 +29,20 @@ export function TimelineTab({ scholarId, events, mutateEvents }: TimelineTabProp
             </button>
           ))}
         </div>
+        <div className="paper-filters">
+          <button
+            className={`filter-btn ${sortBy === 'discovered' ? 'active' : ''}`}
+            onClick={() => onSortChange('discovered')}
+          >
+            Discovered
+          </button>
+          <button
+            className={`filter-btn ${sortBy === 'event_date' ? 'active' : ''}`}
+            onClick={() => onSortChange('event_date')}
+          >
+            Event date
+          </button>
+        </div>
       </div>
 
       {events.length === 0 ? (
@@ -41,7 +57,13 @@ export function TimelineTab({ scholarId, events, mutateEvents }: TimelineTabProp
                   <EventIcon type={evt.event_type} />
                 </span>
                 <div className="event-body">
-                  <span className="event-title">{evt.title ?? evt.event_type}</span>
+                  {evt.source_url ? (
+                    <a className="event-title event-link" href={evt.source_url} target="_blank" rel="noopener noreferrer">
+                      {evt.title ?? evt.event_type} <ExternalLink size={12} />
+                    </a>
+                  ) : (
+                    <span className="event-title">{evt.title ?? evt.event_type}</span>
+                  )}
                   <span className="event-meta">
                     {evt.event_date && (
                       <span className="event-date-label">

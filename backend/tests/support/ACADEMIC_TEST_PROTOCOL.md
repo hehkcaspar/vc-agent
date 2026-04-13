@@ -1,8 +1,10 @@
-# Academic Tracking — Randomized E2E Test Protocol
+# Academic Tracking — Randomized E2E Test Protocol (v2)
 
 ## Purpose
 
-Validate the Academic Tracking pipeline end-to-end using real API calls (Gemini + Semantic Scholar + Google Search) against a pool of 20 known scholars in `academic_test_scholars.json`. Each test run randomly selects 4 scholars and varies which URLs are submitted, simulating realistic frontend usage where the user may provide only a homepage, only a Google Scholar link, or a partial subset of known URLs.
+Validate the Academic Tracking v2 pipeline end-to-end using real API calls (Gemini + Semantic Scholar + SerpAPI + Google Search) against a pool of 20 known scholars in `academic_test_scholars.json`. Each test run randomly selects 4 scholars and varies which URLs are submitted, simulating realistic frontend usage where the user may provide only a homepage, only a Google Scholar link, or a partial subset of known URLs.
+
+**v2 architecture**: 3-layer continuous monitoring (identity resolution → Layer 2 source fetchers → Layer 3 dim evals + phase classifier + narrative synthesizer). 4 MECE dimensions (Academic Excellence, Tech-transfer Experience, Founder Potential, Growth Trajectory). Evaluations are per-dim JSONL files, not monolithic JSON. Reports are narrative.jsonl, not reports/*.md.
 
 ## Test Pool
 
@@ -41,35 +43,35 @@ For each selected scholar, randomly choose one of these strategies:
 
 If a scholar has only 1 URL, always use that as `input_url` with no `other_urls`.
 
-### 3. Task Creation
+### 3. Scholar Creation
 
 ```
-POST /academic/tasks
+POST /academic/scholars
 {
   "name": "<scholar name>",
-  "input_type": 2,
-  "input_url": "<chosen url>",
-  "other_urls": "<comma-separated or omitted>"
+  "urls": ["<chosen url>", ...additional urls if partial/all strategy...],
+  "tracking_priority": "high",
+  "tags": ["<field>", "<career_stage>"]
 }
 ```
 
-Assert: status 200, response `status == -1` (pending).
+Assert: status 200, response has `id` and `status == "active"`.
 
 ### 4. Pipeline Execution
 
 ```
-POST /academic/tasks/{task_id}/execute
+POST /academic/scholars/{scholar_id}/evaluate
 ```
 
-Assert: status 200, returns a report object with `status == 0` (pending).
+Assert: status 200. This triggers `bootstrap_scholar` as a background task (identity resolution → Layer 2 sources → phase classifier → Layer 3 dim evals → narrative synthesizer). Scholar status transitions to `"evaluating"`.
 
 ### 5. Polling (max 180s)
 
 ```
-GET /academic/tasks/{task_id}
+GET /academic/scholars/{scholar_id}
 ```
 
-Poll every 5 seconds. Record elapsed time. Pipeline is done when `status != 0`.
+Poll every 5 seconds. Record elapsed time. Pipeline is done when `status != "evaluating"` (expect `"active"` on success).
 
 ## Validation Checkpoints
 
@@ -78,7 +80,7 @@ Poll every 5 seconds. Record elapsed time. Pipeline is done when `status != 0`.
 After pipeline completes, fetch the scholar record:
 
 ```
-GET /academic/tasks/{task_id}/scholars
+GET /academic/scholars/{scholar_id}
 ```
 
 **Must check:**
@@ -112,29 +114,32 @@ GET /academic/scholars/{scholar_id}/papers?limit=5
 
 Log top 3 papers (title, year, citations) for manual review.
 
-### Phase 3 — Report
+### Phase 3 — Evaluation + Narrative
 
-Fetch the report:
+Fetch the v2 evaluations bundle:
 
 ```
-GET /academic/tasks/{task_id}/reports
+GET /academic/scholars/{scholar_id}/evaluations
 ```
+
+Response shape: `{dimensions: {dim_id: DimEvalResult|null}, narrative: NarrativeReport|null, peer_group: PeerGroup|null, red_flags: [...]}`
 
 **Must check:**
 
 | Field | Criterion | Severity |
 |---|---|---|
-| `status` | `== 1` (completed) | FAIL if 2 (failed) |
-| `content` | Length > 200 chars | FAIL if empty/short |
-| `content` | Contains scholar name (case-insensitive substring) | WARN if missing |
-| `content` | Contains at least 3 of the 7 expected section headers (Research Overview, Impact Assessment, Key Publications, Research Trajectory, Venture Relevance, Collaboration Network, Summary) | WARN if fewer |
-| `error_message` | null | FAIL if populated on a status=1 report |
+| `dimensions` | At least 1 dim has a non-null scored eval | FAIL if all null |
+| Each scored dim | `score` in [0, 100], `mini_report` non-empty, `evidence` list non-empty | WARN per dim |
+| `peer_group` | Non-null, has `phase` and `field` | WARN if null |
+| `narrative` | Non-null, `headline` and `summary` non-empty | WARN if null |
+| `narrative.summary` | Contains scholar name (case-insensitive) | WARN if missing |
+| `narrative.open_questions` | Non-empty list | WARN if empty |
 
-### Overall Task
+### Overall
 
 | Field | Criterion | Severity |
 |---|---|---|
-| `status` | `== 1` (completed) | FAIL |
+| Scholar status | `== "active"` (returned from evaluating) | FAIL |
 | Elapsed time | `< 180s` | FAIL (timeout) |
 
 ## Severity Definitions

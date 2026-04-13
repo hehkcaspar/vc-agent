@@ -21,6 +21,7 @@ from app.models import (
     ConversationSession,
     Entity,
     WorkspaceNode,
+    WorkspaceOp,
 )
 from app.schemas import (
     ChatMessageCreate,
@@ -38,9 +39,9 @@ from app.schemas import (
 )
 from app.config import settings
 from app.services.gemini_context import (
-    build_deep_agent_multimodal_parts,
     build_context_parts,
     build_harness_user_attachment_text,
+    build_selected_files_pointer_list,
 )
 from app.services.direct_llm import (
     generate_json_one_shot,
@@ -57,17 +58,41 @@ from app.services.preset_registry import (
     render_extract_info,
     render_red_team,
 )
-from app.services.portfolio_deep_agent import (
-    create_portfolio_agent,
+from app.services.agent_harness import (
+    create_react_portfolio_agent,
     history_to_lc_messages,
-    invoke_portfolio_agent,
+    invoke_react_portfolio_agent,
 )
+
+# Deep Agent compat — removable module. Delete deep_agent_compat.py
+# and deepagents from requirements.txt to fully remove.
+try:
+    from app.services.deep_agent_compat import (
+        create_portfolio_agent,
+        invoke_portfolio_agent,
+    )
+    DEEP_AGENT_AVAILABLE = True
+except ImportError:
+    DEEP_AGENT_AVAILABLE = False
 from app.services.prompt_assembly import EntityBrief, build_portfolio_system_prompt
 from app.services.storage import storage
 from app.services.workspace import WorkspaceService, Actor
 
 router = APIRouter(tags=["entity-chat"])
 workspace_service = WorkspaceService(storage)
+
+AGENT_MODES = {"one_shot", "react", "deep_agent"}
+
+
+def _resolve_agent_mode(
+    agent_mode: str | None, use_deep_agent: bool | None,
+) -> str:
+    """Resolve the execution mode from request fields + server default."""
+    if agent_mode and agent_mode in AGENT_MODES:
+        return agent_mode
+    if use_deep_agent is not None:
+        return "react" if use_deep_agent else "one_shot"
+    return settings.CHAT_DEFAULT_AGENT_MODE
 
 
 async def _get_entity(db: AsyncSession, entity_id: str) -> Entity:
@@ -188,13 +213,8 @@ async def run_chat_agent_job(job_id: str) -> None:
 
             node_ids = json.loads(job.node_ids_json or "[]")
             nodes = await _load_nodes(db, job.entity_id, node_ids)
-            profile_id = normalize_profile_id(job.model_profile_id)
-            multimodal_parts, used_ids, _ = build_deep_agent_multimodal_parts(
-                nodes, profile_id
-            )
-            attach_preamble, _ = build_harness_user_attachment_text(
-                nodes, skip_node_ids=used_ids
-            )
+
+            pointer_list = build_selected_files_pointer_list(nodes)
 
             # Build workspace context (three-layer: tree + descriptions + notes)
             workspace_context = await workspace_service.build_annotated_tree_text(
@@ -205,8 +225,8 @@ async def run_chat_agent_job(job_id: str) -> None:
             preamble_parts = []
             if workspace_context:
                 preamble_parts.append(workspace_context)
-            if attach_preamble:
-                preamble_parts.append(attach_preamble)
+            if pointer_list:
+                preamble_parts.append(pointer_list)
             if preamble_parts:
                 user_turn = (
                     "\n\n".join(preamble_parts) + f"\n\n--- User message ---\n{user_turn}"
@@ -222,31 +242,37 @@ async def run_chat_agent_job(job_id: str) -> None:
             session_id_snap = job.session_id
             model_profile_id_snap = job.model_profile_id
 
+            agent_mode_snap = job.agent_mode or "deep_agent"
+
             job.agent_run_id = agent_run_id_snap
             job.status = "running"
             job.step_detail = "Starting agent..."
             job.updated_at = utc_now()
             await db.commit()
 
-        def _run_deep_agent() -> Tuple[str, Any]:
-            agent = create_portfolio_agent(
+        def _run_agent() -> Tuple[str, Any]:
+            kwargs = dict(
                 entity=brief,
                 system_prompt_extras=harness_extras_snap,
                 session_id=session_id_snap,
                 model_profile_id=model_profile_id_snap,
                 run_id=agent_run_id_snap,
-                initial_user_text=user_row.content,
                 on_status=on_status,
             )
             lc_messages = history_to_lc_messages(history, user_turn)
-            return invoke_portfolio_agent(
-                agent,
-                lc_messages,
-                on_status=on_status,
-                user_multimodal_parts=multimodal_parts,
-            )
+            if agent_mode_snap == "deep_agent" and DEEP_AGENT_AVAILABLE:
+                agent = create_portfolio_agent(**kwargs)
+                return invoke_portfolio_agent(
+                    agent, lc_messages, on_status=on_status,
+                )
+            else:
+                # ReAct (default) or fallback when deep_agent unavailable
+                agent = create_react_portfolio_agent(**kwargs)
+                return invoke_react_portfolio_agent(
+                    agent, lc_messages, on_status=on_status,
+                )
 
-        reply_text, raw = await asyncio.to_thread(_run_deep_agent)
+        reply_text, raw = await asyncio.to_thread(_run_agent)
         if isinstance(raw, dict):
             message_count = len(raw.get("messages") or [])
             tool_trace = {
@@ -386,13 +412,8 @@ async def run_preset_agent_job(job_id: str) -> None:
 
             node_ids = json.loads(job.node_ids_json or "[]")
             nodes = await _load_nodes(db, job.entity_id, node_ids)
-            profile_id = normalize_profile_id(job.model_profile_id)
-            multimodal_parts, used_ids, _ = build_deep_agent_multimodal_parts(
-                nodes, profile_id
-            )
-            attach_preamble, _ = build_harness_user_attachment_text(
-                nodes, skip_node_ids=used_ids
-            )
+
+            pointer_list = build_selected_files_pointer_list(nodes)
 
             workspace_context = await workspace_service.build_annotated_tree_text(
                 db, job.entity_id
@@ -423,8 +444,8 @@ async def run_preset_agent_job(job_id: str) -> None:
             preamble_parts = []
             if workspace_context:
                 preamble_parts.append(workspace_context)
-            if attach_preamble:
-                preamble_parts.append(attach_preamble)
+            if pointer_list:
+                preamble_parts.append(pointer_list)
             if preamble_parts:
                 user_turn = (
                     "\n\n".join(preamble_parts)
@@ -443,6 +464,8 @@ async def run_preset_agent_job(job_id: str) -> None:
             session_id_snap = job.session_id
             model_profile_id_snap = job.model_profile_id
 
+            agent_mode_snap = job.agent_mode or "deep_agent"
+
             job.agent_run_id = agent_run_id_snap
             job.status = "running"
             job.step_detail = "Starting agent..."
@@ -455,25 +478,73 @@ async def run_preset_agent_job(job_id: str) -> None:
             default_artifact_status_snap = preset.default_artifact_status
             artifact_title_snap = preset.artifact_title
 
-        def _run_deep_agent() -> Tuple[str, Any]:
-            agent = create_portfolio_agent(
+        def _run_agent() -> Tuple[str, Any]:
+            kwargs = dict(
                 entity=brief,
                 system_prompt_extras=harness_extras_snap,
                 session_id=session_id_snap,
                 model_profile_id=model_profile_id_snap,
                 run_id=agent_run_id_snap,
-                initial_user_text=task_body,
                 on_status=on_status,
             )
             lc_messages = history_to_lc_messages(history, user_turn)
-            return invoke_portfolio_agent(
-                agent,
-                lc_messages,
-                on_status=on_status,
-                user_multimodal_parts=multimodal_parts,
-            )
+            if agent_mode_snap == "deep_agent" and DEEP_AGENT_AVAILABLE:
+                agent = create_portfolio_agent(**kwargs)
+                return invoke_portfolio_agent(
+                    agent, lc_messages, on_status=on_status,
+                )
+            else:
+                agent = create_react_portfolio_agent(**kwargs)
+                return invoke_react_portfolio_agent(
+                    agent, lc_messages, on_status=on_status,
+                )
 
-        deliverable_body, raw = await asyncio.to_thread(_run_deep_agent)
+        deliverable_body, raw = await asyncio.to_thread(_run_agent)
+
+        # Fallback: if the agent wrote a report via workspace tools instead of
+        # returning the full content, recover it from the written file.
+        if (
+            output_kind_snap == "markdown"
+            and len(deliverable_body.strip()) < 500
+            and agent_run_id_snap
+        ):
+            async with AsyncSessionLocal() as db:
+                ops_res = await db.execute(
+                    select(WorkspaceOp.node_id)
+                    .where(
+                        WorkspaceOp.entity_id == job.entity_id,
+                        WorkspaceOp.actor_type == "agent",
+                        WorkspaceOp.actor_ref == agent_run_id_snap,
+                        WorkspaceOp.op_type.in_(["create_file", "overwrite"]),
+                    )
+                )
+                written_node_ids = [r[0] for r in ops_res.all() if r[0]]
+                if written_node_ids:
+                    nodes_res = await db.execute(
+                        select(WorkspaceNode)
+                        .where(
+                            WorkspaceNode.id.in_(written_node_ids),
+                            WorkspaceNode.name.like("%.md"),
+                            WorkspaceNode.deleted_at.is_(None),
+                        )
+                        .order_by(WorkspaceNode.size_bytes.desc())
+                    )
+                    best = nodes_res.scalars().first()
+                    if best and best.storage_key:
+                        try:
+                            recovered = storage.read_file_sync(
+                                best.storage_key
+                            ).decode("utf-8", errors="replace")
+                            if len(recovered) > len(deliverable_body):
+                                deliverable_body = recovered
+                                logging.getLogger(__name__).info(
+                                    "Recovered preset deliverable from agent-written "
+                                    "file %s (%d bytes)",
+                                    best.path,
+                                    len(recovered),
+                                )
+                        except Exception:
+                            pass
 
         # Post-process JSON presets
         if output_kind_snap == "json":
@@ -498,6 +569,7 @@ async def run_preset_agent_job(job_id: str) -> None:
         actor = Actor(type="system", ref=f"preset:{preset_id}")
 
         async with AsyncSessionLocal() as db:
+            description = f"{preset_label_snap}: {title}"
             node = await workspace_service.write_file(
                 db,
                 job.entity_id,
@@ -505,7 +577,11 @@ async def run_preset_agent_job(job_id: str) -> None:
                 deliverable_body.encode("utf-8"),
                 "application/json" if file_suffix == ".json" else "text/markdown",
                 actor,
-                metadata={"deliverable_type": dtype, "status": dstatus},
+                metadata={
+                    "deliverable_type": dtype,
+                    "status": dstatus,
+                    "description": description,
+                },
             )
             node.origin_type = "agent"
             await db.commit()
@@ -735,9 +811,21 @@ async def get_chat_session(
         .order_by(ConversationMessage.created_at.asc())
     )
     messages = result.scalars().all()
+    # Check for an active (pending/running) job so the frontend can resume polling.
+    active_job_row = await db.execute(
+        select(ChatCompletionJob.id)
+        .where(
+            ChatCompletionJob.session_id == session_id,
+            ChatCompletionJob.status.in_(["pending", "running"]),
+        )
+        .order_by(ChatCompletionJob.id.desc())
+        .limit(1)
+    )
+    active_job_id = active_job_row.scalar_one_or_none()
     return ChatSessionDetailResponse(
         session=session,
         messages=messages,
+        active_job_id=active_job_id,
     )
 
 
@@ -838,19 +926,10 @@ async def post_chat_message(
 
     nodes = await _load_nodes(db, entity_id, body.node_ids)
     profile_id = normalize_profile_id(body.model_profile_id)
-    use_deep_agent = (
-        body.use_deep_agent
-        if body.use_deep_agent is not None
-        else settings.CHAT_USE_DEEP_AGENT
-    )
-    if use_deep_agent:
-        _, used_ids, mm_warnings = build_deep_agent_multimodal_parts(
-            nodes, profile_id
-        )
-        attach_preamble, warnings = build_harness_user_attachment_text(
-            nodes, skip_node_ids=used_ids
-        )
-        warnings.extend(mm_warnings)
+    mode = _resolve_agent_mode(body.agent_mode, body.use_deep_agent)
+    if mode in ("react", "deep_agent"):
+        attach_preamble = ""
+        warnings: List[str] = []
         context_parts = None
     elif profile_id == "kimi_moonshot":
         attach_preamble, warnings = build_harness_user_attachment_text(nodes)
@@ -879,7 +958,7 @@ async def post_chat_message(
     tool_trace: Optional[dict] = None
     reply_text = ""
 
-    if use_deep_agent:
+    if mode in ("react", "deep_agent"):
         run_id = str(uuid.uuid4())
         ctx_note = []
         if body.node_ids or attach_preamble:
@@ -920,6 +999,7 @@ async def post_chat_message(
             model_profile_id=body.model_profile_id,
             harness_extras=extras,
             warnings_json=json.dumps(warnings),
+            agent_mode=mode,
         )
         db.add(job)
         session.updated_at = utc_now()
@@ -1065,17 +1145,13 @@ async def run_chat_preset(
 
     nodes = await _load_nodes(db, entity_id, body.node_ids)
     profile_id = normalize_profile_id(body.model_profile_id)
-    use_deep_agent = (
-        body.use_deep_agent
-        if body.use_deep_agent is not None
-        else settings.CHAT_USE_DEEP_AGENT
-    )
+    mode = _resolve_agent_mode(body.agent_mode, body.use_deep_agent)
     # extract_info is a one-shot JSON extraction — never route through the agent
     if preset_id == "extract_info":
-        use_deep_agent = False
+        mode = "one_shot"
 
-    # ----- Deep-agent path: dispatch as background job, return 202 -----
-    if use_deep_agent:
+    # ----- Agent path (react or deep_agent): background job, return 202 -----
+    if mode in ("react", "deep_agent"):
         if not body.session_id:
             raise HTTPException(
                 status_code=400,
@@ -1092,8 +1168,7 @@ async def run_chat_preset(
         else:
             raise HTTPException(status_code=400, detail="Preset not implemented")
 
-        _, _, mm_warnings = build_deep_agent_multimodal_parts(nodes, profile_id)
-        warnings = list(mm_warnings)
+        warnings: List[str] = []
 
         extras = (
             f"## Preset\n{preset.label} ({preset.id})\n\n## Task\n{task_body}"
@@ -1131,6 +1206,7 @@ async def run_chat_preset(
             harness_extras=extras,
             warnings_json=json.dumps(warnings),
             preset_payload_json=json.dumps(preset_payload),
+            agent_mode=mode,
         )
         db.add(job)
         session.updated_at = utc_now()

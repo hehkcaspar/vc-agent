@@ -849,10 +849,26 @@ async def _enqueue_background_extraction(entity_id: str, node_ids: List[str]) ->
     """Fire-and-forget per-file extraction for a list of node ids.
 
     Uses asyncio.create_task to avoid blocking the inbox job. Sequential
-    inside the task to respect Gemini rate limits.
+    inside the task to respect Gemini rate limits.  Registers a batch for
+    progress tracking so the frontend can poll extraction status.
     """
     if not node_ids:
         return
+
+    from app.services.metadata_preprocess_jobs import (
+        register_extraction_batch,
+        update_batch_progress,
+    )
+
+    # Look up node names for progress display
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(WorkspaceNode.id, WorkspaceNode.name)
+            .where(WorkspaceNode.id.in_(node_ids))
+        )
+        node_names = {r.id: r.name for r in result}
+
+    await register_extraction_batch(entity_id, node_ids, node_names)
 
     async def _runner(ids: List[str]) -> None:
         from app.services.metadata_preprocess_jobs import (
@@ -864,8 +880,12 @@ async def _enqueue_background_extraction(entity_id: str, node_ids: List[str]) ->
                 jid, scheduled = await create_or_reuse_job(entity_id, nid)
                 if scheduled:
                     await run_metadata_preprocess_job(jid)
-            except Exception:
+                await update_batch_progress(entity_id, nid, success=True)
+            except Exception as exc:
                 logger.exception("Background extraction failed for %s", nid)
+                await update_batch_progress(
+                    entity_id, nid, success=False, error_msg=str(exc)[:200],
+                )
 
     asyncio.create_task(_runner(list(node_ids)))
 

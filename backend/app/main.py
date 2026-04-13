@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 import os
+import re
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -11,6 +12,39 @@ from app.database import init_db
 from app.routers import entities, parkinglot, ingest, chat, academic, workspace
 
 logger = logging.getLogger(__name__)
+
+
+# Redact secrets that vendor SDKs (httpx, requests, etc.) often
+# print at INFO level inside full request URLs. SerpAPI requires
+# `api_key` as a query param so it always shows up in logs unless
+# we filter. Add other key names here if/when needed.
+_SECRET_QUERY_RE = re.compile(
+    r"(api_key|x-api-key|key|token|access_token)=[^&\s\"']+",
+    re.IGNORECASE,
+)
+
+
+class _SecretRedactor(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            record.msg = _SECRET_QUERY_RE.sub(r"\1=***REDACTED***", str(record.msg))
+            if record.args:
+                record.args = tuple(
+                    _SECRET_QUERY_RE.sub(r"\1=***REDACTED***", str(a))
+                    if isinstance(a, str)
+                    else a
+                    for a in record.args
+                )
+        except Exception:
+            pass
+        return True
+
+
+def _install_secret_redactor() -> None:
+    f = _SecretRedactor()
+    for name in ("httpx", "httpcore", "urllib3", "uvicorn.access"):
+        logging.getLogger(name).addFilter(f)
+    logging.getLogger().addFilter(f)
 
 
 def _guard_langsmith_tracing() -> None:
@@ -49,9 +83,47 @@ def _guard_langsmith_tracing() -> None:
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     # Startup
+    _install_secret_redactor()
     _guard_langsmith_tracing()
     await init_db()
     await init_academic_db()
+
+    # V2 migration — ensure `last_interaction_id` column exists on
+    # academic_chat_sessions (added by the scholar evaluation framework
+    # rewrite). Single ALTER TABLE, idempotent.
+    try:
+        from sqlalchemy import text
+        from app.academic_database import academic_engine
+        async with academic_engine.begin() as conn:
+            res = await conn.exec_driver_sql(
+                "PRAGMA table_info(academic_chat_sessions)"
+            )
+            cols = {row[1] for row in res.fetchall()}
+            if "last_interaction_id" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE academic_chat_sessions "
+                    "ADD COLUMN last_interaction_id TEXT"
+                )
+                logger.info("Added last_interaction_id column to academic_chat_sessions")
+    except Exception:
+        logger.warning("v2 migration (last_interaction_id) failed", exc_info=True)
+
+    # Add agent_mode column to chat_completion_jobs (react vs deep_agent dispatch)
+    try:
+        from app.database import engine as portfolio_engine
+        async with portfolio_engine.begin() as conn:
+            res = await conn.exec_driver_sql(
+                "PRAGMA table_info(chat_completion_jobs)"
+            )
+            cols = {row[1] for row in res.fetchall()}
+            if "agent_mode" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE chat_completion_jobs "
+                    "ADD COLUMN agent_mode TEXT DEFAULT 'deep_agent'"
+                )
+                logger.info("Added agent_mode column to chat_completion_jobs")
+    except Exception:
+        logger.warning("agent_mode migration failed", exc_info=True)
 
     # Reset any scholars stuck in "evaluating" (no background tasks survive restart)
     try:
@@ -69,6 +141,14 @@ async def lifespan(app: FastAPI):
                 logger.info("Reset %d stuck 'evaluating' scholars to 'active'", result.rowcount)
     except Exception:
         logger.warning("Could not reset stuck scholar statuses", exc_info=True)
+
+    # Trim the evaluation log if it has grown past its bounds — cheap
+    # startup check, no effect during steady-state operation.
+    try:
+        from app.services.academic.eval_log import rotate_if_needed
+        rotate_if_needed()
+    except Exception:
+        logger.warning("eval_log rotation check failed", exc_info=True)
 
     # Start academic heartbeat scheduler
     from app.services.academic.heartbeat import HeartbeatScheduler

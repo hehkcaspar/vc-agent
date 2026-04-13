@@ -1,323 +1,339 @@
-"""Evaluation logic extracted from the academic router.
+"""Thin façade over Layer 2 refreshers + Layer 3 dim runner.
 
-Handles normalisation of agent-written evaluation JSON, delta computation
-between consecutive evaluations, score extraction for ranking, and the
-background evaluation/refresh task orchestration.
+The public surface is:
+
+- ``bootstrap_scholar`` — full identity + Layer 2 refresh + all dim evals
+  + phase classification + narrative synth. Used by both the manual
+  ``/evaluate`` / ``/refresh`` endpoints and the heartbeat dispatcher.
+- ``run_evaluation`` / ``run_refresh`` — router entry points that wrap
+  ``bootstrap_scholar`` for background execution.
+- ``claim_evaluating`` / ``release_evaluating`` — atomic SQL lock on
+  ``scholar.status`` that prevents manual + heartbeat runs from racing
+  on the same scholar.
+- ``launch_background_run`` / ``cancel_scholar_task`` — asyncio task
+  registry so ``/stop`` can actually cancel an in-flight run instead
+  of just flipping a status bit.
+- ``get_all_latest_evals`` / ``get_latest_eval_scores`` — read helpers
+  the router uses to build its responses.
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
-import uuid as _uuid
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
+import time
+from typing import Any, Awaitable, Callable
+
+from sqlalchemy import update
 
 from app.academic_database import AcademicAsyncSessionLocal
-from app.academic_models import Channel, Scholar
+from app.academic_models import Scholar
 
-from .file_utils import dossier_path, read_json, write_json
+from .continuous_config import load_continuous_tasks
+from .dim_runner import run_dim_eval
+from .eval_log import log_eval, log_step
+from .fact_store import active_red_flags
+from .file_utils import latest_record, read_records
+from .identity_resolver import resolve_identity
+from .narrative_synthesizer import run_narrative_synthesizer
+from .phase_classifier import run_phase_classifier
+from .refresh_dispatcher import trigger_refresh
 
 logger = logging.getLogger(__name__)
 
-# Module-level dict tracking in-flight agent tasks (for cancellation).
-running_agents: dict[str, bool] = {}
+
+# ── Cross-process / cross-coroutine lock ─────────────────────────────
 
 
-# ── Normalisation ─────────────────────────────────────────────
+async def claim_evaluating(scholar_id: str) -> bool:
+    """Atomically transition a scholar from ``active`` → ``evaluating``.
 
-
-def normalize_evaluation(data: dict, filepath: Path) -> dict:
-    """Inject defaults and normalise agent-written evaluation JSON.
-
-    The agent may omit fields or use slightly different structures.
-    This ensures the response always matches EvaluationResponse schema.
+    Only one caller can execute the UPDATE — losers see ``rowcount=0``
+    and must back off. Heartbeat and the router both call this so
+    manual + continuous work cannot interleave on the same scholar.
+    Pair with :func:`release_evaluating` in a ``try/finally``.
     """
-    if "id" not in data:
-        data["id"] = filepath.stem
-    if "created_at" not in data:
-        parts = filepath.stem.split("_", 1)
-        data["created_at"] = parts[0] if parts else ""
-    if "type" not in data:
-        parts = filepath.stem.split("_", 1)
-        data["type"] = parts[1] if len(parts) > 1 else "full"
-
-    dims = data.get("dimensions", {})
-    if isinstance(dims, dict):
-        for key, val in dims.items():
-            if isinstance(val, (int, float)):
-                dims[key] = {"score": int(val), "explanation": "", "evidence": []}
-            elif isinstance(val, dict):
-                val.setdefault("score", 0)
-                val.setdefault("explanation", "")
-                val.setdefault("evidence", [])
-                if not isinstance(val["evidence"], list):
-                    val["evidence"] = [str(val["evidence"])]
-        data["dimensions"] = dims
-
-    comm = data.get("commercialization_signals")
-    if isinstance(comm, list):
-        data["commercialization_signals"] = {"items": comm}
-    elif not isinstance(comm, dict):
-        data["commercialization_signals"] = {}
-
-    data.setdefault("computed_metrics", {})
-    data.setdefault("field_context", {})
-    data.setdefault("trigger", "manual")
-    data.setdefault("model", "")
-
-    return data
-
-
-# ── Delta ─────────────────────────────────────────────────────
-
-
-def compute_and_attach_delta(scholar_id: str) -> None:
-    """Compute evaluation delta and write it into the newest evaluation file.
-
-    Compares the two most recent evaluations' dimension scores.
-    Pure file I/O, no LLM.
-    """
-    evals_dir = dossier_path(scholar_id) / "evaluations"
-    if not evals_dir.exists():
-        return
-
-    eval_files = sorted(evals_dir.glob("*.json"), reverse=True)
-    if len(eval_files) < 2:
-        return
-
-    try:
-        newest = json.loads(eval_files[0].read_text(encoding="utf-8"))
-        previous = json.loads(eval_files[1].read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return
-
-    new_dims = newest.get("dimensions", {})
-    old_dims = previous.get("dimensions", {})
-    if not new_dims or not old_dims:
-        return
-
-    dimension_changes: dict[str, dict] = {}
-    for key in new_dims:
-        new_score = new_dims[key].get("score") if isinstance(new_dims[key], dict) else new_dims[key]
-        old_score = old_dims.get(key, {})
-        old_score = old_score.get("score") if isinstance(old_score, dict) else old_score
-        if isinstance(new_score, (int, float)) and isinstance(old_score, (int, float)):
-            change = int(new_score) - int(old_score)
-            if change != 0:
-                dimension_changes[key] = {
-                    "old": int(old_score),
-                    "new": int(new_score),
-                    "change": f"+{change}" if change > 0 else str(change),
-                }
-
-    prev_id = previous.get("id", eval_files[1].stem)
-
-    delta: dict[str, Any] = {
-        "vs_evaluation": prev_id,
-        "dimension_changes": dimension_changes,
-        "new_papers_since": 0,
-        "notable_events": [],
-    }
-
-    prev_date = previous.get("created_at", "")[:10]
-    if prev_date:
-        papers_data = read_json(dossier_path(scholar_id) / "papers.json")
-        for p in papers_data.get("papers", []):
-            pub_date = p.get("publication_date", "") or ""
-            if pub_date > prev_date:
-                delta["new_papers_since"] += 1
-
-    newest["delta"] = delta
-    eval_files[0].write_text(
-        json.dumps(newest, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
-    )
-
-
-# ── Score extraction ──────────────────────────────────────────
-
-
-def get_latest_eval_scores(scholar_id: str) -> tuple[dict[str, int], str | None]:
-    """Read the latest evaluation and extract dimension scores."""
-    evals_dir = dossier_path(scholar_id) / "evaluations"
-    if not evals_dir.exists():
-        return {}, None
-    files = sorted(evals_dir.glob("*.json"), reverse=True)
-    if not files:
-        return {}, None
-    try:
-        data = json.loads(files[0].read_text(encoding="utf-8"))
-        data = normalize_evaluation(data, files[0])
-        dims = data.get("dimensions", {})
-        scores: dict[str, int] = {}
-        for key, val in dims.items():
-            if isinstance(val, dict):
-                scores[key] = int(val.get("score", 0))
-            elif isinstance(val, (int, float)):
-                scores[key] = int(val)
-        eval_date = data.get("created_at")
-        return scores, eval_date
-    except Exception:
-        return {}, None
-
-
-# ── Background tasks ──────────────────────────────────────────
-
-
-async def auto_create_channels(scholar_id: str) -> None:
-    """Auto-create monitoring channels from discovered identity in profile.json."""
-    profile = read_json(dossier_path(scholar_id) / "profile.json")
-    identity = profile.get("identity", {})
-    if not identity:
-        return
-
-    channels_path = dossier_path(scholar_id) / "channels.json"
-    channels_data = read_json(channels_path) if channels_path.exists() else {}
-    channels_list = channels_data.get("channels", [])
-    existing_types = {c.get("type") for c in channels_list}
-
-    new_channels: list[dict] = []
-
-    gs = identity.get("google_scholar", {})
-    gs_url = gs.get("url") if isinstance(gs, dict) else None
-    if gs_url and "google_scholar_profile" not in existing_types:
-        ch_id = str(_uuid.uuid4())
-        new_channels.append({
-            "id": ch_id,
-            "type": "google_scholar_profile",
-            "url": gs_url,
-            "is_active": True,
-            "polling_interval_hours": 168,
-            "last_snapshot": {},
-        })
-
-    ss = identity.get("semantic_scholar", {})
-    ss_id = ss.get("id") if isinstance(ss, dict) else None
-    if ss_id and "semantic_scholar_profile" not in existing_types:
-        ch_id = str(_uuid.uuid4())
-        ss_url = f"https://api.semanticscholar.org/graph/v1/author/{ss_id}"
-        new_channels.append({
-            "id": ch_id,
-            "type": "semantic_scholar_profile",
-            "url": ss_url,
-            "is_active": True,
-            "polling_interval_hours": 72,
-            "last_snapshot": {},
-        })
-
-    if not new_channels:
-        return
-
-    channels_list.extend(new_channels)
-    channels_data["channels"] = channels_list
-    write_json(channels_path, channels_data)
-
     try:
         async with AcademicAsyncSessionLocal() as db:
-            for ch in new_channels:
-                db.add(Channel(
-                    id=ch["id"],
-                    scholar_id=scholar_id,
-                    channel_type=ch["type"],
-                    url=ch["url"],
-                    is_active=True,
-                    polling_interval_hours=ch["polling_interval_hours"],
-                ))
+            result = await db.execute(
+                update(Scholar)
+                .where(Scholar.id == scholar_id)
+                .where(Scholar.status == "active")
+                .values(status="evaluating")
+            )
             await db.commit()
-        logger.info("Auto-created %d channels for scholar %s", len(new_channels), scholar_id)
+            return result.rowcount > 0
     except Exception:
-        logger.exception("Failed to create channels for %s", scholar_id)
+        logger.exception("could not claim evaluating lock for %s", scholar_id)
+        return False
+
+
+async def release_evaluating(scholar_id: str) -> None:
+    """Transition ``evaluating`` → ``active`` without touching paused/archived."""
+    try:
+        async with AcademicAsyncSessionLocal() as db:
+            await db.execute(
+                update(Scholar)
+                .where(Scholar.id == scholar_id)
+                .where(Scholar.status == "evaluating")
+                .values(status="active")
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("could not release evaluating lock for %s", scholar_id)
+
+
+# ── Async task registry (for /stop cancellation) ─────────────────────
+
+
+_running_tasks: dict[str, asyncio.Task[Any]] = {}
+
+
+def launch_background_run(
+    scholar_id: str,
+    coro_factory: Callable[[], Awaitable[Any]],
+) -> asyncio.Task[Any]:
+    """Spawn a background run and store its Task so ``/stop`` can cancel it.
+
+    The caller is expected to have already claimed the evaluating lock
+    (so this is called with ``already_claimed=True`` inside the coro).
+    The task self-deregisters in ``bootstrap_scholar``'s ``finally``.
+    """
+    task = asyncio.create_task(coro_factory())
+    _running_tasks[scholar_id] = task
+    task.add_done_callback(
+        lambda t, sid=scholar_id: _running_tasks.pop(sid, None)
+        if _running_tasks.get(sid) is t
+        else None
+    )
+    return task
+
+
+async def cancel_scholar_task(scholar_id: str) -> bool:
+    """Cancel an in-flight evaluation and wait for it to unwind.
+
+    Returns True if a running task was cancelled, False if nothing was
+    running. Awaiting the task guarantees ``bootstrap_scholar``'s
+    ``finally`` block has already released the SQL lock by the time
+    this returns, so an immediate re-``evaluate`` won't race.
+    """
+    task = _running_tasks.get(scholar_id)
+    if not task or task.done():
+        return False
+    task.cancel()
+    try:
+        await task
+    except (asyncio.CancelledError, Exception):
+        pass
+    return True
+
+
+# ── Bootstrap (the only real pipeline) ───────────────────────────────
+
+
+async def _load_scholar_name(scholar_id: str) -> str | None:
+    try:
+        async with AcademicAsyncSessionLocal() as db:
+            s = await db.get(Scholar, scholar_id)
+            return s.name if s else None
+    except Exception:
+        return None
+
+
+async def bootstrap_scholar(
+    scholar_id: str,
+    *,
+    mode: str = "bootstrap",
+    already_claimed: bool = False,
+) -> dict[str, Any]:
+    """Run identity → Layer 2 sources → phase classifier → Layer 3 dims → narrative.
+
+    Step-level failures are logged and swallowed so one broken source or
+    one broken dim does not abort the whole run. ``CancelledError``
+    propagates naturally — callers who invoke ``cancel_scholar_task``
+    will observe the scholar transitioning back to ``active`` once the
+    ``finally`` block unwinds.
+
+    All setup work (config load, claim, name lookup) runs INSIDE the
+    outer try/finally so the evaluating lock is released even if
+    bootstrap crashes before reaching the pipeline steps. A broken
+    config file must not leave scholars stuck in ``evaluating``
+    forever — the router has already claimed the lock by the time we
+    get here.
+    """
+    t0 = time.monotonic()
+    scholar_name: str | None = None
+    results: dict[str, Any] = {"sources": {}, "dimensions": {}}
+
+    try:
+        cfg = load_continuous_tasks()
+
+        if not already_claimed and not await claim_evaluating(scholar_id):
+            logger.info(
+                "bootstrap_scholar: %s already being evaluated — skipping",
+                scholar_id,
+            )
+            log_eval(
+                scholar_id, "bootstrap", "skipped", detail="already_running"
+            )
+            return {"skipped": True, "reason": "already_running"}
+
+        scholar_name = await _load_scholar_name(scholar_id)
+        log_eval(
+            scholar_id, "bootstrap", "start",
+            detail={"mode": mode},
+            scholar_name=scholar_name,
+        )
+        # ── Identity resolution (pre-Layer-2) ───────────────────
+        try:
+            async with log_step(scholar_id, "identity", scholar_name=scholar_name):
+                results["identity"] = await resolve_identity(scholar_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("bootstrap: identity failed for %s", scholar_id)
+            results["identity"] = {"status": "error", "error": str(e)}
+
+        # ── Layer 2 sources (parallel) ──────────────────────────
+        enabled_sources = [sid for sid, sc in cfg.sources.items() if sc.enabled]
+
+        async def _run_source(source_id: str) -> tuple[str, Any]:
+            try:
+                async with log_step(
+                    scholar_id, f"source/{source_id}", scholar_name=scholar_name
+                ):
+                    return source_id, await trigger_refresh(
+                        scholar_id,
+                        source_id,
+                        mode=mode,
+                        reason="bootstrap_scholar",
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.exception(
+                    "bootstrap: source %s failed for %s", source_id, scholar_id
+                )
+                return source_id, {"error": str(e)}
+
+        for sid, r in await asyncio.gather(*(_run_source(s) for s in enabled_sources)):
+            results["sources"][sid] = r
+
+        # ── Phase classification ────────────────────────────────
+        try:
+            async with log_step(
+                scholar_id, "phase_classifier", scholar_name=scholar_name
+            ):
+                results["peer_group"] = await run_phase_classifier(scholar_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("bootstrap: phase_classifier failed for %s", scholar_id)
+            results["peer_group"] = {"error": str(e)}
+
+        # ── Layer 3 dim evals (parallel) ────────────────────────
+        enabled_dims = [dim_id for dim_id, dc in cfg.dimensions.items() if dc.enabled]
+
+        async def _run_dim(dim_id: str) -> tuple[str, Any]:
+            try:
+                async with log_step(
+                    scholar_id, f"dim/{dim_id}", scholar_name=scholar_name
+                ) as ctx:
+                    r = await run_dim_eval(
+                        scholar_id, dim_id, cfg=cfg, force_score=True
+                    )
+                    ctx.detail = {"score": r.get("score")}
+                    return dim_id, r
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.exception(
+                    "bootstrap: dim %s failed for %s", dim_id, scholar_id
+                )
+                return dim_id, {"error": str(e)}
+
+        for dim_id, r in await asyncio.gather(*(_run_dim(d) for d in enabled_dims)):
+            results["dimensions"][dim_id] = r
+
+        # ── Narrative synthesizer ───────────────────────────────
+        try:
+            async with log_step(scholar_id, "narrative", scholar_name=scholar_name):
+                results["narrative"] = await run_narrative_synthesizer(scholar_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:
+            logger.exception("bootstrap: narrative failed for %s", scholar_id)
+            results["narrative"] = {"error": str(e)}
+
+    except asyncio.CancelledError:
+        log_eval(
+            scholar_id, "bootstrap", "cancelled",
+            duration_s=time.monotonic() - t0,
+            scholar_name=scholar_name,
+        )
+        raise
+    else:
+        log_eval(
+            scholar_id, "bootstrap", "done",
+            duration_s=time.monotonic() - t0,
+            scholar_name=scholar_name,
+        )
+    finally:
+        await release_evaluating(scholar_id)
+
+    return results
+
+
+# ── Router entry points ──────────────────────────────────────────────
 
 
 async def run_evaluation(scholar_id: str) -> None:
-    """Background task: invoke the scholar agent for initial evaluation."""
-    from app.services.academic.scholar_agent import invoke_scholar_agent
-    from app.services.academic.scholar_prompts import GOAL_INITIAL_EVALUATION
-
-    running_agents[scholar_id] = True
-    try:
-        result = await invoke_scholar_agent(scholar_id, GOAL_INITIAL_EVALUATION)
-        logger.info("Evaluation complete for %s: %s", scholar_id, result.get("run_id"))
-        compute_and_attach_delta(scholar_id)
-        await auto_create_channels(scholar_id)
-    except Exception as e:
-        logger.exception("Evaluation failed for %s: %s", scholar_id, e)
-    finally:
-        running_agents.pop(scholar_id, None)
-        try:
-            async with AcademicAsyncSessionLocal() as db:
-                scholar = await db.get(Scholar, scholar_id)
-                if scholar and scholar.status == "evaluating":
-                    scholar.status = "active"
-                    await db.commit()
-        except Exception:
-            logger.exception("Could not reset scholar status for %s", scholar_id)
+    await bootstrap_scholar(scholar_id, mode="bootstrap", already_claimed=True)
 
 
 async def run_refresh(scholar_id: str) -> None:
-    """Background task: refresh a scholar's dossier."""
-    from app.services.academic.scholar_agent import invoke_scholar_agent
-    from app.services.academic.scholar_prompts import GOAL_REFRESH
-
-    running_agents[scholar_id] = True
-    try:
-        await invoke_scholar_agent(scholar_id, GOAL_REFRESH)
-        compute_and_attach_delta(scholar_id)
-        await auto_create_channels(scholar_id)
-    except Exception as e:
-        logger.exception("Refresh failed for %s: %s", scholar_id, e)
-    finally:
-        running_agents.pop(scholar_id, None)
-        try:
-            async with AcademicAsyncSessionLocal() as db:
-                s = await db.get(Scholar, scholar_id)
-                if s and s.status == "evaluating":
-                    s.status = "active"
-                    await db.commit()
-        except Exception:
-            pass
+    await bootstrap_scholar(scholar_id, mode="incremental", already_claimed=True)
 
 
-async def run_comparative(scholar_id: str, other_id: str) -> None:
-    """Background task: comparative evaluation via scholar agent."""
-    from app.services.academic.scholar_agent import invoke_scholar_agent
-    from app.services.academic.scholar_prompts import GOAL_COMPARATIVE_EVALUATION
+# ── Read helpers for the router ──────────────────────────────────────
 
-    running_agents[scholar_id] = True
-    try:
-        profile_a = read_json(dossier_path(scholar_id) / "profile.json")
-        profile_b = read_json(dossier_path(other_id) / "profile.json")
-        scores_a, _ = get_latest_eval_scores(scholar_id)
-        scores_b, _ = get_latest_eval_scores(other_id)
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def _latest_eval(scholar_id: str, dim_id: str) -> dict[str, Any] | None:
+    """Latest eval record — scored or not-scoreable (skips triage-only/error)."""
+    for rec in reversed(read_records(scholar_id, f"evaluations/{dim_id}")):
+        if isinstance(rec.get("score"), (int, float)) and rec.get("scoreable", True):
+            return rec
+        if rec.get("scoreable") is False:
+            return rec
+    return None
 
-        def _fmt_dims(scores: dict) -> str:
-            return "\n".join(f"  - {k}: {v}/100" for k, v in scores.items())
 
-        goal = GOAL_COMPARATIVE_EVALUATION.format(
-            name_a=profile_a.get("name", "Scholar A"),
-            affiliation_a=profile_a.get("affiliation", {}).get("current", "Unknown"),
-            h_index_a=profile_a.get("metrics", {}).get("h_index", "N/A"),
-            dimensions_a=_fmt_dims(scores_a),
-            name_b=profile_b.get("name", "Scholar B"),
-            affiliation_b=profile_b.get("affiliation", {}).get("current", "Unknown"),
-            h_index_b=profile_b.get("metrics", {}).get("h_index", "N/A"),
-            dimensions_b=_fmt_dims(scores_b),
-            date=today,
-        )
+def get_all_latest_evals(scholar_id: str) -> dict[str, Any]:
+    """Per-dim latest eval + narrative + peer group + active red flags."""
+    cfg = load_continuous_tasks()
+    dims: dict[str, Any] = {dim_id: _latest_eval(scholar_id, dim_id) for dim_id in cfg.dimensions}
+    return {
+        "dimensions": dims,
+        "narrative": latest_record(scholar_id, "narrative"),
+        "peer_group": latest_record(scholar_id, "peer_group"),
+        "red_flags": active_red_flags(scholar_id),
+    }
 
-        await invoke_scholar_agent(scholar_id, goal)
-    except Exception as e:
-        logger.exception("Comparative evaluation failed: %s", e)
-    finally:
-        running_agents.pop(scholar_id, None)
-        try:
-            async with AcademicAsyncSessionLocal() as db:
-                scholar = await db.get(Scholar, scholar_id)
-                if scholar and scholar.status == "evaluating":
-                    scholar.status = "active"
-                    await db.commit()
-        except Exception:
-            pass
+
+def get_latest_eval_scores(scholar_id: str) -> tuple[dict[str, int | None], str | None]:
+    """Compact ``{dim_id: score}`` for the ranking table. Not-scoreable → None."""
+    scores: dict[str, int | None] = {}
+    latest_date: str | None = None
+    cfg = load_continuous_tasks()
+    for dim_id in cfg.dimensions:
+        rec = _latest_eval(scholar_id, dim_id)
+        if not rec:
+            continue
+        rid = rec.get("id")
+        if rid and (latest_date is None or rid > latest_date):
+            latest_date = rid
+        if rec.get("scoreable") is False:
+            scores[dim_id] = None
+        elif isinstance(rec.get("score"), (int, float)):
+            scores[dim_id] = int(rec["score"])
+    return scores, latest_date

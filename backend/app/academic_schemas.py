@@ -59,6 +59,44 @@ class UpdateScholarRequest(BaseModel):
     user_notes: Optional[str] = None
 
 
+class IdentitySourceUpsert(BaseModel):
+    """Payload for manually adding or editing an identity source.
+
+    User edits are authoritative: the resolver will NOT LLM-verify the
+    value, and the id is removed from `rejected_identity` if it was
+    previously blacklisted. `id` is optional because some sources
+    (homepage, twitter, linkedin) only need a URL.
+    """
+
+    source_id: str = Field(..., min_length=1, description="e.g. google_scholar")
+    url: str = Field(..., min_length=1)
+    id: Optional[str] = None
+
+
+class IdentitySourceDelete(BaseModel):
+    """Payload for deleting an identity source.
+
+    `blacklist=true` additionally records the removed id in
+    `rejected_identity[source_id]` so future resolve passes skip it.
+    """
+
+    blacklist: bool = False
+
+
+class PatchContinuousTaskRequest(BaseModel):
+    """Payload for PATCH /academic/continuous-tasks/{kind}/{task_id}.
+
+    All fields optional — only fields that are set in the request
+    body are applied. The handler re-validates the full config after
+    mutation, so any combination that breaks cross-refs (e.g. setting
+    cadence to 0) is rejected with 422 before the file is written.
+    """
+
+    enabled: Optional[bool] = None
+    default_cadence_days: Optional[int] = Field(default=None, ge=1)
+    priority_overrides: Optional[dict[str, int]] = None
+
+
 class ScholarResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -109,6 +147,7 @@ class EventResponse(BaseModel):
     significance: str = "medium"
     title: Optional[str] = None
     is_read: bool = False
+    source_url: Optional[str] = None
     event_date: Optional[datetime] = None
     created_at: datetime
     # Full payload from JSONL (set by router when expanded)
@@ -146,45 +185,15 @@ class UpdateChannelRequest(BaseModel):
 # ── Evaluations (read from JSON files, not SQL) ─────────────
 
 
-class EvaluationDimension(BaseModel):
-    score: int
-    explanation: str = ""
-    evidence: list[str] = []
-    archetype_used: Optional[str] = None
-
-
-class EvaluationDelta(BaseModel):
-    vs_evaluation: Optional[str] = None
-    dimension_changes: dict[str, dict[str, Any]] = {}
-    new_papers_since: int = 0
-    notable_events: list[str] = []
-
-
-class EvaluationResponse(BaseModel):
-    """Evaluation snapshot read from data/scholars/{id}/evaluations/{file}.json
-
-    Agent output may not perfectly match the schema — fields have lenient defaults.
-    """
-
-    id: Optional[str] = None
-    type: str = "full"
-    trigger: str = "manual"
-    model: str = ""
-    created_at: Optional[str] = None
-
-    dimensions: dict[str, EvaluationDimension] = {}
-    computed_metrics: dict[str, Any] = {}
-    field_context: dict[str, Any] = {}
-    commercialization_signals: Any = {}  # Agent may output list or dict
-    delta: Optional[EvaluationDelta] = None
-    agent_trace_ref: Optional[str] = None
-
-
-class EvaluationListResponse(BaseModel):
-    evaluations: list[EvaluationResponse]
-
-
 # ── Papers (read from papers.json) ──────────────────────────
+#
+# NOTE: legacy v1 evaluation schemas (EvaluationResponse,
+# EvaluationListResponse, EvaluationDimension, EvaluationDelta) were
+# removed in the v2 framework rewrite. The /evaluations endpoint
+# now returns an untyped dict bundling per-dim latest evals,
+# narrative, peer_group, and red_flags — see
+# `services/academic/evaluation_service.get_all_latest_evals`. The
+# typed shape lives in `services/academic/schemas.DimEvalResult`.
 
 
 class PaperResponse(BaseModel):
@@ -228,22 +237,11 @@ class PapersResponse(BaseModel):
     papers: list[PaperResponse] = []
 
 
-# ── Reports (read from markdown files) ──────────────────────
-
-
-class ReportResponse(BaseModel):
-    id: str
-    filename: str
-    report_type: str = "full"
-    created_at: str
-    content: Optional[str] = None
-
-
-class ReportListResponse(BaseModel):
-    reports: list[ReportResponse]
-
-
 # ── Chat ─────────────────────────────────────────────────────
+#
+# NOTE: legacy v1 reports schemas (ReportResponse, ReportListResponse)
+# were removed. v2 stores reports as records in narrative.jsonl;
+# see `/scholars/{id}/narrative-history`.
 
 
 class AcademicChatSessionCreate(BaseModel):
@@ -307,6 +305,7 @@ class SignalFeedEventResponse(BaseModel):
     significance: str = "medium"
     title: Optional[str] = None
     is_read: bool = False
+    source_url: Optional[str] = None
     event_date: Optional[datetime] = None
     created_at: datetime
 
@@ -328,7 +327,7 @@ class RankingScholarResponse(BaseModel):
     h_index: Optional[int] = None
     tracking_priority: str = "medium"
     status: str = "active"
-    dimensions: dict[str, int] = {}
+    dimensions: dict[str, int | None] = {}
     eval_date: Optional[str] = None
 
 

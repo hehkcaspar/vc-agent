@@ -1,35 +1,95 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import {
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   ResponsiveContainer,
 } from 'recharts';
-import { DIMENSION_LABELS, getScoreColor } from '../../types/academic';
-import type { Evaluation } from '../../types/academic';
+import {
+  DIMENSION_LABELS, DIMENSION_ORDER, PHASE_LABELS,
+  SEVERITY_COLORS, getScoreColor,
+} from '../../types/academic';
+import type { DimEvalResult, EvaluationsResponse } from '../../types/academic';
 
 interface EvaluationTabProps {
-  latestEval: Evaluation | null;
-  evaluations: Evaluation[];
+  data: EvaluationsResponse | undefined;
 }
 
-export function EvaluationTab({ latestEval, evaluations }: EvaluationTabProps) {
-  const [expandedDimension, setExpandedDimension] = useState<string | null>(null);
+export function EvaluationTab({ data }: EvaluationTabProps) {
+  const [expanded, setExpanded] = useState<string | null>(null);
 
-  if (!latestEval) {
+  if (!data) {
     return (
       <div className="tab-content evaluation-content">
-        <p className="text-muted">No evaluation yet. Run an evaluation to see dimension scores.</p>
+        <p className="text-muted">No evaluation yet. Run an evaluation to populate the dimensions.</p>
       </div>
     );
   }
 
-  const radarData = Object.entries(latestEval.dimensions).map(([key, dim]) => ({
-    dimension: DIMENSION_LABELS[key] ?? key,
-    score: dim.score,
+  const dims = data.dimensions || {};
+  const scoredDims = DIMENSION_ORDER
+    .map((k) => [k, dims[k]] as const)
+    .filter(([, v]) => v && typeof v.score === 'number');
+
+  const radarData = scoredDims.map(([k, v]) => ({
+    dimension: DIMENSION_LABELS[k] ?? k,
+    score: v!.score,
     fullMark: 100,
   }));
 
   return (
     <div className="tab-content evaluation-content">
+      {/* Red flags banner */}
+      {data.red_flags && data.red_flags.length > 0 && (
+        <div className="red-flags-banner" style={{
+          border: '1px solid #ef4444', borderRadius: 8, padding: 12, marginBottom: 16,
+          background: 'rgba(239,68,68,0.08)',
+        }}>
+          <strong style={{ color: '#ef4444' }}>Active red flags</strong>
+          <ul style={{ margin: '6px 0 0 0', paddingLeft: 18 }}>
+            {data.red_flags.map((f) => (
+              <li key={f.id} style={{ color: SEVERITY_COLORS[f.severity] }}>
+                <strong>{f.severity.toUpperCase()}</strong> — {f.category}: {f.claim}
+                {f.source_url && (
+                  <> — <a href={f.source_url} target="_blank" rel="noopener noreferrer">source</a></>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Peer group block */}
+      {data.peer_group && (
+        <div className="peer-group-block" style={{
+          border: '1px solid var(--color-border)', borderRadius: 8,
+          padding: 12, marginBottom: 16,
+        }}>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'baseline', flexWrap: 'wrap' }}>
+            <strong>{PHASE_LABELS[data.peer_group.phase] ?? data.peer_group.phase}</strong>
+            <span className="text-muted">{data.peer_group.field}</span>
+            {data.peer_group.academic_age != null && (
+              <span className="meta-tag">{data.peer_group.academic_age} yrs post-PhD</span>
+            )}
+            {data.peer_group.context_modifiers?.institution_tier && (
+              <span className="meta-tag">
+                tier: {data.peer_group.context_modifiers.institution_tier}
+              </span>
+            )}
+            {data.peer_group.context_modifiers?.data_availability && (
+              <span className="meta-tag">
+                data: {data.peer_group.context_modifiers.data_availability}
+              </span>
+            )}
+          </div>
+          {data.peer_group.cohort_examples && data.peer_group.cohort_examples.length > 0 && (
+            <div className="text-muted" style={{ marginTop: 6, fontSize: 12 }}>
+              Peers: {data.peer_group.cohort_examples.join(' · ')}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Radar chart */}
       {radarData.length >= 3 && (
         <div className="radar-chart-container">
@@ -53,128 +113,104 @@ export function EvaluationTab({ latestEval, evaluations }: EvaluationTabProps) {
         </div>
       )}
 
-      {/* Delta summary */}
-      {latestEval.delta && Object.keys(latestEval.delta.dimension_changes).length > 0 && (
-        <div className="delta-summary">
-          <span className="delta-summary-label">vs. previous evaluation</span>
-          {latestEval.delta.new_papers_since > 0 && (
-            <span className="delta-summary-item">
-              +{latestEval.delta.new_papers_since} new papers
-            </span>
-          )}
-        </div>
-      )}
-
-      {/* Dimension scores */}
+      {/* Dimension cards */}
       <h4>Dimension Scores</h4>
       <div className="dimension-grid">
-        {Object.entries(latestEval.dimensions).map(([key, dim]) => (
-          <div
-            key={key}
-            className={`dimension-card ${expandedDimension === key ? 'expanded' : ''}`}
-            onClick={() => setExpandedDimension(expandedDimension === key ? null : key)}
-          >
-            <div className="dimension-header">
-              <span className="dimension-name">{DIMENSION_LABELS[key] ?? key}</span>
-              <span className="dimension-score" style={{ color: getScoreColor(dim.score) }}>
-                {dim.score}
-                {latestEval.delta?.dimension_changes[key] && (() => {
-                  const dc = latestEval.delta!.dimension_changes[key];
-                  const diff = dc.new - dc.old;
-                  return (
-                    <span className={`delta-indicator ${diff > 0 ? 'delta-up' : 'delta-down'}`}>
-                      {diff > 0 ? '+' : ''}{diff}
+        {DIMENSION_ORDER.map((key) => {
+          const dim: DimEvalResult | null | undefined = dims[key];
+          return (
+            <div
+              key={key}
+              className={`dimension-card ${expanded === key ? 'selected' : ''}`}
+              onClick={() => setExpanded(expanded === key ? null : key)}
+            >
+              <div className="dimension-header">
+                <span className="dimension-name">{DIMENSION_LABELS[key] ?? key}</span>
+                {dim ? (
+                  dim.score == null ? (
+                    <span className="dimension-score text-muted" title="Insufficient evidence to evaluate">N/A</span>
+                  ) : (
+                    <span className="dimension-score" style={{ color: getScoreColor(dim.score) }}>
+                      {dim.score}
+                      {dim.diff_from_last?.delta != null && dim.diff_from_last.delta !== 0 && (
+                        <span
+                          className={`delta-indicator ${dim.diff_from_last.delta > 0 ? 'delta-up' : 'delta-down'}`}
+                        >
+                          {dim.diff_from_last.delta > 0 ? '+' : ''}{dim.diff_from_last.delta}
+                        </span>
+                      )}
                     </span>
-                  );
-                })()}
-              </span>
-            </div>
-            {expandedDimension === key && (
-              <div className="dimension-detail">
-                <p>{dim.explanation}</p>
-                {dim.evidence.length > 0 && (
-                  <ul>
-                    {dim.evidence.map((e, i) => <li key={i}>{e}</li>)}
-                  </ul>
+                  )
+                ) : (
+                  <span className="text-muted">—</span>
                 )}
               </div>
-            )}
-          </div>
-        ))}
+            </div>
+          );
+        })}
       </div>
 
-      {/* Computed metrics */}
-      {latestEval.computed_metrics && Object.keys(latestEval.computed_metrics).length > 0 && (
-        <>
-          <h4 style={{ marginTop: 24 }}>Computed Metrics</h4>
-          <div className="metrics-grid">
-            {Object.entries(latestEval.computed_metrics).map(([key, val]) => (
-              <div key={key} className="metric-card">
-                <span className="metric-label">{key.replace(/_/g, ' ')}</span>
-                <span className="metric-value">{typeof val === 'number' ? val.toLocaleString() : String(val)}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
-
-      {/* Commercialization signals */}
-      {latestEval.commercialization_signals && Object.keys(latestEval.commercialization_signals).length > 0 && (
-        <>
-          <h4 style={{ marginTop: 24 }}>Commercialization Signals</h4>
-          <div className="signals-section">
-            {latestEval.commercialization_signals.patents?.length > 0 && (
-              <div>
-                <h5>Patents</h5>
+      {/* Detail panel (below grid, only when a card is selected) */}
+      {expanded && dims[expanded] && (() => {
+        const dim = dims[expanded]!;
+        return (
+          <div className="dimension-detail-panel">
+            <div className="dimension-detail-panel-header">
+              <h4 style={{ margin: 0 }}>
+                {DIMENSION_LABELS[expanded] ?? expanded}
+                {dim.score != null && (
+                  <span style={{ marginLeft: 8, color: getScoreColor(dim.score), fontFamily: 'var(--font-display)' }}>
+                    {dim.score}
+                  </span>
+                )}
+              </h4>
+              <button
+                className="btn-icon"
+                onClick={() => setExpanded(null)}
+                aria-label="Close detail"
+                title="Close"
+              >✕</button>
+            </div>
+            <p className="text-muted" style={{ fontSize: 12, margin: '0 0 var(--space-2)' }}>
+              uncertainty: {dim.uncertainty}
+            </p>
+            <div className="mini-report-md">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{dim.mini_report}</ReactMarkdown>
+            </div>
+            {dim.evidence.length > 0 && (
+              <>
+                <h5 style={{ marginTop: 8 }}>Evidence</h5>
                 <ul>
-                  {latestEval.commercialization_signals.patents.map((p: any, i: number) => {
-                    if (typeof p === 'string') return <li key={i}>{p}</li>;
-                    const label = [p.title, p.id].filter(Boolean).join(' · ') || p.id || 'Patent';
-                    return (
-                      <li key={i}>
-                        {label}{p.year ? ` (${p.year})` : ''}
-                        {p.url && <> — <a href={p.url} target="_blank" rel="noopener noreferrer">link</a></>}
-                      </li>
-                    );
-                  })}
+                  {dim.evidence.map((e, i) => (
+                    <li key={i}>
+                      <strong>{e.weight}</strong>: {e.claim}
+                      {e.source && (
+                        <> — <a href={e.source} target="_blank" rel="noopener noreferrer">source</a></>
+                      )}
+                    </li>
+                  ))}
                 </ul>
-              </div>
+              </>
             )}
-            {latestEval.commercialization_signals.startups?.length > 0 && (
-              <div>
-                <h5>Startups</h5>
+            {dim.missing_data.length > 0 && (
+              <>
+                <h5 style={{ marginTop: 8 }}>Missing data</h5>
                 <ul>
-                  {latestEval.commercialization_signals.startups.map((s: any, i: number) => {
-                    if (typeof s === 'string') return <li key={i}>{s}</li>;
-                    return (
-                      <li key={i}>
-                        {s.name}{s.role ? ` — ${s.role}` : ''}
-                        {s.url && <> — <a href={s.url} target="_blank" rel="noopener noreferrer">link</a></>}
-                      </li>
-                    );
-                  })}
+                  {dim.missing_data.map((m, i) => <li key={i}>{m}</li>)}
                 </ul>
-              </div>
+              </>
+            )}
+            {dim.questions_for_investor.length > 0 && (
+              <>
+                <h5 style={{ marginTop: 8 }}>Questions for investor</h5>
+                <ul>
+                  {dim.questions_for_investor.map((q, i) => <li key={i}>{q}</li>)}
+                </ul>
+              </>
             )}
           </div>
-        </>
-      )}
-
-      {/* Evaluation history */}
-      {evaluations.length > 1 && (
-        <>
-          <h4 style={{ marginTop: 24 }}>Evaluation History</h4>
-          <div className="eval-history">
-            {evaluations.map((ev) => (
-              <div key={ev.id} className="eval-history-item">
-                <span>{ev.created_at}</span>
-                <span className="meta-tag">{ev.type}</span>
-                <span className="text-muted">{ev.trigger}</span>
-              </div>
-            ))}
-          </div>
-        </>
-      )}
+        );
+      })()}
     </div>
   );
 }

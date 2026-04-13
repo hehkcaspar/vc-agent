@@ -4,6 +4,8 @@ import {
   WorkspaceNode,
   WorkspaceTreeNode,
   InboxProcessJobStatus,
+  ExtractionProgress,
+  AgentMode,
   IngestItem,
   IngestResponse,
   ChatSession,
@@ -130,6 +132,10 @@ export const api = {
       fetchJson<InboxProcessJobStatus>(
         `/entities/${entityId}/workspace/inbox/process/${jobId}`,
       ),
+    getExtractionProgress: (entityId: string) =>
+      fetchJson<ExtractionProgress>(
+        `/entities/${entityId}/workspace/extraction-progress`,
+      ),
     createFolder: (entityId: string, path: string) =>
       fetchJson<WorkspaceNode>(
         `/entities/${entityId}/workspace/folder?path=${encodeURIComponent(path)}`,
@@ -253,6 +259,7 @@ export const api = {
         node_ids: string[];
         model_profile_id?: string | null;
         use_deep_agent?: boolean | null;
+        agent_mode?: AgentMode | null;
       },
     ): Promise<PostChatMessageResult> => {
       const response = await fetch(
@@ -296,6 +303,7 @@ export const api = {
         session_id?: string | null;
         model_profile_id?: string | null;
         use_deep_agent?: boolean | null;
+        agent_mode?: AgentMode | null;
         industry?: string | null;
         stage?: string | null;
       },

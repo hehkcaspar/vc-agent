@@ -3,7 +3,7 @@ Academic Tracking v2 database — separate SQLite file from the portfolio DB.
 
 v2 uses 3 SQL tables (scholars, scholar_events, channels) as a lightweight
 index.  Full scholar state lives in JSON/JSONL/markdown files on disk.
-See doc/ACADEMIC_TRACKING_V2_DESIGN.md §2.
+See docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md.
 """
 
 from sqlalchemy import create_engine, event

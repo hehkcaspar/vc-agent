@@ -109,8 +109,14 @@ class SemanticScholarService:
                     "citation_count": d.get("citationCount", 0),
                     "h_index": d.get("hIndex"),
                 }
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 404:
+                    logger.debug("SS author %s not found (404)", author_id)
+                else:
+                    logger.warning("SS get author %s failed: %s", author_id, e)
+                return None
             except Exception as e:
-                logger.error("Semantic Scholar get author failed: %s", e)
+                logger.warning("SS get author %s failed: %s", author_id, e)
                 return None
 
     # ── Author papers ──────────────────────────────────────────

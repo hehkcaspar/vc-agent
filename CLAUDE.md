@@ -17,6 +17,10 @@ VC Portfolio Manager — a full-stack app for managing portfolio companies as ca
 
 ## Development Commands
 
+### System Dependencies
+- **LibreOffice** — required for legacy office format support (doc/ppt/xls → text extraction). Install: `brew install --cask libreoffice` (macOS) / `apt install libreoffice-core` (Debian/Ubuntu). The `soffice` binary must be on PATH.
+- **Ghostscript** — required for PDF compression (reduces token cost, enables oversized PDFs). Install: `brew install ghostscript` (macOS) / `apt install ghostscript` (Linux). The `gs` binary must be on PATH.
+
 ### Backend (from `backend/`)
 ```bash
 # Install dependencies (use venv — never install globally)
@@ -52,7 +56,7 @@ No frontend test runner is configured yet.
 3. Normal APIs only operate on canonical records (never raw parking lot)
 
 ### Workspace (Hierarchical File System per Entity)
-Each entity has a single workspace tree that replaces the old dual Resource/Artifact model. Design doc: `doc/ENTITY_WORKSPACE_DESIGN.md`.
+Each entity has a single workspace tree that replaces the old dual Resource/Artifact model. Design doc: `docs/design/ENTITY_WORKSPACE_DESIGN.md`.
 
 - **`workspace_nodes`** table — files, folders, bookmarks in a tree (path-based, with `parent_id`)
 - **`workspace_ops`** table — audit log for all mutations (create, overwrite, move, delete, etc.)
@@ -70,36 +74,53 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
 - **Structured upload**: `POST /workspace/upload` (multipart, preserves `webkitRelativePath` from frontend) and `POST /workspace/upload-zip` (server-side `zipfile` unpack with `WORKSPACE_MAX_ZIP_BYTES` cap, zip-slip rejection, single-root detection to avoid double-nesting). Frontend `FileUploadModal` (in `EntityDetail.tsx`) exposes four modes — **Files / Folder / Zip / Text**. Text mode wraps pasted free-form content (email, IM, notes) into a synthetic `File` and submits through the same `POST /workspace/upload` endpoint so it flows through Process Inbox identically to regular uploads; filename defaults to `note-<ISO timestamp>.md`.
 
 ### Backend Structure (`backend/app/`)
-- **`main.py`** — FastAPI app, CORS, lifespan (LangSmith guard + DB init + stuck-evaluating reset)
-- **`routers/`** — `entities`, `workspace`, `chat`, `ingest`, `parkinglot`, `academic`
+- **`main.py`** — FastAPI app, CORS, lifespan (LangSmith guard + DB init + stuck-evaluating reset + secret redactor for httpx logs + v2 migration)
+- **`routers/`** — `entities`, `workspace`, `chat`, `ingest`, `parkinglot`, `academic` (scholar CRUD, evaluate/refresh/stop, papers, evaluations, events, channels, chat sessions/jobs, signal feed, ranking, digests, custom dimensions, identity source CRUD, continuous-tasks catalog/patch/run-now, eval-log)
 - **`services/`** — Domain logic:
   - `workspace.py` — `WorkspaceService` (tree queries, write/overwrite/version, move/rename, delete, copy, undo, provenance enforcement, template scaffolding, agent context builder)
   - `workspace_tools.py` — `build_workspace_tools()` — 13 LangChain agent tools for workspace operations
   - `storage.py` — `StorageAdapter` abstraction (local FS, designed for future cloud swap)
   - `parking.py` / `resolver.py` / `materializer.py` — ingestion pipeline (materializes to workspace Inbox/)
-  - `direct_llm.py` / `gemini_context.py` — Gemini Interactions API + Kimi dispatch, workspace node context building (replaced legacy `gemini_runner.py`)
-  - `portfolio_deep_agent.py` — LangChain Deep Agent harness (workspace tools, job polling)
+  - `direct_llm.py` / `gemini_context.py` — Gemini Interactions API + Kimi dispatch; `build_context_parts` (one-shot Gemini, with PDF compression via ghostscript), `build_harness_user_attachment_text` (one-shot Kimi, pypdf text extraction), `build_selected_files_pointer_list` (agent mode, metadata-only pointer table — no file content inlined)
+  - `office_extractors.py` — text extraction for OOXML (docx/pptx/xlsx via zipfile XML) + legacy office (doc/ppt/xls via LibreOffice headless conversion)
+  - `document_text.py` — `extract_pdf_text` (pypdf page-by-page) + `compress_pdf` (ghostscript /ebook→/screen)
+  - `agent_harness.py` — ReAct agent harness (`langchain.agents.create_agent` with SummarizationMiddleware + PatchToolCallsMiddleware, workspace tools only); shared utilities (`history_to_lc_messages`, `_build_agent_core`). Passes `model_profile_id` to tools for format-aware file handling
+  - `deep_agent_compat.py` — Legacy Deep Agent compat (removable). Uses `deepagents.create_deep_agent` which adds SDK built-in tools. Delete this file + `deepagents` from requirements.txt to fully remove
   - `model_profiles.py` — model wiring (Gemini, Kimi/Moonshot)
   - `metadata_extraction.py` / `metadata_preprocess_jobs.py` — async single-file metadata enrichment for workspace nodes
   - `inbox_processing_jobs.py` — Process Inbox batch intake (Path A loose files, Path B user-uploaded folders); reuses metadata_preprocess for per-file extraction
-  - `academic/` — Academic Tracking v2 module (separate from portfolio):
-    - `file_utils.py` — shared dossier path, JSON/JSONL read/write helpers
-    - `evaluation_service.py` — evaluation normalisation, delta computation, score extraction, background eval/refresh/comparative tasks, `running_agents` registry
-    - `chat_service.py` — background chat job execution
-    - `digest_service.py` — weekly portfolio digest generation via Gemini
-    - `scholar_agent.py` — goal-driven Deep Agents harness (invoke_scholar_agent, invoke_scholar_chat); `_extract_text()` normalises Gemini content blocks to plain strings
-    - `scholar_prompts.py` — goal prompt templates (initial eval, refresh, chat, comparative, upload processing). `build_scholar_system_prompt()` interpolates dimensions from `dimensions.py` at every invocation
-    - `dimensions.py` — file-backed evaluation dimensions at `data/config/dimensions.json` (`DEFAULT_DIMENSIONS` seed, `read/write_dimensions()`, `render_dimensions_schema_block()`, `render_dimensions_rubric()`)
-    - `domain_tools.py` — 12 scholar-scoped tools built via `build_scholar_tools(scholar_id)` closure pattern
-    - `tool_utils.py` — pure utility functions (URL classification, name matching, title normalisation)
+  - `academic/` — Academic Tracking v2 module (separate from portfolio). Uses the Scholar Evaluation Framework (`docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md`): 4 MECE dimensions, 3-layer continuous monitoring, `google-genai` SDK (no langchain in this module):
+    - `file_utils.py` — dossier path, JSON/JSONL read/write, four JSONL primitives (`append_record`, `read_records`, `fold_records`, `latest_record`) with per-scholar asyncio write lock
+    - `locks.py` — per-scholar `asyncio.Lock` registry (single-process; file-lock needed for multi-worker)
+    - `continuous_config.py` — Pydantic-validated loader + atomic writer for `data/config/continuous_tasks.json` (Layer 2 sources + Layer 3 tasks + cadences). `load_continuous_tasks()` for the Pydantic model, `load_raw_continuous_tasks()` for mutation, `write_continuous_tasks()` validates then writes atomically via `tmp → os.replace`
+    - `identity_resolver.py` — multi-pass identity resolution for new scholars: homepage crawl → grounded Gemini discovery → deterministic URL parsing → per-source LLM verification (`identity_verifier.py`) → GS verification (SerpAPI + direct-scrape + `search_gs_by_papers` fallback, each candidate LLM-verified) → SS resolution (Tier 1 top-K name search + Tier 2 paper search, each candidate passes cheap pre-filter `verify_ss_metrics` then LLM verifier) → ORCID verification (`orcid_client.py` enrichment + LLM) → homepage text verification. Rejected candidates are persisted in `profile.json.rejected_identity` so future runs skip them. Writes 10+ identity sources to profile.json
+    - `identity_verifier.py` — LLM-based per-source identity verification gate. `IdentityVerifier` class with per-run cache, `ScholarContext` context builder, `IdentityVerdict` structured output. Every high-signal source (GS, SS, ORCID, homepage) must pass this gate before being committed. Low-confidence matches (`<0.6`) are committed but flagged `llm_low_confidence` for UI review. Rejections append to `rejected_identity` with reason + timestamp
+    - `orcid_client.py` — minimal public-ORCID fetcher (`pub.orcid.org` API, no auth): name, biography, employments, work titles. Used only by the identity verifier for LLM enrichment
+    - `evaluation_service.py` — thin façade: `bootstrap_scholar()` runs identity → Layer 2 sources (parallel) → phase classifier → Layer 3 dim evals (parallel) → narrative synthesizer. All setup (config load, claim, name lookup) runs inside the outer try/finally so the evaluating lock is always released even if bootstrap crashes before reaching the pipeline steps. Atomic `claim_evaluating` / `release_evaluating` cross-process lock via scholar status column
+    - `dim_runner.py` — generic Layer 3 dim eval: triage (cold-start skip) → scoring via `generate_structured` → red-flag caps → append to `evaluations/{dim_id}.jsonl`
+    - `phase_classifier.py` — two-pass R1-R4 classification: grounded search discovery → structured synthesis into `peer_group.jsonl`
+    - `narrative_synthesizer.py` — cross-dim narrative + open questions → `narrative.jsonl`
+    - `scholar_chat.py` — Gemini Interactions API agentic chat: function-calling tools (read_fact_store, read_dim_history, trigger_refresh, log_event) + google_search, client-driven tool loop, `previous_interaction_id` chain persistence
+    - `chat_service.py` — background job wrapper for scholar_chat, stores `last_interaction_id` on session
+    - `llm_client.py` — self-contained `google-genai` wrapper (no portfolio imports): `generate_structured` (Path 1), `grounded_generate_text` / `grounded_search_json` (Path 2), `interactions_create` (Path 3)
+    - `schemas.py` — Pydantic response schemas: `DimEvalResult`, `TriageResult`, `PhaseClassificationResult`, `NarrativeReport`, `RedFlagDetection`, etc.
+    - `fact_store.py` — read-only aggregate: `current_state()` bundles profile/papers/grants/patents/startups/attributed_metrics/peer_group/red_flags. Red-flag projection via `fold_records`. Severity caps per Concept 7
+    - `attributed_metrics.py` — author-position-weighted citation metrics (Concept 4): per-paper weights, first/last h-index, inflation flags. Returns `missing_data` when SS id is absent
+    - `refresh_dispatcher.py` — `trigger_refresh(source, scholar_id)` with in-flight per-(scholar, source) dedupe
+    - `events_sync.py` — `log_event()` creates `ScholarEvent` SQL rows (single source of truth, no JSONL). Dual-date contract: `created_at` (auto, when collected) vs `event_date` (caller-supplied, when it actually happened — NULL if unknown). Sources must parse real dates from upstream data (e.g. `published_date` from news, `year` from papers) and pass as `event_date`. All event writers (sources, heartbeat, upload_processor, scholar_chat) route through `log_event()`
+    - `upload_processor.py` — structured-output upload analysis → profile patch + timeline events (via `log_event`)
+    - `sources/` — Layer 2 source fetchers (one module per external API): `semantic_scholar_papers` (passes paper year as `event_date`), `google_scholar_stats` (SerpAPI + direct-scrape fallback + `search_gs_by_papers`), `patents_lens` (scaffold), `news_web` (grounded search + URL dedupe, parses `published_date` as `event_date`), `crunchbase_startups` (scaffold, disabled), `red_flags_watch` (grounded search with VC-calibrated severity). **Snapshot contract**: every `run()` must call `record_snapshot()` on ALL exit paths (including early returns for missing ids or fetch errors) so the heartbeat cadence timer resets — otherwise `_is_source_due` returns True every tick
+    - `dimensions.py` — file-backed 4-dim config at `data/config/dimensions.json` (Academic Excellence, Tech-transfer Experience, Founder Potential, Growth Trajectory)
+    - `tool_utils.py` — pure utility functions: `classify_urls` (10 source shapes: GS/SS/ORCID/DBLP/arXiv/OpenReview/LinkedIn/GitHub/Twitter/homepage), `names_match` (unicode + initial + prefix aware), `verify_ss_metrics` (cheap pre-filter: rejects zero-metric candidates against strong anchors; the LLM verifier is the final gate), `KNOWN_IDENTITY_SOURCES` + `HIGH_SIGNAL_IDENTITY_SOURCES` frozen sets. Note: `KNOWN_IDENTITY_SOURCES` is used by the identity resolver for automated discovery — the identity CRUD endpoints accept arbitrary source_ids (user-defined custom sources)
     - `semantic_scholar.py` — Semantic Scholar API client (rate-limited, optional key)
-    - `heartbeat.py` — background scheduler for stale scholar refresh, channel polling, digest generation
-    - `channel_pollers.py` — Google Scholar / Semantic Scholar change detection
+    - `heartbeat.py` — unified dispatcher: reads `continuous_tasks.json` per tick, claims evaluating lock, dispatches Layer 2 + Layer 3 per scholar cadence; also runs legacy channel polling (events routed through `log_event`). Module-level `get_heartbeat_status()` exposes liveness (last tick timestamp) for the Tasks view
+    - `eval_log.py` — structured append-only JSONL evaluation log at `data/logs/evaluation.jsonl`. Every pipeline step emits `start` + terminal (`done|error|cancelled`). `log_step` async context manager for automatic timing. `read_tail_jsonl` for bounded reads. Auto-rotation on startup
+    - `channel_pollers.py` — Google Scholar / Semantic Scholar change detection (legacy, kept for signal feed)
 - **`prompts/`** — Markdown prompt templates (extract_info, red_team, file_lookup_preprocess, inbox_grouping, inbox_folder_routing)
 - **`models.py`** — SQLAlchemy ORM (entities, workspace_nodes, workspace_ops, ingest_items, conversation_sessions/messages, chat_completion_jobs)
 - **`academic_database.py`** — Academic DB engine, sessions, `AcademicBase` (separate `data/academic.db`)
 - **`academic_models.py`** — Academic Tracking ORM using `AcademicBase` (scholars, scholar_events, channels, chat_sessions/messages/jobs)
-- **`academic_schemas.py`** — Pydantic schemas for academic endpoints (scholar CRUD, evaluations, papers, reports, events, chat, ranking, digest, custom dimensions)
+- **`academic_schemas.py`** — Pydantic schemas for academic endpoints (scholar CRUD, papers, events, chat, ranking, digest, custom dimensions, identity source upsert/delete with arbitrary source_ids, continuous-task patch). Legacy evaluation/report schemas removed in v2 — the `/evaluations` endpoint returns an untyped dict; typed shapes live in `services/academic/schemas.py`
 - **`config.py`** — Pydantic Settings loaded from `.env`
 
 ### Frontend Structure (`frontend/src/`)
@@ -108,19 +129,22 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
 - **`components/EntityDetail.tsx`** — Entity workspace (hierarchical file tree + chat panel)
 - **`components/EntityConversation.tsx`** — Chat UI with presets, agent toggle, job polling, workspace node selection
 - **`components/academic/`** — Academic Tracking v2 workspace:
-  - `AcademicTab.tsx` — Scholar list/ranking views, signal feed, stale alerts, digest viewer, custom dimensions modal
-  - `ScholarDetail.tsx` — Scholar detail with report sidebar, content tab router, auto-refresh during evaluation
-  - `EvaluationTab.tsx` — Radar chart, dimension scores with delta indicators, computed metrics, commercialisation signals
-  - `PublicationsTab.tsx` — Papers table with sort (citations/year) and author position filter
-  - `ProfilesTab.tsx` — Profile link cards with channel monitoring controls (pause/resume)
-  - `TimelineTab.tsx` — Event timeline with significance filter; shows event date vs discovery date when they differ
+  - `AcademicTab.tsx` — Scholar list/ranking/tasks views (tri-toggle), signal feed (shows event date + "discovered X ago" when dates differ), stale alerts, digest viewer, custom dimensions modal, activity log modal
+  - `ScholarDetail.tsx` — Scholar detail header with evaluation controls (Run/Stop/Confirmation modal), content tab router, auto-refresh during evaluation
+  - `EvaluationTab.tsx` — Radar chart (4 dims), stable dimension cards grid with expandable detail panel (evidence/uncertainty/questions), peer group block, red flags banner
+  - `ReportTab.tsx` — Full-width synthesized narrative report with an inline version-history picker dropdown
+  - `PublicationsTab.tsx` — Full-width papers table with sort (citations/year) and author position filter
+  - `ProfilesTab.tsx` — Full-width profile table (all identity sources: GS/SS/ORCID/DBLP/LinkedIn/GitHub/Twitter/homepage + user-defined custom sources) with monitoring status dots, pause/play controls, inline edit/add/delete via `EditProfileModal`, low-confidence amber badges for LLM-unverified sources. Delete supports optional blacklisting (adds to `rejected_identity`). Profile links only appear here (not duplicated in the header). Custom sources get title-cased labels derived from their snake_case key
+  - `EditProfileModal.tsx` — Add/edit identity source modal (source picker with "Other..." option for arbitrary custom sources, URL + optional id inputs, GS/SS warning banner). Custom sources prompt for a free-text name (normalized to snake_case `source_id`). User edits bypass LLM verification and set `verified_by: user_edit`
+  - `TimelineTab.tsx` — Event timeline with significance filter and sort toggle (Discovered vs Event date). Shows event date vs discovery date when they differ; sort by event_date pushes NULL dates last
   - `ScholarConversation.tsx` — Per-scholar chat with session management and async job polling
   - `RankingView.tsx` — Sortable ranking table with weight presets and comparative evaluation
+  - `TasksView.tsx` — Continuous-tasks management page. Three sections (Layer 2 Sources / Layer 3 Dimensions / Layer 3 System) with heartbeat liveness strip. Per-task: inline cadence edit (Enter/Esc), enable toggle, 7d run count, health dot (green/amber/red), run-now button. Expandable detail panel with description, required sources, models, last run, last error. All class names use `ct-*` prefix to avoid collisions with the scholar-list `.task-*` classes
   - `AddScholarModal.tsx` — Create/edit scholar modal
 - **`services/api.ts`** — API client (entities, workspace, chat, ingest, parking lot)
-- **`services/academicApi.ts`** — API client (scholars, chat, ranking, digests, uploads, custom dimensions)
+- **`services/academicApi.ts`** — API client (scholars, chat, ranking, digests, uploads, custom dimensions, identity source CRUD, continuous-tasks catalog + patch + run-now)
 - **`hooks/useEntities.ts`** — SWR hooks: `useEntities`, `useEntity`, `useWorkspaceTree`
-- **`hooks/useAcademic.ts`** — SWR hooks for all academic data
+- **`hooks/useAcademic.ts`** — SWR hooks for all academic data including `useContinuousTasks` (10s poll for the Tasks view)
 - **`types/index.ts`** — TypeScript interfaces (Entity, WorkspaceNode, WorkspaceTreeNode, chat types)
 - **`types/academic.ts`** — TypeScript interfaces + display constants (labels, colours, score helpers)
 - **`lib/academicRanking.ts`** — `computeWeightedRank()` for client-side ranking
@@ -135,10 +159,11 @@ Each entity has a single workspace tree that replaces the old dual Resource/Arti
 - **`context/TabContext.tsx`** — Tab state management
 - Data fetching via SWR with automatic revalidation
 
-### Chat Modes
-- **One-shot** (default): synchronous Gemini call → 200 response
-- **Deep Agent** (`use_deep_agent=true`): 202 response with `job_id`, background LangChain agent with 13 workspace tools, client polls for completion. Agent receives workspace tree context (file structure + descriptions + workspace notes) on every turn.
-- **Preset shortcuts** (`POST /chat/presets/{id}/run`) share the same two modes. In deep-agent mode, the endpoint returns **202 + `PresetRunJobAccepted`**, persists a synthetic `▶ Run preset: <label>` user message, creates a `chat_completion_jobs` row with `preset_payload_json` populated, and runs `run_preset_agent_job` as a background task. **Poll the same chat-job endpoint** — no separate preset job endpoint. The frontend's `agentJob` polling loop + spinner status line are reused verbatim, so Red Team / Extract Info runs get the same live tool-step progress as a chat send. `extract_info` is force-pinned to one-shot; `red_team` honors the toggle.
+### Chat Modes (tri-state: `agent_mode` field)
+- **One-shot** (`agent_mode: "one_shot"`): synchronous Gemini/Kimi call → 200 response. Files are inlined into the prompt: Gemini receives native binary (PDFs compressed via ghostscript, images as-is); Kimi receives pypdf-extracted text. Capped at `MAX_ATTACHMENTS = 8` files.
+- **ReAct Agent** (`agent_mode: "react"`, default when agent enabled): 202 response with `job_id`, background agent via `langchain.agents.create_agent` with 13 workspace tools + SummarizationMiddleware + PatchToolCallsMiddleware. **No SDK built-in tools** — only workspace tools. Agent receives a pointer list (path, type, size, description) of user-selected files plus the full workspace tree context. Uses `workspace_read_file` on demand: Gemini gets compressed native PDF binary (base64 content blocks) and native images; Kimi gets pypdf text. No file count limit.
+- **Deep Agent** (`agent_mode: "deep_agent"`, legacy compat): Same async pattern but uses `deepagents.create_deep_agent` which adds 9 SDK built-in tools (read_file, write_file, ls, etc.) alongside workspace tools. **Removable** — delete `deep_agent_compat.py` + `deepagents` from requirements.txt. Falls back to ReAct automatically via `DEEP_AGENT_AVAILABLE` guard.
+- **Preset shortcuts** (`POST /chat/presets/{id}/run`) share all three modes. The endpoint returns **202 + `PresetRunJobAccepted`**, persists a synthetic `▶ Run preset: <label>` user message, creates a `chat_completion_jobs` row with `preset_payload_json` + `agent_mode` populated, and runs `run_preset_agent_job` as a background task. **Poll the same chat-job endpoint** — no separate preset job endpoint. `extract_info` is force-pinned to one-shot; `red_team` honors the toggle.
 
 ### File preview
 `FilePreview` in `components/EntityDetail.tsx` renders files in the side panel and supports an **expand-to-popup** modal (lucide `Maximize2`). Markdown files (`.md`, `text/markdown`) render via `react-markdown` + `remark-gfm`, not as raw text. The popup header has filename + **version picker dropdown** on the left (text/markdown only, fetched lazily from `GET /workspace/file/{id}/versions`; historical blob via `GET /workspace/file/{id}/versions/{version}`) and **copy-to-clipboard** + close on the right. Versions in the modal are view-only — no re-fetch on expand, modalContent overrides content when a historical version is selected. The inline side panel always shows the current version.
@@ -153,15 +178,17 @@ Write + manage (6): `workspace_write_file`, `workspace_annotate`, `workspace_del
 - Entity workspace files at `data/entities/{entity_id}/workspace/blobs/{node_id}/`
 - Version history at `data/entities/{entity_id}/workspace/.versions/{node_id}/`
 - Parking lot at `data/entities/00000/parkinglot/`
-- Scholar dossiers at `data/scholars/{scholar_id}/` (profile.json, papers.json, events.jsonl, channels.json, evaluations/, reports/, uploads/, agent_runs/)
-- Academic config at `data/config/` (heartbeat.json, field_archetypes.json, ranking_presets/, digests/, dimensions.json)
+- Scholar dossiers at `data/scholars/{scholar_id}/` — profile.json, papers.json, attributed_metrics.json, grants.json, patents.json, startups.json, channels.json, news.jsonl, peer_group.jsonl, red_flags.jsonl, snapshot_log.jsonl, narrative.jsonl, evaluations/{dim_id}.jsonl, uploads/. Events are SQL-only (`scholar_events` table), not in dossier files
+- Academic config at `data/config/` (continuous_tasks.json, dimensions.json, heartbeat.json, field_archetypes.json, ranking_presets/, digests/)
 - `data/` is gitignored
 
 ## Key Configuration
 
 All backend config via environment variables (see `backend/.env_sample`):
 - `GEMINI_API_KEY` / `GOOGLE_API_KEY` — required for AI features
-- `CHAT_USE_DEEP_AGENT` — enable deep agent mode (default false)
+- `CHAT_USE_DEEP_AGENT` — legacy boolean (default false); overridden by `agent_mode` when present
+- `CHAT_DEFAULT_AGENT_MODE` — `one_shot`, `react`, or `deep_agent` (default `one_shot`; frontend defaults to `react` when agent toggle is on)
+- `CHAT_AGENT_RECURSION_LIMIT` — LangGraph recursion limit for agent modes (default 100)
 - `CHAT_DEFAULT_MODEL_PROFILE` — `gemini_google` or `kimi_moonshot`
 - `WORKSPACE_MAX_FILE_BYTES` — max file size (default 50 MB)
 - `WORKSPACE_MAX_ZIP_BYTES` — max zip upload size (default 500 MB)
@@ -175,43 +202,61 @@ All backend config via environment variables (see `backend/.env_sample`):
 
 Frontend proxy target configurable via `VITE_PROXY_TARGET` (default `http://127.0.0.1:8000`).
 
-## Academic Tracking Module (v2)
+## Academic Tracking Module (v2 — Scholar Evaluation Framework)
 
-Separate from portfolio — scholar-centric tracking with goal-driven Deep Agents. Uses its own SQLite DB (`data/academic.db`) with `AcademicBase` declared in `app/academic_database.py`. Full design in `doc/ACADEMIC_TRACKING_V2_DESIGN.md`.
+Separate from portfolio — scholar-centric tracking with 3-layer continuous monitoring. Uses its own SQLite DB (`data/academic.db`) with `AcademicBase` declared in `app/academic_database.py`. All LLM calls use the `google-genai` SDK (`services/academic/llm_client.py`), not `langchain-google-genai` or `deepagents` — those are portfolio-only.
 
-### Two-layer storage
-- **Document store** (source of truth): JSON/JSONL/markdown files per scholar in `data/scholars/{id}/` — profile.json, papers.json, events.jsonl, channels.json, evaluations/*.json, reports/*.md
-- **SQL index** (queryable): 3 core tables (scholars, scholar_events, channels) + 3 chat tables — rebuildable from documents via `sync_sql_index` tool
+Full design: `docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md` (8 shared concepts + 4 per-dim prompts).
 
-### Agent architecture
-One agent factory (`invoke_scholar_agent`), one toolkit (`build_scholar_tools(scholar_id)` — 12 closure-bound tools), different goals. Initial evaluation, refresh, signal investigation, chat, comparative evaluation, and upload processing are all the same agent with different system prompts.
+### 4 MECE dimensions
+- **D1 Academic Excellence** — scientific contribution + peer standing (authorship-weighted citations, field recognition, collaboration quality)
+- **D2 Tech-transfer Experience** — historical commercial track record (ventures, IP, market validation). Clean venture failures are positive evidence, not red flags
+- **D3 Founder Potential** — future commercial success probability (founder-market fit, determination, commitment, team-attracting ability)
+- **D4 Growth Trajectory** — slope across scientific + commercial + operator axes (multi-axis acceleration, phase-sensitive)
 
-**Goals (background tasks via FastAPI BackgroundTasks):**
-- **Initial evaluation** — identity extraction (URL-first, deterministic pre-classification), paper fetching (SS API), bibliometrics, N-dimension scoring (list lives in `data/config/dimensions.json`, editable at runtime — see "Dimensions config" below), report generation
-- **Refresh** — re-fetch papers, update metrics, rescore, compute delta vs previous evaluation
-- **Chat** — multi-turn conversation with scholar context and tools
-- **Comparative** — side-by-side evaluation of two scholars
-- **Upload processing** — agent analyses user-uploaded documents
-- **Digest** — weekly portfolio summary via direct Gemini call (no agent)
+Dimension prompts live in `data/config/dimensions.json` (file-backed, editable at runtime, auto-seeded with 4 defaults).
 
-### Service modules (under `services/academic/`)
-- `file_utils.py` — shared `dossier_path()`, `read_json()`, `write_json()`, `append_jsonl()`
-- `evaluation_service.py` — normalisation, delta, scoring, background task orchestration, `running_agents` registry
-- `chat_service.py` — background chat job execution
-- `digest_service.py` — weekly digest generation
-- `heartbeat.py` — stale scholar refresh, channel polling, scheduled digest
+### 3-layer architecture
+- **Layer 1 — Fact store**: per-scholar JSON + JSONL files under `data/scholars/{id}/`. Current-state files (profile.json, papers.json, attributed_metrics.json, etc.) are rewritten wholesale; append-only logs (peer_group.jsonl, red_flags.jsonl, evaluations/{dim}.jsonl) use the four JSONL primitives in `file_utils.py`. Events are SQL-only (`scholar_events` table) — no dossier file
+- **Layer 2 — Source fetchers**: `sources/` modules (semantic_scholar_papers, google_scholar_stats, patents_lens, news_web, crunchbase_startups, red_flags_watch). Each owns one external API; dim agents in Layer 3 can only call `trigger_refresh`, never external APIs directly
+- **Layer 3 — Dim evaluation + synthesis**: `dim_runner.py` (per-dim triage → scoring), `phase_classifier.py` (R1-R4 classification), `narrative_synthesizer.py` (cross-dim report), `scholar_chat.py` (Interactions API with function tools)
+
+All tasks are configured in `data/config/continuous_tasks.json` (cadences, models, required_sources); heartbeat dispatches them.
+
+### Identity resolution
+`identity_resolver.py` runs before Layer 2 on fresh scholars. Pipeline: homepage crawl → grounded LLM discovery → deterministic `classify_urls` → **per-source LLM verification** (every high-signal source independently verified via `identity_verifier.py`):
+- **GS**: fetch profile → LLM verify (name + affiliation + metrics) → if rejected, try SerpAPI paper-search fallback with LLM verify on each candidate
+- **SS**: cheap pre-filter (`verify_ss_metrics` — rejects zero-metric candidates against strong anchors) → LLM verify → iterate top-K candidates in Tier 1 (name search) and Tier 2 (paper search). Each rejection is appended to `profile.json.rejected_identity` so future runs skip it
+- **ORCID**: fetch public API via `orcid_client.py` (name, bio, employments, works) → LLM verify
+- **Homepage**: fetch + strip to plain text → LLM verify
+- Low-signal sources (LinkedIn, GitHub, Twitter, DBLP, arXiv, OpenReview) committed with heuristic confidence, no LLM gate
+- **Persistent rejections**: `rejected_identity` in profile.json stores known-bad candidates per source type. The resolver skips them before reaching the LLM. User edits (via Profiles tab) bypass LLM verification and clear rejections for that id
+- Metrics seeded from GS; falls back to SS when no GS profile exists. Each source is verified independently — no GS-as-hard-anchor requirement
+
+### Continuous-tasks management
+- `continuous_tasks.json` is file-backed, mutated in place by the API, re-read by heartbeat every tick. No DB table, no migration
+- `GET /academic/continuous-tasks` — full catalog + per-task health (7d runs, success rate, avg duration, last error) computed from the eval log + heartbeat liveness probe
+- `PATCH /academic/continuous-tasks/{kind}/{task_id}` — edit `enabled` / `default_cadence_days` / `priority_overrides`. Validates the full config via Pydantic before atomic write. Emits audit entry to eval log
+- `POST /academic/continuous-tasks/{kind}/{task_id}/run-now` — force-execute one task across all active scholars (or one scholar). Uses existing runners + evaluating lock. Observable in the Activity Log
+- Frontend Tasks view (accessible via List / Ranking / **Tasks** toggle) shows all sources + dims + system tasks with inline cadence edit, enable toggle, run-now, expandable detail panel
+
+### Cross-process coordination
+- `claim_evaluating(scholar_id)` / `release_evaluating(scholar_id)` — atomic SQL status transition that prevents heartbeat + manual `/evaluate` + run-now from racing on the same scholar
+- `bootstrap_scholar` wraps all setup (config load, claim, name lookup) inside the outer try/finally so the evaluating lock is always released even on early crashes
+- Heartbeat only dispatches to scholars in `active` status; bootstrap, heartbeat, and run-now all claim/release
+- Startup lifespan resets any stuck `evaluating` scholars to `active`
 
 ### Key design decisions
-- **Minimal SQL, rich documents**: SQL for cross-scholar queries/scheduling only; all agent-readable state lives in dossier files
-- **URL-first identity**: Homepage links are ground truth; pre-classification extracts GS/SS/LinkedIn IDs deterministically before Gemini
-- Google Scholar stats are authoritative; Semantic Scholar only fills gaps
-- `@tool` decorator requires docstring as FIRST statement in function body (no logger calls before it)
-- Startup hook resets stuck "evaluating" scholars to "active" (handles server restart mid-evaluation)
-- **Event date vs discovery date**: `append_event` tool accepts optional `event_date` for when the event actually occurred (e.g., a company founding); `created_at` records when the system discovered it. Timeline UI shows both when they differ
-- **Gemini content block handling**: `_extract_text()` in `scholar_agent.py` normalises list-of-blocks content (`[{"type": "text", "text": "..."}]`) from Gemini models into plain strings before storing in DB
-- **Dimensions config (dynamic, file-backed)**: evaluation dimensions are NOT hardcoded in prompts. `services/academic/dimensions.py` owns `data/config/dimensions.json`, auto-seeded on first read with seven defaults. `scholar_prompts.build_scholar_system_prompt()` calls `read_dimensions()` every invocation and interpolates `{dimensions_schema_block}` (the JSON schema example) and `{dimensions_rubric}` (the scoring guidance) into `_BASE_PROMPT`, plus `{n_dimensions}` into goal text. CRUD exposed via `GET/POST/PUT/DELETE /academic/custom-dimensions` (route name kept for backward compatibility; the endpoint now manages the full list — there is no distinction between "built-in" and "custom"). Changes take effect on the next agent run; no restart. Caveat: ranking-preset weights in `routers/academic.py` still reference default keys by name, so deleting a default leaves that preset partially dead
+- **Minimal SQL, rich documents**: SQL for cross-scholar queries, scheduling, signal feed, and events; all Layer 3-readable state (evaluations, narratives, peer group, red flags) lives in dossier files
+- **Identity-first with LLM verification**: every high-signal source (GS, SS, ORCID, homepage) passes a lightweight LLM gate (`identity_verifier.py`) before being committed to profile.json. The LLM checks name + affiliation + research area + top papers; rejects on contradiction, accepts on consistency. The old heuristic `verify_ss_metrics` is kept as a cheap pre-filter (catches zero-metric mismatches before wasting an LLM call) but is no longer the final word. Rejected candidates are persistently blacklisted in `profile.json.rejected_identity` so they can't sneak back on subsequent runs
+- **Percentile scoring** (Concept 1): scores represent "percent of comparable peers beaten". Band anchors: <50 (unremarkable), 50-74 (solid), 75-89 (top quartile), 90-94 (top decile), 95-98 (top 5%), 99 (singular)
+- **Peer group** (Concept 2): R1-R4 phases via two-axis classification (academic age + achievement gates G1-G4). Gates dominate age; age caps upward mobility
+- **Evidence contract** (Concept 3): every score ≥50 must emit structured evidence with primary/supporting weights and `missing_data` / `uncertainty`
+- **Red flags** (Concept 7): append-only event log in `red_flags.jsonl` with per-severity caps. Severity calibrated for VC: clean venture failures are `low` (note only), fraud/misconduct is `critical`
+- **LLM execution model** (Concept 8): Path 1 (single-shot `generate_structured` for scoring/triage/synthesis/identity-verification), Path 2 (grounded Google Search for discovery), Path 3 (Interactions API for chat with function tools)
+- **Events are SQL-only**: `scholar_events` is the single source of truth (no `events.jsonl` duplication). All event creation routes through `events_sync.log_event()`. Dual-date: `created_at` (auto, collection time) vs `event_date` (nullable, when it actually happened). Sources parse real dates; `event_date=None` means unknown. Timeline supports sorting by either date; signal feed shows both when they differ
 - Frontend auto-refreshes (5s polling) while scholar status is "evaluating"
-- Frontend is an independent tab/workspace with 6 content tabs (Report, Timeline, Evaluation, Publications, Profiles, Chat) plus list/ranking views, signal feed, and digest
+- Frontend tab workspace: Narrative (sidebar), Timeline, Evaluation, Publications, Profiles, Chat — plus list/ranking/tasks views, signal feed, and digest
 
 ## Code Style
 
@@ -221,4 +266,4 @@ One agent factory (`invoke_scholar_agent`), one toolkit (`build_scholar_tools(sc
 
 ## Documentation
 
-Detailed docs in `docs/`: `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md`, `API_REFERENCE.md`, `TRACING.md`. Workspace design in `doc/ENTITY_WORKSPACE_DESIGN.md`. Product requirements in `doc/MVP-prd.md`.
+Detailed docs in `docs/`: `ARCHITECTURE.md`, `DEVELOPER_GUIDE.md`, `API_REFERENCE.md`, `TRACING.md`. Design rationale in `docs/design/`: `MVP-prd.md` (original PRD), `ENTITY_WORKSPACE_DESIGN.md` (workspace design), `SCHOLAR_EVALUATION_FRAMEWORK.md` (canonical evaluation design — 8 shared concepts + 4 per-dim prompts).

@@ -44,9 +44,9 @@ def main() -> int:
 
     from app.config import settings
     from app.services.model_profiles import _kimi_openai_credentials, build_chat_model
-    from app.services.portfolio_deep_agent import (
+    from app.services.agent_harness import history_to_lc_messages
+    from app.services.deep_agent_compat import (
         create_portfolio_agent,
-        history_to_lc_messages,
         invoke_portfolio_agent,
     )
     from app.services.prompt_assembly import EntityBrief

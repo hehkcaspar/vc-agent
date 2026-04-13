@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect, useCallback, DragEvent, ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Sparkles, Loader2, Copy, Maximize2, X, ChevronDown, ChevronRight, MoreVertical, Folder } from 'lucide-react';
+import { Plus, Sparkles, Loader2, Copy, Maximize2, X, ChevronDown, ChevronRight, MoreVertical, Folder, Check, Clock, AlertTriangle } from 'lucide-react';
 import { Modal } from './ui/Modal';
-import { Entity, WorkspaceTreeNode, DeliverableCardPayload, InboxProcessJobStatus } from '../types';
+import { Entity, WorkspaceTreeNode, DeliverableCardPayload, InboxProcessJobStatus, ExtractionProgress } from '../types';
 import { useWorkspaceTree } from '../hooks/useEntities';
 import { api } from '../services/api';
 import {
@@ -206,7 +206,11 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
                   Workspace
                   <span className="zone-count">({allFileIds.length})</span>
                 </h3>
-                <div style={{ display: 'flex', gap: 6 }}>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <ExtractionProgressPill
+                    entityId={entity.id}
+                    onExtractionDone={handleRefresh}
+                  />
                   <ProcessInboxButton
                     entityId={entity.id}
                     inboxItemCount={tree ? countInboxItems(tree) : 0}
@@ -218,14 +222,20 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             )}
           </div>
           <div className="zone-content">
-            {previewNode ? (
+            {previewNode && (
               <FilePreview entityId={entity.id} node={previewNode} />
-            ) : treeLoading ? (
+            )}
+            
+            {treeLoading && !previewNode && (
               <div className="empty-zone">Loading...</div>
-            ) : !tree || tree.length === 0 ? (
+            )}
+            
+            {!treeLoading && (!tree || tree.length === 0) && !previewNode && (
               <div className="empty-zone">No files yet</div>
-            ) : (
-              <div className="resource-list">
+            )}
+            
+            {tree && tree.length > 0 && (
+              <div className="resource-list" style={{ display: previewNode ? 'none' : 'flex' }}>
                 <div className="select-all-row">
                   <span className="select-all-label">Select all</span>
                   <label className="resource-chat-toggle" onClick={e => e.stopPropagation()}>
@@ -651,6 +661,130 @@ function ProcessInboxButton({
 }
 
 // ---------------------------------------------------------------------------
+// Extraction progress pill (appears while background extraction runs)
+// ---------------------------------------------------------------------------
+
+function ExtractionProgressPill({
+  entityId,
+  onExtractionDone,
+}: {
+  entityId: string;
+  onExtractionDone: () => void;
+}) {
+  const [progress, setProgress] = useState<ExtractionProgress | null>(null);
+  const [showPopover, setShowPopover] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const prevStatusRef = useRef<string | null>(null);
+
+  // Poll every 2s
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const p = await api.workspace.getExtractionProgress(entityId);
+        if (cancelled) return;
+        // Detect running → idle/done transition → refresh tree
+        if (
+          prevStatusRef.current === 'running' &&
+          (p.status === 'idle' || p.status === 'done')
+        ) {
+          onExtractionDone();
+        }
+        prevStatusRef.current = p.status;
+        setProgress(p.status === 'idle' ? null : p);
+      } catch {
+        /* ignore */
+      }
+    };
+    void tick();
+    const interval = setInterval(tick, 2000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [entityId, onExtractionDone]);
+
+  // Click-outside to close popover
+  useEffect(() => {
+    if (!showPopover) return;
+    const handler = (e: MouseEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setShowPopover(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showPopover]);
+
+  if (!progress || progress.status === 'idle') return null;
+
+  const remaining = progress.remaining ?? 0;
+  const total = progress.total ?? 0;
+  const completed = progress.completed ?? 0;
+  const failed = progress.failed ?? 0;
+  const pct = total > 0 ? Math.round(((completed + failed) / total) * 100) : 0;
+
+  const tooltip =
+    `Extracting metadata: ${completed + failed} of ${total} files` +
+    (failed ? ` (${failed} failed)` : '');
+
+  return (
+    <div className="extraction-progress-wrapper" ref={wrapperRef}>
+      <button
+        className="extraction-progress-pill"
+        title={tooltip}
+        onClick={() => setShowPopover((p) => !p)}
+      >
+        <Loader2 size={12} className="zone-header-icon-btn-spin" />
+        <span className="extraction-progress-count">{remaining}</span>
+      </button>
+
+      {showPopover && (
+        <div className="extraction-progress-popover">
+          <div className="extraction-popover-header">
+            <span>Metadata Extraction</span>
+            <span className="extraction-popover-pct">{pct}%</span>
+          </div>
+          <div className="extraction-popover-bar">
+            <div
+              className="extraction-popover-bar-fill"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          {progress.current_file && (
+            <div className="extraction-popover-current">
+              Processing: {progress.current_file}
+            </div>
+          )}
+          <div className="extraction-popover-stats">
+            <span className="extraction-stat-done">
+              <Check size={12} /> {completed} done
+            </span>
+            <span className="extraction-stat-remaining">
+              <Clock size={12} /> {remaining} remaining
+            </span>
+            {failed > 0 && (
+              <span className="extraction-stat-failed">
+                <AlertTriangle size={12} /> {failed} failed
+              </span>
+            )}
+          </div>
+          {failed > 0 && progress.errors && progress.errors.length > 0 && (
+            <div className="extraction-popover-errors">
+              {progress.errors.slice(0, 5).map((e, i) => (
+                <div key={i} className="extraction-error-item">
+                  {e.name}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Recursive tree node
 // ---------------------------------------------------------------------------
 
@@ -726,61 +860,74 @@ function TreeNode({ node, depth, entityId, selectedNodeIds, onToggle, onOpen, on
         className="compact-row"
         ref={rowRef}
         onClick={handleClick}
-        style={{ paddingLeft: `${8 + depth * 16}px` }}
+        style={{ paddingLeft: `${4 + depth * 12}px` }}
       >
-        <div className="compact-row-left">
-          <div className="resource-icon compact-row-logo">
-            {isFolder ? (
-              <span style={{ fontSize: 14, cursor: 'pointer' }}>
-                {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              </span>
-            ) : (
-              <NodeIcon node={node} />
-            )}
-          </div>
-          <button
-            type="button"
-            className="compact-row-actions-trigger"
-            aria-label="Actions"
-            onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
-          >
-            <MoreVertical size={14} />
-          </button>
-          {menuOpen && (
-            <div className="compact-row-actions-menu" onClick={e => e.stopPropagation()}>
-              <button type="button" onClick={() => { setMenuOpen(false); handleRename(); }}>Rename</button>
-              {isFile && (
-                <button type="button" onClick={() => { setMenuOpen(false); void handleDownload(); }}>Download</button>
-              )}
-              <button
-                type="button"
-                className="compact-row-actions-menu-danger"
-                onClick={() => { setMenuOpen(false); handleDelete(); }}
-              >
-                Delete
-              </button>
-            </div>
+        <div className="compact-row-chevron" style={{ width: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {isFolder && (
+            <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', color: '#6b7280' }}>
+              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </span>
           )}
         </div>
+
+        <div className="resource-icon compact-row-logo">
+          <NodeIcon node={node} />
+        </div>
+
         <div className="resource-info compact-row-info">
           <div className="resource-name">{node.name}</div>
-          <div className="resource-meta">
-            {node.description
-              ? node.description
-              : isFile
-                ? formatBytes(node.size_bytes)
-                : `${node.children.length} item${node.children.length !== 1 ? 's' : ''}`}
-          </div>
+          {!isFile && node.children.length > 0 && (
+            <div className="resource-meta">{node.children.length}</div>
+          )}
         </div>
-        {isFile && (
-          <label className="resource-chat-toggle" title="Include in chat context" onClick={e => e.stopPropagation()}>
-            <input
-              type="checkbox"
-              checked={selectedNodeIds.has(node.id)}
-              onChange={() => onToggle(node.id)}
-            />
-          </label>
-        )}
+
+        <div className="compact-row-right">
+          <div className="compact-row-actions">
+            <button
+              type="button"
+              className="compact-row-actions-trigger"
+              aria-label="Actions"
+              onClick={e => { e.stopPropagation(); setMenuOpen(o => !o); }}
+            >
+              <MoreVertical size={14} />
+            </button>
+            {menuOpen && (
+              <div className="compact-row-actions-menu" onClick={e => e.stopPropagation()}>
+                <div style={{ padding: '8px 10px', fontSize: '11px', color: '#6b7280', borderBottom: '1px solid #e5e7eb', marginBottom: '4px', cursor: 'default' }}>
+                  <div style={{ marginBottom: 2, color: '#374151', fontWeight: 600 }}>File Info</div>
+                  {isFile && <div>Size: {formatBytes(node.size_bytes)}</div>}
+                  {isFile && <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={node.mime_type || ''}>Type: {node.name.includes('.') ? node.name.split('.').pop()?.toUpperCase() : 'FILE'}</div>}
+                  {node.description && (
+                    <div style={{ marginTop: 4, fontStyle: 'italic', display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={node.description}>
+                      {node.description}
+                    </div>
+                  )}
+                </div>
+                <button type="button" onClick={() => { setMenuOpen(false); handleRename(); }}>Rename</button>
+                {isFile && (
+                  <button type="button" onClick={() => { setMenuOpen(false); void handleDownload(); }}>Download</button>
+                )}
+                <button
+                  type="button"
+                  className="compact-row-actions-menu-danger"
+                  onClick={() => { setMenuOpen(false); handleDelete(); }}
+                >
+                  Delete
+                </button>
+              </div>
+            )}
+          </div>
+          
+          {isFile && (
+            <label className="resource-chat-toggle" title="Include in chat context" onClick={e => e.stopPropagation()}>
+              <input
+                type="checkbox"
+                checked={selectedNodeIds.has(node.id)}
+                onChange={() => onToggle(node.id)}
+              />
+            </label>
+          )}
+        </div>
       </div>
       {isFolder && expanded && node.children.map(child => (
         <TreeNode

@@ -16,6 +16,10 @@ Reproducible runs:
 
 Control sample size:
     SCHOLAR_COUNT=2 ../venv/bin/python tests/test_academic_randomized.py
+
+Explicit scholar selection (overrides random sampling):
+    SCHOLAR_NAMES="Terence Tao,Katie Bouman" \
+        ../venv/bin/python tests/test_academic_randomized.py
 """
 
 import json
@@ -56,19 +60,13 @@ PIPELINE_TIMEOUT = int(os.environ.get("PIPELINE_TIMEOUT", "480"))  # seconds
 PORT = 8879
 BASE = f"http://127.0.0.1:{PORT}"
 
-# Report sections expected in the generated markdown
-EXPECTED_REPORT_SECTIONS = [
-    "executive summary",
-    "research profile",
-    "impact analysis",
-    "authorship analysis",
-    "key publications",
-    "career trajectory",
-    "commercialization potential",
-    "collaboration network",
-    "evaluation scores",
-    "summary",
-    "vc recommendation",
+# v2 uses per-dim evaluation + narrative (no markdown report sections).
+# The 4 MECE dimension ids expected in the evaluations response:
+EXPECTED_DIMS = [
+    "academic_excellence",
+    "tech_transfer_experience",
+    "founder_potential",
+    "growth_trajectory",
 ]
 
 URL_STRATEGIES = ["single-homepage", "single-gs", "partial", "all"]
@@ -331,152 +329,104 @@ def validate_phase2(scholar: dict, papers_response: dict, expected: dict) -> Pha
 
 
 def validate_phase3_4(evaluations_response: dict, scholar_name: str) -> PhaseResult:
-    """Validate metrics computation (Phase 3) and AI evaluation (Phase 4).
+    """Validate dim evals (Phase 3/4) against the v2 response shape.
 
-    evaluations_response is the v2 EvaluationListResponse: {evaluations: [...]}
-    Each evaluation has dimensions dict with {score, explanation, evidence} per dimension,
-    plus computed_metrics, field_context, commercialization_signals.
+    evaluations_response is the v2 shape:
+    {dimensions: {dim_id: DimEvalResult|null}, narrative: ...,
+     peer_group: ..., red_flags: [...]}
     """
     r = PhaseResult()
 
-    evaluations = evaluations_response.get("evaluations", [])
-    if not evaluations:
-        r.warns.append("no evaluation record found")
+    dimensions = evaluations_response.get("dimensions", {})
+    r.info["dimensions_present"] = [k for k, v in dimensions.items() if v]
+
+    if not any(v for v in dimensions.values()):
+        r.warns.append("no scored dimensions found")
         r.info["has_evaluation"] = False
         return r
 
-    # Use the most recent evaluation
-    evaluation = evaluations[0]
     r.info["has_evaluation"] = True
-    r.info["evaluation_id"] = evaluation.get("id")
-    r.info["evaluation_type"] = evaluation.get("type")
-    r.info["evaluation_trigger"] = evaluation.get("trigger")
 
-    # ── Phase 3: Computed metrics ──
-    computed = evaluation.get("computed_metrics", {})
-    r.info["first_author_papers"] = computed.get("first_author_papers", 0)
-    r.info["last_author_papers"] = computed.get("last_author_papers", 0)
-    r.info["sole_author_papers"] = computed.get("sole_author_papers", 0)
-    r.info["first_author_citation_pct"] = computed.get("first_author_citation_pct")
+    # Validate each dimension
+    null_scores = []
+    for dim_id, dim_eval in dimensions.items():
+        if dim_eval is None:
+            null_scores.append(dim_id)
+            continue
+        score = dim_eval.get("score")
+        r.info[f"dim_{dim_id}_score"] = score
+        if score is None:
+            null_scores.append(dim_id)
+        elif not (0 <= score <= 100):
+            r.warns.append(f"dimension {dim_id} score={score} out of range [0,100]")
 
-    career_years = computed.get("career_years")
-    r.info["career_years"] = career_years
-    if career_years is not None and career_years <= 0:
-        r.warns.append(f"career_years={career_years} seems wrong")
+        mini_report = dim_eval.get("mini_report", "")
+        if not mini_report:
+            r.warns.append(f"dimension {dim_id} has no mini_report")
 
-    r.info["papers_per_year_avg"] = computed.get("papers_per_year_avg")
-    r.info["papers_per_year_recent"] = computed.get("papers_per_year_recent")
-    r.info["citation_growth_rate"] = computed.get("citation_growth_rate")
-    r.info["unique_coauthors"] = computed.get("unique_coauthors")
-    r.info["influential_paper_count"] = computed.get("influential_paper_count", 0)
-    r.info["top_venue_papers"] = computed.get("top_venue_papers", 0)
-    r.info["recent_5yr_papers"] = computed.get("recent_5yr_papers", 0)
+        evidence = dim_eval.get("evidence", [])
+        r.info[f"dim_{dim_id}_evidence_count"] = len(evidence)
 
-    # ── Phase 4: AI evaluation — dimension-based scores ──
-    dimensions = evaluation.get("dimensions", {})
-    r.info["dimensions_present"] = list(dimensions.keys())
+    if null_scores:
+        r.warns.append(f"null/missing dimension scores: {', '.join(null_scores)}")
 
-    if not dimensions:
-        r.warns.append("no dimensions in evaluation (scoring may have failed)")
-    else:
-        # Validate each dimension has score, explanation, evidence
-        null_scores = []
-        for dim_name, dim_data in dimensions.items():
-            score = dim_data.get("score") if isinstance(dim_data, dict) else None
-            explanation = dim_data.get("explanation", "") if isinstance(dim_data, dict) else ""
-            evidence = dim_data.get("evidence", []) if isinstance(dim_data, dict) else []
+    # Peer group
+    pg = evaluations_response.get("peer_group")
+    r.info["has_peer_group"] = pg is not None
+    if pg:
+        r.info["phase"] = pg.get("phase")
+        r.info["field"] = pg.get("field")
+        r.info["cohort_examples"] = pg.get("cohort_examples", [])
 
-            r.info[f"dim_{dim_name}_score"] = score
-            if score is None:
-                null_scores.append(dim_name)
-            elif not (0 <= score <= 100):
-                r.warns.append(f"dimension {dim_name} score={score} out of range [0,100]")
+    # Red flags
+    red_flags = evaluations_response.get("red_flags", [])
+    r.info["red_flag_count"] = len(red_flags)
 
-            if not explanation:
-                r.warns.append(f"dimension {dim_name} has no explanation")
-
-        if null_scores:
-            r.warns.append(f"null dimension scores: {', '.join(null_scores)}")
-
-    # Commercialization signals (structured data)
-    comm = evaluation.get("commercialization_signals", {})
-    r.info["has_commercialization_signals"] = bool(comm)
-    if isinstance(comm, dict):
-        r.info["patents_found"] = len(comm.get("patents", []))
-        r.info["startups_found"] = len(comm.get("startups", []))
-        r.info["industry_collabs_found"] = len(comm.get("industry_collabs", []))
-    elif isinstance(comm, list):
-        r.info["commercialization_items"] = len(comm)
-
-    # Field context
-    fc = evaluation.get("field_context", {})
-    r.info["has_field_context"] = bool(fc)
-    if fc:
-        r.info["primary_field"] = fc.get("primary_field")
-        r.info["percentile_estimate"] = fc.get("percentile_estimate")
-
-    # Delta (if this is a re-evaluation)
-    delta = evaluation.get("delta")
-    r.info["has_delta"] = delta is not None
+    # Narrative
+    narrative = evaluations_response.get("narrative")
+    r.info["has_narrative"] = narrative is not None
+    if narrative:
+        r.info["narrative_headline"] = narrative.get("headline", "")
 
     return r
 
 
-def validate_phase5(client, scholar_id: str, reports_response: dict, scholar_name: str) -> PhaseResult:
-    """Validate enhanced report generation.
+def validate_phase5(client, scholar_id: str, evaluations_response: dict, scholar_name: str) -> PhaseResult:
+    """Validate narrative synthesis.
 
-    reports_response is the v2 ReportListResponse: {reports: [{id, filename, report_type, created_at}]}
-    Content requires a second fetch via GET /academic/scholars/{id}/reports/{report_id}.
+    In v2 the narrative lives inside the evaluations response and in
+    narrative-history. We validate the narrative headline + summary +
+    open_questions rather than fetching a legacy .md report file.
     """
     r = PhaseResult()
 
-    reports = reports_response.get("reports", [])
-    if not reports:
-        r.fails.append("no reports generated")
-        r.passed = False
+    narrative = evaluations_response.get("narrative")
+    if not narrative:
+        r.warns.append("no narrative generated")
         return r
 
-    # Fetch the content of the first (most recent) report
-    report_meta = reports[0]
-    report_id = report_meta.get("id")
-    r.info["report_id"] = report_id
-    r.info["report_type"] = report_meta.get("report_type")
-    r.info["report_filename"] = report_meta.get("filename")
+    headline = narrative.get("headline", "")
+    summary = narrative.get("summary", "")
+    r.info["narrative_headline"] = headline
+    r.info["content_length"] = len(summary)
 
-    resp = client.get(f"/academic/scholars/{scholar_id}/reports/{report_id}")
-    if resp.status_code != 200:
-        r.fails.append(f"failed to fetch report content: HTTP {resp.status_code}")
-        r.passed = False
-        return r
+    if len(summary) < 100:
+        r.warns.append(f"narrative summary too short ({len(summary)} chars)")
 
-    report = resp.json()
-    content = report.get("content", "") or ""
-    r.info["content_length"] = len(content)
-
-    if len(content) < 200:
-        r.fails.append(f"report too short ({len(content)} chars)")
-        r.passed = False
-        return r
-
-    # Scholar name should appear in report
-    if scholar_name.lower() not in content.lower():
-        # Try partial match (first name or last name)
+    # Scholar name should appear in narrative
+    combined = f"{headline} {summary}".lower()
+    if scholar_name.lower() not in combined:
         name_parts = scholar_name.lower().split()
-        if not any(part in content.lower() for part in name_parts if len(part) > 2):
-            r.warns.append("scholar name not found in report content")
+        if not any(part in combined for part in name_parts if len(part) > 2):
+            r.warns.append("scholar name not found in narrative")
 
-    # Count section headers found (case-insensitive)
-    content_lower = content.lower()
-    found_sections = [s for s in EXPECTED_REPORT_SECTIONS if s in content_lower]
-    r.info["sections_found"] = len(found_sections)
-    r.info["sections_matched"] = found_sections
+    # Open questions (v2 replaces section-header check)
+    open_q = narrative.get("open_questions", [])
+    r.info["open_questions_count"] = len(open_q)
 
-    # With the enhanced pipeline, we expect at least 4 of the known sections
-    if len(found_sections) < 4:
-        r.warns.append(
-            f"only {len(found_sections)}/{len(EXPECTED_REPORT_SECTIONS)} expected sections found: "
-            f"{found_sections}"
-        )
+    # Per-dim highlights
+    highlights = narrative.get("per_dim_highlights", [])
+    r.info["dim_highlights_count"] = len(highlights)
 
     return r
 
@@ -566,19 +516,15 @@ def run_scholar_test(client, scholar_entry: dict) -> ScholarResult:
     r = client.get(f"/academic/scholars/{scholar_id}/papers?limit=100")
     papers_response = r.json() if r.status_code == 200 else {"papers": [], "summary": {}, "total": 0}
 
-    # Evaluations — v2 returns {evaluations: [...]} with dimension-based format
+    # Evaluations — v2 shape: {dimensions, narrative, peer_group, red_flags}
     r = client.get(f"/academic/scholars/{scholar_id}/evaluations")
-    evaluations_response = r.json() if r.status_code == 200 else {"evaluations": []}
-
-    # Reports — v2 returns {reports: [{id, filename, report_type, created_at}]}
-    r = client.get(f"/academic/scholars/{scholar_id}/reports")
-    reports_response = r.json() if r.status_code == 200 else {"reports": []}
+    evaluations_response = r.json() if r.status_code == 200 else {"dimensions": {}}
 
     # ── Validate each phase ──
     result.phase1 = validate_phase1(scholar, expected, had_gs_url)
     result.phase2 = validate_phase2(scholar, papers_response, expected)
     result.phase3_4 = validate_phase3_4(evaluations_response, name)
-    result.phase5 = validate_phase5(client, scholar_id, reports_response, name)
+    result.phase5 = validate_phase5(client, scholar_id, evaluations_response, name)
 
     return result
 
@@ -685,12 +631,10 @@ def print_result(result: ScholarResult):
     p5 = result.phase5
     print(f"\nPhase 5 — Enhanced Report:")
     print(f"  Report ID: {p5.info.get('report_id', 'N/A')}")
-    print(f"  Report type: {p5.info.get('report_type', 'N/A')}")
-    print(f"  Content length: {p5.info.get('content_length', 0)} chars")
-    print(f"  Sections found: {p5.info.get('sections_found', 0)}/{len(EXPECTED_REPORT_SECTIONS)}")
-    matched = p5.info.get('sections_matched', [])
-    if matched:
-        print(f"  Matched: {matched}")
+    print(f"  Headline: {p5.info.get('narrative_headline', 'N/A')[:80]}")
+    print(f"  Summary length: {p5.info.get('content_length', 0)} chars")
+    print(f"  Open questions: {p5.info.get('open_questions_count', 0)}")
+    print(f"  Dim highlights: {p5.info.get('dim_highlights_count', 0)}")
     for f in p5.fails:
         print(f"  [FAIL] {f}")
     for w in p5.warns:
@@ -757,6 +701,37 @@ def print_summary(results: list[ScholarResult], seed: int, total_elapsed: int):
 
 # ── Main ──────────────────────────────────────────────────────
 
+
+def _seed_test_config_dir() -> None:
+    """Copy production academic config files into the isolated test config dir.
+
+    The evaluation pipeline reads `continuous_tasks.json`, `dimensions.json`,
+    `field_archetypes.json`, `heartbeat.json`, plus the `digests/` and
+    `ranking_presets/` subdirs. Any missing file crashes bootstrap on
+    first run, so we copy them wholesale from the repo's `data/config/`
+    tree before the server starts.
+    """
+    src_config = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__), "..", "..", "data", "config"
+        )
+    )
+    if not os.path.isdir(src_config):
+        raise SystemExit(
+            f"test setup: source config dir not found at {src_config}"
+        )
+    os.makedirs(TEST_CONFIG_DIR, exist_ok=True)
+    for entry in os.listdir(src_config):
+        src_path = os.path.join(src_config, entry)
+        dst_path = os.path.join(TEST_CONFIG_DIR, entry)
+        if os.path.isdir(src_path):
+            if os.path.exists(dst_path):
+                shutil.rmtree(dst_path)
+            shutil.copytree(src_path, dst_path)
+        else:
+            shutil.copy2(src_path, dst_path)
+
+
 def main():
     import httpx
 
@@ -764,6 +739,12 @@ def main():
     if os.path.exists(TEST_DIR):
         shutil.rmtree(TEST_DIR)
     os.makedirs(TEST_DIR, exist_ok=True)
+
+    # Seed the isolated config dir with the production config files
+    # the evaluation pipeline depends on. Without this,
+    # `load_continuous_tasks` raises FileNotFoundError on the first
+    # bootstrap and every scholar hangs in `evaluating` until timeout.
+    _seed_test_config_dir()
 
     # Load test scholars
     scholars_file = os.path.join(
@@ -773,14 +754,28 @@ def main():
         data = json.load(f)
     all_scholars = data["scholars"]
 
-    # Random selection
-    random.seed(SEED)
-    count = min(SCHOLAR_COUNT, len(all_scholars))
-    selected = random.sample(all_scholars, count)
-
-    print(f"Random seed: {SEED}")
+    # Selection: explicit names override random sampling so a caller
+    # can reproduce a specific scholar mix (e.g. for debugging a
+    # pipeline change).
+    explicit = os.environ.get("SCHOLAR_NAMES", "").strip()
+    if explicit:
+        wanted = [n.strip() for n in explicit.split(",") if n.strip()]
+        by_name = {s["name"]: s for s in all_scholars}
+        missing = [n for n in wanted if n not in by_name]
+        if missing:
+            raise SystemExit(
+                f"SCHOLAR_NAMES included unknown scholars: {missing}. "
+                f"Known: {sorted(by_name)}"
+            )
+        selected = [by_name[n] for n in wanted]
+        print(f"Explicit selection: {[s['name'] for s in selected]}")
+    else:
+        random.seed(SEED)
+        count = min(SCHOLAR_COUNT, len(all_scholars))
+        selected = random.sample(all_scholars, count)
+        print(f"Random seed: {SEED}")
+        print(f"Selected {count} scholars: {[s['name'] for s in selected]}")
     print(f"Test dir: {TEST_DIR}")
-    print(f"Selected {count} scholars: {[s['name'] for s in selected]}")
 
     # Start server
     print("\nStarting isolated test server...")

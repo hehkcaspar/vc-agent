@@ -576,8 +576,9 @@ The server computes an **effective** deep-agent flag per request:
 use_deep_agent = body.use_deep_agent if body.use_deep_agent is not None else CHAT_USE_DEEP_AGENT
 ```
 
-- **`use_deep_agent` true:** LangChain **Deep Agents** (`create_deep_agent`) with entity-scoped tools (workspace-aware tools in `portfolio_deep_agent.py`). The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API and **poll** job status for step text.
-- **`use_deep_agent` false:** one-shot model call (`generate_with_context`). Returns **`200 OK`** with the assistant message in the body (no job).
+- **`agent_mode: "react"`** (or legacy `use_deep_agent: true`): ReAct agent (`langchain.agents.create_agent` in `agent_harness.py`) with 13 workspace tools + SummarizationMiddleware. The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API and **poll** job status for step text.
+- **`agent_mode: "deep_agent"`**: Legacy Deep Agent (`deepagents.create_deep_agent` in `deep_agent_compat.py`). Same async job pattern. Removable — falls back to ReAct if `deep_agent_compat.py` is deleted.
+- **`agent_mode: "one_shot"`** (or legacy `use_deep_agent: false`): one-shot model call. Returns **`200 OK`** with the assistant message in the body (no job).
 
 The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) also accept `use_deep_agent` and `model_profile_id`, so shortcut runs can follow the same mode/profile selection.
 
@@ -592,19 +593,16 @@ The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `
 | `GEMINI_METADATA_EXTRACTION_MODEL` | Presets such as `extract_info` and **node metadata pre-process** (file lookup JSON); default `gemini-3.1-flash-lite-preview` |
 | `CHAT_USE_DEEP_AGENT` | Server default for deep agent when request omits `use_deep_agent` |
 | `CHAT_DEFAULT_MODEL_PROFILE` | Default profile id if client omits `model_profile_id` |
-| `CHAT_AGENT_RECURSION_LIMIT` | LangGraph recursion limit (default 50) |
+| `CHAT_AGENT_RECURSION_LIMIT` | LangGraph recursion limit (default 100) |
 | `WORKSPACE_MAX_FILE_BYTES` | Max upload size per file (default 50 MB) |
 | `WORKSPACE_VERSION_RETENTION_DAYS` | How long old file versions are kept (default 30 days) |
 | `MOONSHOT_API_KEY`, `KIMI_CODE_API_KEY`, URLs, `KIMI_CODE_MODEL`, etc. | Moonshot Open Platform vs Kimi Code routing — see `backend/app/config.py`, `backend/.env_sample`, `model_profiles.py` |
 
 Other: `CHAT_ENABLE_GOOGLE_SEARCH`, attachment/history limits. Deep-agent steps are pushed to `chat_completion_jobs.step_detail` for UI polling.
 
-**Deep-agent workspace tools (summary):**
+**Deep-agent file handling:** In agent mode, user-selected files are passed as a **pointer list** (path, type, size, description) — no file content is pre-injected. The agent reads files on demand via `workspace_read_file`. For PDFs, Gemini receives compressed native binary (multimodal tool response); Kimi receives pypdf-extracted text. Office formats (docx/pptx/xlsx + legacy doc/ppt/xls via LibreOffice) are extracted to text. No file count limit.
 
-- **`portfolio_list_workspace` / `portfolio_search_workspace`** — discover workspace files and folders.
-- **`portfolio_read_file`** — read file content (text payloads, parsed PDF/Office text).
-- **`portfolio_create_file`** — create a new file in the workspace tree.
-- **`portfolio_edit_file`** — overwrite/update an existing file (creates a new version).
+**Deep-agent workspace tools (13 total):** `workspace_get_tree`, `workspace_list_files`, `workspace_read_file`, `workspace_search_files`, `workspace_create_folder`, `workspace_move`, `workspace_rename`, `workspace_write_file`, `workspace_annotate`, `workspace_delete`, `workspace_file_versions`, `workspace_restore_version`, `workspace_history`.
 
 ### `GET /entities/{entity_id}/chat/presets`
 
@@ -647,7 +645,7 @@ Send a user turn. JSON body:
 - **`202 Accepted`** — Deep agent path. Body (`ChatMessageJobAccepted`): `job_id`, `user_message` (already stored), `warnings`. Client should **poll** `GET .../jobs/{job_id}` until `status` is `succeeded` or `failed`; then load session messages or read `assistant_message` from the job payload.
 - **`200 OK`** — Legacy path. Body (`ChatMessageResult`): `assistant_message`, `warnings`.
 
-Legacy: multimodal context where supported. Harness: text-inline preamble from selections; tools can fetch the rest. Search behavior follows the active profile when enabled.
+One-shot: files inlined (Gemini native binary / Kimi text). Agent mode: pointer list only — agent reads files on demand via tools. Search behavior follows the active profile when enabled.
 
 ### `GET /entities/{entity_id}/chat/sessions/{session_id}/jobs/{job_id}`
 

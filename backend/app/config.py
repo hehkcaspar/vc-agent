@@ -32,7 +32,10 @@ class Settings(BaseSettings):
 
     # Deep Agents harness (LangChain). When False, chat uses direct google-genai / Kimi path.
     CHAT_USE_DEEP_AGENT: bool = False
-    CHAT_AGENT_RECURSION_LIMIT: int = 50
+    # Tri-state mode: "one_shot" | "react" | "deep_agent". Used when client
+    # does not send an explicit agent_mode or use_deep_agent.
+    CHAT_DEFAULT_AGENT_MODE: str = "one_shot"
+    CHAT_AGENT_RECURSION_LIMIT: int = 100
     CHAT_DEFAULT_MODEL_PROFILE: str = "gemini_google"
 
     # Gemini Interactions API: TTL in days (paid tier retains 55 days; 0 = free tier / disabled)

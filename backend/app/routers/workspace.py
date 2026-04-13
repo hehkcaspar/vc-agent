@@ -673,6 +673,16 @@ async def get_metadata_preprocess_job(
     )
 
 
+@router.get("/extraction-progress")
+async def get_extraction_progress(entity_id: str):
+    """Background metadata extraction progress for this entity."""
+    from app.services.metadata_preprocess_jobs import get_extraction_progress as _get
+    progress = await _get(entity_id)
+    if progress is None:
+        return {"status": "idle"}
+    return progress
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Process Inbox (batch intake)
 # ──────────────────────────────────────────────────────────────────────

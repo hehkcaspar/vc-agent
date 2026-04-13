@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Trash2, Bot, ArrowUp, ChevronDown, FileText, ArrowUpRight } from 'lucide-react';
+import { Plus, Trash2, Bot, ArrowUp, ChevronDown, FileText, ArrowUpRight, Zap } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { useChatModelProfile } from '../context/ChatModelProfileContext';
 import { parseDeliverableCardMessage } from '../lib/chatArtifactCard';
@@ -10,7 +10,12 @@ import {
   CLI_SPINNER_DOTS_INTERVAL_MS,
 } from '../lib/cliSpinnerDots';
 import { api } from '../services/api';
-import type { ChatMessage, ChatSession, DeliverableCardPayload, PresetInfo } from '../types';
+import type { ChatMessage, ChatSession, ChatModelProfileId, DeliverableCardPayload, PresetInfo, AgentMode } from '../types';
+
+const MODEL_OPTIONS: { value: ChatModelProfileId; label: string }[] = [
+  { value: 'gemini_google', label: 'Gemini' },
+  { value: 'kimi_moonshot', label: 'Kimi' },
+];
 
 function formatSessionTimestamp(iso: string): string {
   try {
@@ -36,17 +41,19 @@ function roleLabel(role: string): string {
   return role;
 }
 
-const CHAT_AGENT_PREF_KEY = 'vc_chat_use_deep_agent';
+const AGENT_MODE_PREF_KEY = 'vc_chat_agent_mode';
 
-function readChatAgentPref(): boolean {
+function readAgentModePref(): AgentMode {
   try {
-    const v = localStorage.getItem(CHAT_AGENT_PREF_KEY);
-    if (v === '0' || v === 'false') return false;
-    if (v === '1' || v === 'true') return true;
+    const v = localStorage.getItem(AGENT_MODE_PREF_KEY);
+    if (v === 'one_shot' || v === 'react') return v;
+    // Migrate old boolean pref
+    const old = localStorage.getItem('vc_chat_use_deep_agent');
+    if (old === '0' || old === 'false') return 'one_shot';
   } catch {
     /* ignore */
   }
-  return true;
+  return 'react'; // Default: react mode on
 }
 
 interface EntityConversationProps {
@@ -62,7 +69,7 @@ export function EntityConversation({
   onArtifactsChanged,
   onViewDeliverable,
 }: EntityConversationProps) {
-  const { profileId } = useChatModelProfile();
+  const { profileId, setProfileId } = useChatModelProfile();
   const sessionIdRef = useRef<string | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const onArtifactsChangedRef = useRef(onArtifactsChanged);
@@ -83,26 +90,29 @@ export function EntityConversation({
   const [agentStatus, setAgentStatus] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
-  const [chatAgentOn, setChatAgentOn] = useState(readChatAgentPref);
+  const [agentMode, setAgentMode] = useState<AgentMode>(readAgentModePref);
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [spinnerFrame, setSpinnerFrame] = useState(0);
   const [showModelSwapConfirm, setShowModelSwapConfirm] = useState(false);
-  const pendingSendRef = useRef<(() => void) | null>(null);
+  const pendingModelRef = useRef<ChatModelProfileId | null>(null);
 
-  const toggleChatAgent = useCallback(() => {
-    setChatAgentOn((on) => {
-      const next = !on;
+  const toggleAgentMode = useCallback(() => {
+    setAgentMode((cur) => {
+      const next: AgentMode = cur === 'one_shot' ? 'react' : 'one_shot';
       try {
-        localStorage.setItem(CHAT_AGENT_PREF_KEY, next ? '1' : '0');
+        localStorage.setItem(AGENT_MODE_PREF_KEY, next);
       } catch {
         /* ignore */
       }
       return next;
     });
   }, []);
+
+  // Derived for backwards-compat and convenience
+  const chatAgentOn = agentMode !== 'one_shot';
 
   const refreshSessions = useCallback(async () => {
     const list = await api.chat.listSessions(entityId);
@@ -143,7 +153,12 @@ export function EntityConversation({
     if (!sessionId) return;
     let cancelled = false;
     api.chat.getSession(entityId, sessionId).then((d) => {
-      if (!cancelled) setMessages(d.messages);
+      if (cancelled) return;
+      setMessages(d.messages);
+      // Resume polling if the backend has an active agent job for this session.
+      if (d.active_job_id) {
+        setAgentJob({ sessionId, jobId: d.active_job_id });
+      }
     });
     return () => {
       cancelled = true;
@@ -375,7 +390,7 @@ export function EntityConversation({
         text,
         node_ids: Array.from(selectedNodeIds),
         model_profile_id: profileId,
-        use_deep_agent: chatAgentOn,
+        agent_mode: agentMode,
       });
       setInput('');
       if (out.kind === 'accepted') {
@@ -406,20 +421,23 @@ export function EntityConversation({
   const handleSend = async () => {
     const text = input.trim();
     if (!text || !sessionId) return;
+    await doSend();
+  };
 
-    // Confirm before switching from Gemini to Kimi (destroys Interactions API chain)
+  /** Gate model changes: warn when switching away from Gemini with an active chain. */
+  const handleModelChange = (next: ChatModelProfileId) => {
+    if (next === profileId) return;
     const currentSession = sessions.find((s) => s.id === sessionId);
     if (
-      profileId === 'kimi_moonshot' &&
+      next === 'kimi_moonshot' &&
       !chatAgentOn &&
       currentSession?.has_gemini_chain
     ) {
-      pendingSendRef.current = doSend;
+      pendingModelRef.current = next;
       setShowModelSwapConfirm(true);
       return;
     }
-
-    await doSend();
+    setProfileId(next);
   };
 
   const handleRunPreset = async (presetId: string) => {
@@ -431,7 +449,7 @@ export function EntityConversation({
         node_ids: Array.from(selectedNodeIds),
         session_id: sessionId ?? undefined,
         model_profile_id: profileId,
-        use_deep_agent: chatAgentOn,
+        agent_mode: agentMode,
       });
       if (res.kind === 'accepted') {
         // Deep-agent path: dispatched as background job. The polling effect
@@ -661,32 +679,50 @@ export function EntityConversation({
                   aria-checked={chatAgentOn}
                   aria-label={chatAgentOn ? 'Agent on' : 'Agent off'}
                   className={
-                    chatAgentOn
-                      ? 'entity-conversation-agent-pill entity-conversation-agent-pill--on'
-                      : 'entity-conversation-agent-pill'
+                    'entity-conversation-agent-pill' +
+                    (chatAgentOn ? ' entity-conversation-agent-pill--react' : '')
                   }
-                  onClick={() => toggleChatAgent()}
+                  onClick={() => toggleAgentMode()}
                   disabled={busy || agentActiveHere}
                   title={
                     chatAgentOn
-                      ? 'Agent mode is on: multi-step tools. Click to turn off for quick one-shot replies.'
-                      : 'Agent mode is off: one-shot reply. Click to turn on for tools and longer runs.'
+                      ? 'ReAct agent: workspace tools + context management. Click to turn off.'
+                      : 'One-shot mode: quick reply, no tools. Click to enable agent.'
                   }
                 >
                   <span className="entity-conversation-agent-pill__icon" aria-hidden>
-                    <Bot size={16} strokeWidth={1.75} aria-hidden />
+                    {chatAgentOn ? (
+                      <Zap size={16} strokeWidth={1.75} />
+                    ) : (
+                      <Bot size={16} strokeWidth={1.75} />
+                    )}
                   </span>
-                  <span className="entity-conversation-agent-pill__label">Agent</span>
+                  <span className="entity-conversation-agent-pill__label">
+                    {chatAgentOn ? 'ReAct' : 'Agent'}
+                  </span>
                   <span
                     className={
-                      chatAgentOn
-                        ? 'entity-conversation-agent-pill__state entity-conversation-agent-pill__state--on'
-                        : 'entity-conversation-agent-pill__state entity-conversation-agent-pill__state--off'
+                      'entity-conversation-agent-pill__state' +
+                      (chatAgentOn
+                        ? ' entity-conversation-agent-pill__state--on'
+                        : ' entity-conversation-agent-pill__state--off')
                     }
                   >
                     {chatAgentOn ? 'On' : 'Off'}
                   </span>
                 </button>
+                <label className="entity-conversation-model-pill" title="LLM used for this chat">
+                  <select
+                    className="entity-conversation-model-select"
+                    value={profileId}
+                    onChange={(e) => handleModelChange(e.target.value as ChatModelProfileId)}
+                    disabled={busy || agentActiveHere}
+                  >
+                    {MODEL_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
+                  </select>
+                </label>
               </div>
               <div className="entity-conversation-compose-toolbar-right">
                 <button
@@ -768,7 +804,7 @@ export function EntityConversation({
           isOpen
           onClose={() => {
             setShowModelSwapConfirm(false);
-            pendingSendRef.current = null;
+            pendingModelRef.current = null;
           }}
           size="narrow"
           title="Switch to Kimi?"
@@ -787,7 +823,7 @@ export function EntityConversation({
                 className="btn-secondary"
                 onClick={() => {
                   setShowModelSwapConfirm(false);
-                  pendingSendRef.current = null;
+                  pendingModelRef.current = null;
                 }}
               >
                 Cancel
@@ -797,12 +833,12 @@ export function EntityConversation({
                 className="entity-chat-delete-confirm entity-chat-delete-confirm--danger"
                 onClick={() => {
                   setShowModelSwapConfirm(false);
-                  const fn = pendingSendRef.current;
-                  pendingSendRef.current = null;
-                  if (fn) void fn();
+                  const next = pendingModelRef.current;
+                  pendingModelRef.current = null;
+                  if (next) setProfileId(next);
                 }}
               >
-                Switch &amp; Send
+                Switch
               </button>
             </div>
         </Modal>

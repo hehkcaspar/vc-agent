@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, ArrowRight, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Play, Square, ChevronDown } from 'lucide-react';
 import { TagMenu } from './TagMenu';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import {
-  useScholarReports,
+  useScholarNarratives,
   useScholarPapers,
   useScholarEvaluations,
   useScholarEvents,
@@ -12,12 +12,13 @@ import {
 } from '../../hooks/useAcademic';
 import { showToast } from '../../lib/appToast';
 import { academicApi } from '../../services/academicApi';
+import { Modal } from '../ui/Modal';
 import { ScholarConversation } from './ScholarConversation';
 import { TimelineTab } from './TimelineTab';
 import { EvaluationTab } from './EvaluationTab';
 import { PublicationsTab } from './PublicationsTab';
 import { ProfilesTab } from './ProfilesTab';
-import type { Scholar, Report, TrackingPriority, UserSettableStatus } from '../../types/academic';
+import type { Scholar, NarrativeReport, TrackingPriority, UserSettableStatus } from '../../types/academic';
 import {
   SCHOLAR_STATUS_LABELS,
   PRIORITY_LABELS,
@@ -37,47 +38,92 @@ type ContentTab = 'report' | 'timeline' | 'evaluation' | 'publications' | 'profi
 export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailProps) {
   const { scholars: allScholars, mutate: mutateScholars } = useScholars();
   const scholar = allScholars.find((s) => s.id === scholarProp.id) ?? scholarProp;
-  const { reports, mutate: mutateReports } = useScholarReports(scholar.id);
+  const { narratives, mutate: mutateNarratives } = useScholarNarratives(scholar.id);
   const { papersData, mutate: mutatePapers } = useScholarPapers(scholar.id);
-  const { evaluations, mutate: mutateEvaluations } = useScholarEvaluations(scholar.id);
-  const { events, mutate: mutateEvents } = useScholarEvents(scholar.id);
+  const { evalData, mutate: mutateEvaluations } = useScholarEvaluations(scholar.id);
+  const [eventSortBy, setEventSortBy] = useState<'discovered' | 'event_date'>('discovered');
+  const { events, mutate: mutateEvents } = useScholarEvents(scholar.id, eventSortBy);
   const { channels, mutate: mutateChannels } = useScholarChannels(scholar.id);
 
   // Auto-refresh while evaluating (every 5s)
   useEffect(() => {
     if (scholar.status !== 'evaluating') return;
     const id = setInterval(() => {
-      mutateReports();
+      mutateNarratives();
       mutatePapers();
       mutateEvaluations();
       mutateEvents();
     }, 5000);
     return () => clearInterval(id);
-  }, [scholar.status, mutateReports, mutatePapers, mutateEvaluations, mutateEvents]);
+  }, [scholar.status, mutateNarratives, mutatePapers, mutateEvaluations, mutateEvents]);
 
-  const [selectedReport, setSelectedReport] = useState<Report | null>(null);
-  const [reportContent, setReportContent] = useState<string | null>(null);
+  const [selectedNarrativeIdx, setSelectedNarrativeIdx] = useState(0);
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [contentTab, setContentTab] = useState<ContentTab>('report');
+  const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
+  const [showConfirmEval, setShowConfirmEval] = useState(false);
+  const versionSelectorRef = useRef<HTMLDivElement>(null);
 
-  // Auto-select the first report when reports load
+  const selectedNarrative = narratives[selectedNarrativeIdx] ?? null;
+
+  // Reset index when narratives list changes (e.g. new evaluation completes)
   useEffect(() => {
-    if (reports.length > 0 && !selectedReport) {
-      handleSelectReport(reports[0]);
-    }
-  }, [reports]);
+    setSelectedNarrativeIdx(0);
+  }, [narratives.length]);
 
-  const latestEval = evaluations[0] ?? null;
+  // Close version dropdown on outside click
+  useEffect(() => {
+    if (!versionDropdownOpen) return;
+    const handleClick = (e: MouseEvent) => {
+      if (versionSelectorRef.current && !versionSelectorRef.current.contains(e.target as Node)) {
+        setVersionDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, [versionDropdownOpen]);
+
+  const dimEvals = evalData?.dimensions ?? {};
   const papers = papersData?.papers ?? [];
   const papersSummary = papersData?.summary;
 
-  // Profile links from identity
+  // Profile links from identity — ordered by importance
   const identity = scholar.identity ?? {};
-  const profileLinks: { label: string; url: string }[] = [];
-  if (identity.google_scholar?.url) profileLinks.push({ label: 'Google Scholar', url: identity.google_scholar.url });
-  if (identity.semantic_scholar?.url) profileLinks.push({ label: 'Semantic Scholar', url: identity.semantic_scholar.url });
-  if (identity.linkedin?.url) profileLinks.push({ label: 'LinkedIn', url: identity.linkedin.url });
-  if (identity.homepage?.url) profileLinks.push({ label: 'Homepage', url: identity.homepage.url });
+  const KNOWN_PROFILE_SOURCES: { key: string; label: string }[] = [
+    { key: 'google_scholar', label: 'Google Scholar' },
+    { key: 'semantic_scholar', label: 'Semantic Scholar' },
+    { key: 'orcid', label: 'ORCID' },
+    { key: 'dblp', label: 'DBLP' },
+    { key: 'linkedin', label: 'LinkedIn' },
+    { key: 'github', label: 'GitHub' },
+    { key: 'twitter', label: 'Twitter' },
+    { key: 'homepage', label: 'Homepage' },
+  ];
+  const knownKeys = new Set(KNOWN_PROFILE_SOURCES.map((s) => s.key));
+  const customSources = Object.keys(identity)
+    .filter((k) => !knownKeys.has(k) && identity[k]?.url)
+    .map((k) => ({ key: k, label: k.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) }));
+  const allProfileSources = [...KNOWN_PROFILE_SOURCES, ...customSources];
+  const profileLinks = allProfileSources
+    .filter((s) => identity[s.key]?.url)
+    .map((s) => {
+      const entry = identity[s.key] as Record<string, unknown>;
+      const rawId =
+        (entry.id as string | undefined) ??
+        (entry.handle as string | undefined) ??
+        (entry.user as string | undefined) ??
+        (entry.author as string | undefined);
+      return {
+        sourceKey: s.key,
+        label: s.label,
+        url: entry.url as string,
+        id: rawId,
+        confidence: entry.confidence as string | undefined,
+        verifiedBy: entry.verified_by as string | undefined,
+        llmConfidence: entry.llm_confidence as number | undefined,
+        llmReason: entry.llm_reason as string | undefined,
+      };
+    });
 
   const handlePriorityChange = useCallback(
     async (priority: TrackingPriority) => {
@@ -107,6 +153,8 @@ export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailPro
     setIsEvaluating(true);
     try {
       await academicApi.scholars.evaluate(scholar.id);
+      showToast(`Evaluation started for ${scholar.name}`, 'success');
+      mutateScholars();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Evaluate failed', 'error');
     } finally {
@@ -114,34 +162,25 @@ export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailPro
     }
   };
 
-  const handleSelectReport = async (report: Report) => {
-    setSelectedReport(report);
-    setContentTab('report');
-    if (!report.content) {
-      try {
-        const full = await academicApi.scholars.report(scholar.id, report.id);
-        setReportContent(full.content ?? null);
-      } catch {
-        setReportContent('Failed to load report.');
-      }
-    } else {
-      setReportContent(report.content);
+  const handleStop = async () => {
+    try {
+      await academicApi.scholars.stop(scholar.id);
+      showToast('Evaluation stopped', 'success');
+      mutateScholars();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'Stop failed', 'error');
     }
   };
 
-  const handleDeleteReport = async (reportId: string) => {
-    if (!confirm('Delete this report?')) return;
-    try {
-      await academicApi.scholars.deleteReport(scholar.id, reportId);
-      mutateReports();
-      if (selectedReport?.id === reportId) {
-        setSelectedReport(null);
-        setReportContent(null);
-      }
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
-    }
-  };
+  const isRunning = isEvaluating || scholar.status === 'evaluating';
+
+  // Derive last-evaluated timestamp from the latest narrative id
+  const lastEvaluated = useMemo(() => {
+    if (narratives.length === 0) return null;
+    const id = narratives[0].id;
+    if (!id) return null;
+    return id.slice(0, 10);
+  }, [narratives]);
 
   return (
     <div className="academic-detail">
@@ -170,6 +209,30 @@ export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailPro
               ]}
               onSelect={handlePriorityChange}
             />
+
+            <div className="header-eval-actions">
+              {isRunning ? (
+                <button
+                  className="btn-eval btn-eval-stop"
+                  onClick={handleStop}
+                  title="Stop evaluation"
+                >
+                  <Square size={12} />
+                  <span>Stop</span>
+                  <span className="pulse-dot" />
+                </button>
+              ) : (
+                <button
+                  className="btn-eval btn-eval-run"
+                  onClick={() => setShowConfirmEval(true)}
+                  disabled={scholar.status === 'archived'}
+                  title={scholar.status === 'archived' ? 'Unarchive to run evaluations' : 'Run full evaluation pipeline'}
+                >
+                  <Play size={12} />
+                  <span>Run Evaluation</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {scholar.affiliation && (
@@ -190,20 +253,30 @@ export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailPro
               {papers.length > 0 && (
                 <span className="metric-badge">Papers: <strong>{papers.length}</strong></span>
               )}
+              {lastEvaluated && (
+                <span className="metric-badge last-evaluated">Last evaluated: <strong>{lastEvaluated}</strong></span>
+              )}
             </div>
           )}
 
-          {latestEval && Object.keys(latestEval.dimensions).length > 0 && (
+          {Object.keys(dimEvals).length > 0 && (
             <div className="scholar-metrics-row" style={{ marginTop: 8 }}>
-              {Object.entries(latestEval.dimensions).map(([key, dim]) => (
-                <span
-                  key={key}
-                  className="metric-badge"
-                  style={{ borderColor: getScoreColor(dim.score) }}
-                >
-                  {DIMENSION_LABELS[key] ?? key}: <strong style={{ color: getScoreColor(dim.score) }}>{dim.score}</strong>
-                </span>
-              ))}
+              {Object.entries(dimEvals).map(([key, dim]) =>
+                dim ? (
+                  <span
+                    key={key}
+                    className="metric-badge"
+                    style={{ borderColor: dim.score != null ? getScoreColor(dim.score) : '#9ca3af' }}
+                  >
+                    {DIMENSION_LABELS[key] ?? key}:{' '}
+                    {dim.score != null ? (
+                      <strong style={{ color: getScoreColor(dim.score) }}>{dim.score}</strong>
+                    ) : (
+                      <strong className="text-muted">N/A</strong>
+                    )}
+                  </span>
+                ) : null,
+              )}
             </div>
           )}
 
@@ -223,115 +296,177 @@ export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailPro
             </div>
           )}
 
-          {profileLinks.length > 0 && (
-            <div className="profile-links-inline">
-              {profileLinks.map((link) => (
-                <a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" className="profile-link-inline">
-                  {link.label} <ArrowRight size={12} />
-                </a>
-              ))}
-            </div>
-          )}
         </div>
       </div>
 
+      {/* ── Content tabs (full width, no sidebar) ── */}
       <div className="academic-detail-content">
-        {/* ── Sidebar: Reports ── */}
-        <div className="academic-sidebar">
-          <div className="sidebar-header">
-            <h4>Reports</h4>
+        <div className="content-tabs">
+          {(['report', 'timeline', 'evaluation', 'publications', 'profiles', 'chat'] as const).map((tab) => (
             <button
-              className="btn-icon"
-              onClick={handleEvaluate}
-              disabled={isEvaluating || scholar.status === 'evaluating' || scholar.status === 'archived'}
-              title={scholar.status === 'archived' ? 'Unarchive to run evaluations' : 'Run Evaluation'}
+              key={tab}
+              className={`content-tab ${contentTab === tab ? 'active' : ''}`}
+              onClick={() => setContentTab(tab)}
             >
-              {isEvaluating || scholar.status === 'evaluating' ? '...' : '+'}
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
-          </div>
-
-          {reports.length === 0 && (
-            <p className="text-muted" style={{ padding: '8px', fontSize: '0.85em' }}>
-              No reports yet. Run an evaluation to generate one.
-            </p>
-          )}
-
-          {reports.map((report) => (
-            <div
-              key={report.id}
-              className={`report-item ${selectedReport?.id === report.id ? 'active' : ''}`}
-              onClick={() => handleSelectReport(report)}
-            >
-              <div className="report-item-header">
-                <span className="report-date">{report.created_at}</span>
-                <span className="meta-tag">{report.report_type}</span>
-              </div>
-              <button
-                className="btn-icon btn-icon-danger"
-                onClick={(e) => { e.stopPropagation(); handleDeleteReport(report.id); }}
-                title="Delete report"
-                style={{ fontSize: '0.8em' }}
-              >
-                <X size={14} />
-              </button>
-            </div>
           ))}
         </div>
 
-        {/* ── Content tabs ── */}
-        <div className="academic-content-main">
-          <div className="content-tabs">
-            {(['report', 'timeline', 'evaluation', 'publications', 'profiles', 'chat'] as const).map((tab) => (
-              <button
-                key={tab}
-                className={`content-tab ${contentTab === tab ? 'active' : ''}`}
-                onClick={() => setContentTab(tab)}
-              >
-                {tab.charAt(0).toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
+        {contentTab === 'report' && (
+          <div className="tab-content report-content">
+            {narratives.length === 0 ? (
+              <p className="text-muted">No reports yet. Run an evaluation to generate one.</p>
+            ) : (
+              <>
+                {/* ── Inline version picker ── */}
+                <div className="report-version-bar">
+                  <div className="report-version-selector" ref={versionSelectorRef}>
+                    <button
+                      className="report-version-current"
+                      onClick={() => setVersionDropdownOpen((v) => !v)}
+                    >
+                      <span className="report-version-date">
+                        {(selectedNarrative?.id ?? '').slice(0, 10)}
+                      </span>
+                      {selectedNarrativeIdx === 0 && (
+                        <span className="report-version-latest">Latest</span>
+                      )}
+                      <span className="report-version-count">
+                        {selectedNarrativeIdx + 1} / {narratives.length}
+                      </span>
+                      <ChevronDown size={12} />
+                    </button>
+
+                    {versionDropdownOpen && (
+                      <div className="report-version-dropdown">
+                        {narratives.map((n, i) => {
+                          const nId = n.id ?? '';
+                          return (
+                            <button
+                              key={nId || i}
+                              className={`report-version-option ${i === selectedNarrativeIdx ? 'active' : ''}`}
+                              onClick={() => {
+                                setSelectedNarrativeIdx(i);
+                                setVersionDropdownOpen(false);
+                              }}
+                            >
+                              <span>{nId.slice(0, 10)}</span>
+                              {i === 0 && <span className="report-version-latest">Latest</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Narrative content ── */}
+                {selectedNarrative && <NarrativeReportView narrative={selectedNarrative} />}
+              </>
+            )}
           </div>
+        )}
 
-          {contentTab === 'report' && (
-            <div className="tab-content report-content">
-              {reportContent ? (
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{reportContent}</ReactMarkdown>
-              ) : selectedReport ? (
-                <p className="text-muted">Loading report...</p>
-              ) : (
-                <p className="text-muted">Select a report from the sidebar, or run an evaluation to generate one.</p>
-              )}
-            </div>
-          )}
+        {contentTab === 'timeline' && (
+          <TimelineTab scholarId={scholar.id} events={events} mutateEvents={mutateEvents} sortBy={eventSortBy} onSortChange={setEventSortBy} />
+        )}
 
-          {contentTab === 'timeline' && (
-            <TimelineTab scholarId={scholar.id} events={events} mutateEvents={mutateEvents} />
-          )}
+        {contentTab === 'evaluation' && (
+          <EvaluationTab data={evalData} />
+        )}
 
-          {contentTab === 'evaluation' && (
-            <EvaluationTab latestEval={latestEval} evaluations={evaluations} />
-          )}
+        {contentTab === 'publications' && (
+          <PublicationsTab papers={papers} summary={papersSummary} />
+        )}
 
-          {contentTab === 'publications' && (
-            <PublicationsTab papers={papers} summary={papersSummary} />
-          )}
+        {contentTab === 'profiles' && (
+          <ProfilesTab
+            scholarId={scholar.id}
+            profileLinks={profileLinks}
+            channels={channels}
+            mutateChannels={mutateChannels}
+            mutateScholar={mutateScholars}
+          />
+        )}
 
-          {contentTab === 'profiles' && (
-            <ProfilesTab
-              scholarId={scholar.id}
-              profileLinks={profileLinks}
-              channels={channels}
-              mutateChannels={mutateChannels}
-            />
-          )}
-
-          {contentTab === 'chat' && (
-            <div className="tab-content chat-content">
-              <ScholarConversation scholarId={scholar.id} />
-            </div>
-          )}
-        </div>
+        {contentTab === 'chat' && (
+          <div className="tab-content chat-content">
+            <ScholarConversation scholarId={scholar.id} />
+          </div>
+        )}
       </div>
+
+      {/* ── Confirm Evaluation Modal ── */}
+      <Modal
+        isOpen={showConfirmEval}
+        onClose={() => setShowConfirmEval(false)}
+        title="Run Full Evaluation"
+        size="narrow"
+      >
+        <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-3)' }}>
+          <p style={{ margin: 0, fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+            This will run the <strong>full evaluation pipeline</strong> for <strong>{scholar.name}</strong>. The process includes:
+          </p>
+          <ul style={{ margin: 0, paddingLeft: 'var(--space-5)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+            <li>Identity resolution &amp; profile discovery</li>
+            <li>Paper &amp; citation refresh</li>
+            <li>Peer group classification</li>
+            <li>Dimension scoring (all dimensions re-evaluated)</li>
+            <li>Narrative synthesis</li>
+          </ul>
+          <p style={{ margin: 0, fontSize: 'var(--text-xs)', color: 'var(--color-text-tertiary)' }}>
+            Profile data and paper lists will be <strong>overwritten</strong> with the latest data.
+            Dimension scores and narratives are <strong>versioned</strong> — previous results are preserved.
+          </p>
+        </div>
+        <div className="modal-footer">
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={() => setShowConfirmEval(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={isEvaluating}
+            onClick={() => {
+              setShowConfirmEval(false);
+              handleEvaluate();
+            }}
+          >
+            {isEvaluating ? 'Starting...' : 'Run Evaluation'}
+          </button>
+        </div>
+      </Modal>
     </div>
+  );
+}
+
+
+function NarrativeReportView({ narrative }: { narrative: NarrativeReport }) {
+  // Compose the narrative as a markdown document so the existing
+  // ReactMarkdown renderer in the report panel does the layout.
+  const md = [
+    `# ${narrative.headline}`,
+    '',
+    narrative.summary,
+    '',
+    narrative.red_flag_banner ? `> ⚠ **Red flags**\n>\n> ${narrative.red_flag_banner}` : '',
+    narrative.per_dim_highlights.length > 0 ? '## Dimension highlights' : '',
+    ...narrative.per_dim_highlights.map(
+      (h) => `- **${DIMENSION_LABELS[h.dimension_id] ?? h.dimension_id}** — ${h.highlight}`,
+    ),
+    '',
+    narrative.open_questions.length > 0 ? '## Open questions' : '',
+    ...narrative.open_questions.map((q) => `- ${q}`),
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]}>{md}</ReactMarkdown>
   );
 }

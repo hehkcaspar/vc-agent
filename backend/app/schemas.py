@@ -298,6 +298,7 @@ class ChatMessageResponse(BaseModel):
 class ChatSessionDetailResponse(BaseModel):
     session: ChatSessionResponse
     messages: List[ChatMessageResponse]
+    active_job_id: Optional[str] = None
 
 
 class ChatMessageCreate(BaseModel):
@@ -306,6 +307,9 @@ class ChatMessageCreate(BaseModel):
     model_profile_id: Optional[str] = None
     # When set, overrides server CHAT_USE_DEEP_AGENT for this message only.
     use_deep_agent: Optional[bool] = None
+    # Tri-state mode: "one_shot" | "react" | "deep_agent". Takes precedence
+    # over use_deep_agent when set.
+    agent_mode: Optional[Literal["one_shot", "react", "deep_agent"]] = None
 
 
 class ChatMessageResult(BaseModel):
@@ -347,6 +351,7 @@ class PresetRunRequest(BaseModel):
     session_id: Optional[str] = None
     model_profile_id: Optional[str] = None
     use_deep_agent: Optional[bool] = None
+    agent_mode: Optional[Literal["one_shot", "react", "deep_agent"]] = None
     industry: Optional[str] = None
     stage: Optional[str] = None
     deliverable_type: Optional[str] = None

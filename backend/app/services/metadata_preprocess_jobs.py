@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,6 +27,91 @@ MAX_JOBS = 200
 _lock = asyncio.Lock()
 _jobs: Dict[str, dict[str, Any]] = {}
 _inflight: Dict[Tuple[str, str], str] = {}  # (entity_id, node_id) -> job_id
+
+# ── Batch-level extraction progress (per entity) ───────────────────────
+_batches: Dict[str, dict[str, Any]] = {}  # entity_id -> batch state
+
+
+async def register_extraction_batch(
+    entity_id: str, node_ids: List[str], node_names: Dict[str, str],
+) -> None:
+    """Register a batch of files for background extraction progress tracking."""
+    async with _lock:
+        existing = _batches.get(entity_id)
+        if existing and existing["remaining_ids"]:
+            # Merge into an already-running batch
+            existing["total"] += len(node_ids)
+            existing["remaining_ids"].extend(node_ids)
+            existing["node_names"].update(node_names)
+        else:
+            _batches[entity_id] = {
+                "total": len(node_ids),
+                "completed": 0,
+                "failed": 0,
+                "remaining_ids": list(node_ids),
+                "current_node_id": node_ids[0] if node_ids else None,
+                "current_name": node_names.get(node_ids[0]) if node_ids else None,
+                "node_names": dict(node_names),
+                "errors": [],  # [{name, error}] — last 10
+            }
+
+
+async def update_batch_progress(
+    entity_id: str, node_id: str, *, success: bool, error_msg: str | None = None,
+) -> None:
+    """Called after each file extraction completes (success or failure)."""
+    async with _lock:
+        batch = _batches.get(entity_id)
+        if not batch:
+            return
+        if node_id in batch["remaining_ids"]:
+            batch["remaining_ids"].remove(node_id)
+        if success:
+            batch["completed"] += 1
+        else:
+            batch["failed"] += 1
+            name = batch["node_names"].get(node_id, node_id[:8])
+            batch["errors"].append({"name": name, "error": error_msg or "unknown"})
+            batch["errors"] = batch["errors"][-10:]
+        # Advance current pointer
+        if batch["remaining_ids"]:
+            nxt = batch["remaining_ids"][0]
+            batch["current_node_id"] = nxt
+            batch["current_name"] = batch["node_names"].get(nxt)
+        else:
+            batch["current_node_id"] = None
+            batch["current_name"] = None
+
+
+async def get_extraction_progress(entity_id: str) -> dict[str, Any] | None:
+    """Return extraction progress for an entity, or None if idle."""
+    async with _lock:
+        batch = _batches.get(entity_id)
+        if not batch:
+            return None
+        remaining = len(batch["remaining_ids"])
+        if remaining == 0 and batch["current_node_id"] is None:
+            # Batch finished — snapshot then clean up
+            result: dict[str, Any] = {
+                "status": "done",
+                "total": batch["total"],
+                "completed": batch["completed"],
+                "failed": batch["failed"],
+                "remaining": 0,
+                "current_file": None,
+                "errors": batch["errors"],
+            }
+            del _batches[entity_id]
+            return result
+        return {
+            "status": "running",
+            "total": batch["total"],
+            "completed": batch["completed"],
+            "failed": batch["failed"],
+            "remaining": remaining,
+            "current_file": batch["current_name"],
+            "errors": batch["errors"],
+        }
 
 
 def _prune_locked() -> None:
@@ -180,6 +265,11 @@ async def run_metadata_preprocess_job(job_id: str) -> None:
                 "native_file_metadata": native_block,
                 "gemini_preprocessed": block,
             }
+            # Surface one_liner as description for tree/agent context
+            # (skip if user already set a manual description via annotate)
+            one_liner = (normalized.get("one_liner") or "").strip()
+            if one_liner and not existing.get("description"):
+                merged["description"] = one_liner
             node.metadata_json = json.dumps(merged, ensure_ascii=False)
             node.updated_at = utc_now()
             await db.commit()

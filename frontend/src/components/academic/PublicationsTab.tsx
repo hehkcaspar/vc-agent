@@ -96,11 +96,11 @@ export function PublicationsTab({ papers, summary }: PublicationsTabProps) {
                 )}
               </span>
               <span className="col-authors">
-                {paper.authors.slice(0, 3).map((a) => typeof a === 'string' ? a : a.name).join(', ')}
-                {paper.authors.length > 3 && ` et al.`}
+                {(paper.authors ?? []).slice(0, 3).map((a) => typeof a === 'string' ? a : a.name).join(', ')}
+                {(paper.authors ?? []).length > 3 && ` et al.`}
               </span>
               <span className="col-year">{paper.year ?? '\u2014'}</span>
-              <span className="col-citations">{paper.citations.toLocaleString()}</span>
+              <span className="col-citations">{(paper.citations ?? 0).toLocaleString()}</span>
               <span className="col-venue">{paper.venue ?? '\u2014'}</span>
             </div>
           ))}

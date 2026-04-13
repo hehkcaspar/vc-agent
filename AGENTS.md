@@ -49,7 +49,8 @@ vc-agent/
 │   │       ├── materializer.py        # WorkspaceMaterializer (ingest → Inbox/)
 │   │       ├── parking.py             # ParkingLotManager
 │   │       ├── resolver.py            # EntityResolver
-│   │       ├── portfolio_deep_agent.py # Deep Agent harness
+│   │       ├── agent_harness.py        # ReAct agent harness + shared utilities
+│   │       ├── deep_agent_compat.py   # Legacy Deep Agent (removable)
 │   │       ├── gemini_context.py      # Workspace node → Gemini context
 │   │       ├── direct_llm.py          # Gemini Interactions API + Kimi dispatch
 │   │       ├── metadata_preprocess_jobs.py # Single-file metadata extraction (in-memory job registry)
@@ -65,9 +66,10 @@ vc-agent/
 │       ├── services/api.ts            # API client (entities, workspace, chat)
 │       ├── hooks/useEntities.ts       # SWR hooks (useWorkspaceTree)
 │       └── types/index.ts             # TypeScript interfaces
-└── doc/
+└── docs/design/
     ├── ENTITY_WORKSPACE_DESIGN.md     # Workspace design spec (implemented)
-    └── MVP-prd.md                     # Original MVP requirements
+    ├── MVP-prd.md                     # Original MVP requirements
+    └── SCHOLAR_EVALUATION_FRAMEWORK.md # Evaluation framework spec
 ```
 
 ## Data Storage
@@ -114,4 +116,5 @@ See `backend/.env_sample` for all options. Key settings:
 - `docs/ARCHITECTURE.md` — Backend/frontend architecture
 - `docs/API_REFERENCE.md` — Endpoint contracts and data models
 - `docs/DEVELOPER_GUIDE.md` — Setup, workflow, testing
-- `doc/ENTITY_WORKSPACE_DESIGN.md` — Workspace design spec
+- `docs/design/ENTITY_WORKSPACE_DESIGN.md` — Workspace design spec
+- `docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md` — Evaluation framework spec

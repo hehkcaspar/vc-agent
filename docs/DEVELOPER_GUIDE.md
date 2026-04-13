@@ -126,18 +126,21 @@ vc-agent/
 │   │       ├── parking.py             # Parking lot manager
 │   │       ├── resolver.py            # Entity resolver
 │   │       ├── materializer.py        # Workspace materializer (ingest → Inbox/)
+│   │       ├── office_extractors.py    # OOXML (docx/pptx/xlsx) + legacy (doc/ppt/xls via LibreOffice) text extraction
+│   │       ├── document_text.py       # PDF text extraction (pypdf) + compression (ghostscript)
 │   │       ├── direct_llm.py          # Stateful Gemini Interactions API + Kimi dispatch (replaces gemini_runner)
-│   │       ├── gemini_context.py      # Multimodal parts + harness attachment text
+│   │       ├── gemini_context.py      # One-shot context (Gemini native binary / Kimi text) + agent pointer list
 │   │       ├── preset_registry.py     # Chat presets + loaders for file_lookup_preprocess / inbox_grouping / inbox_folder_routing
 │   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent)
 │   │       ├── metadata_extraction.py # VC-normalized JSON for extract_info preset
 │   │       ├── file_lookup_normalize.py  # Normalize Gemini file-lookup JSON (pre-process)
-│   │       ├── metadata_preprocess_jobs.py # In-memory single-file async jobs; merge native + gemini blocks into metadata_json
+│   │       ├── metadata_preprocess_jobs.py # In-memory single-file async jobs; merge native + gemini + description into metadata_json
 │   │       ├── inbox_processing_jobs.py    # Process Inbox: Path A (per-file extract + synoptic grouping) + Path B (folder routing); in-memory job registry
 │   │       ├── native_file_metadata.py    # Programmatic hints (mime, size, etc.)
 │   │       ├── json_loose.py          # Tolerant JSON decode for model output
 │   │       ├── model_profiles.py      # Gemini / Kimi ChatModel wiring for harness
-│   │       └── portfolio_deep_agent.py # Deep Agents tools + invoke wrapper
+│   │       ├── agent_harness.py        # ReAct agent harness (langchain.agents.create_agent + middleware)
+│   │       └── deep_agent_compat.py   # Legacy Deep Agent compat (removable)
 │   ├── requirements.txt
 │   └── run.py                       # Development server
 │

@@ -112,6 +112,9 @@ class ChatCompletionJob(Base):
     model_profile_id = Column(String, nullable=True)
     harness_extras = Column(Text, nullable=False)
 
+    # "react" | "deep_agent". Determines which agent factory the job worker uses.
+    agent_mode = Column(String, nullable=True, default="react")
+
     # When non-null, this row is a preset shortcut run (Red Team etc.) and the
     # worker is run_preset_agent_job. JSON: {preset_id, deliverable_type,
     # deliverable_status, industry, stage}.

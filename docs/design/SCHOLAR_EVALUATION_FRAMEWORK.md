@@ -1,9 +1,19 @@
-# Scholar Evaluation Framework (WIP)
+# Scholar Evaluation Framework
 
-Design doc for rewriting the scholar evaluation prompts. Work in progress — we are
-iterating on this file before touching `scholar_prompts.py` or `dimensions.json`.
+Design doc for the scholar evaluation system. Source of truth for
+per-dimension prompts and the continuous-monitoring architecture.
+Runtime configs (`dimensions.json`, `continuous_tasks.json`) are
+derived from this doc.
 
-Status: **4-dimension design finalized**. D1 Academic Excellence, D2 Tech-transfer Experience, D3 Founder Potential (absorbs Public Profile as a factor), D4 Growth Trajectory. Each dim is self-contained and transparent to the others — ready for implementation.
+Status: **implemented**. 4 MECE dimensions (D1 Academic Excellence,
+D2 Tech-transfer Experience, D3 Founder Potential, D4 Growth
+Trajectory). Each dim is self-contained and transparent to the others.
+Original design started with 7 dimensions; the MECE redesign (7 → 4)
+is described in the "Why 4 dimensions" section below and the change
+log at the end.
+
+Implementation lives under `backend/app/services/academic/`. See
+CLAUDE.md "Academic Tracking Module (v2)" section for the file map.
 
 ---
 
@@ -54,7 +64,7 @@ The eight shared concepts build on each other:
 5. **Storage conventions** (how everything persists — JSONL vs JSON)
 6. **Continuous monitoring architecture** (3-layer: facts → refresh → eval)
 7. **Red flags fact channel** (negative signals as facts, not a dim)
-8. **Relative traction rubric** (helper used by commercial/founder dims)
+8. **LLM execution model** (modern `google-genai` SDK: single-shot + Interactions API)
 
 ---
 
@@ -381,18 +391,23 @@ whose top 10 papers are first/last author.
 }
 ```
 
-### Downstream rules
+### Downstream rules (framework guidance — not prompt text)
 
-1. **Academic Excellence** scores against `attributed_citations`, never raw.
-   Use a first/last-author h-index.
-2. **Concentration check**: if >40% of attributed citations come from a
-   single paper, flag `inflation: concentrated` and cap Academic Excellence
-   at ~85 unless the paper is truly field-defining.
+These rules govern how the fact store is computed and how dim prompts
+should conceptually think about citations. Dim prompts themselves are
+principle-driven and apply these ideas holistically.
+
+1. **Use attributed citations, never raw.** This is the core rule that
+   downstream dimensions reading the fact store must honor.
+2. **Concentration check**: when a large share of attributed citations
+   comes from a single paper, the fact store emits an `inflation: concentrated`
+   flag. Dim prompts treat this as a warning sign and cap scores unless the
+   paper is truly field-defining.
 3. **Position-over-time check** (anti-gaming): first-author → last-author
-   trajectory is healthy. A scholar stuck as middle author on big consortium
-   papers for 10 years is a red flag, surfaces in Growth Trajectory.
-4. **Venue × position**: note venue tier alongside position but do not
-   double-weight (venue is already encoded in citation count).
+   trajectory is healthy; stuck middle-author on consortium papers for many
+   years is a red flag and surfaces in the trajectory dimension naturally.
+4. **Venue × position**: venue tier is noted alongside position but not
+   double-weighted (venue is already encoded in citation count).
 
 ### Co-first / co-corresponding detection
 
@@ -484,7 +499,7 @@ represented as **additional events** that reference the original record's
 `id`:
 
 ```jsonl
-{"id":"2026-04-01T10-00-00Z","type":"flag","category":"retraction","severity":"high","claim":"...","source_url":"...","source_summary":"...","affected_dimensions":["research_impact"]}
+{"id":"2026-04-01T10-00-00Z","type":"flag","category":"retraction","severity":"high","claim":"...","source_url":"...","source_summary":"...","affected_dimensions":["academic_excellence"]}
 {"id":"2026-04-10T14-22-00Z","type":"dismissal","target_id":"2026-04-01T10-00-00Z","reason":"user confirmed retraction was corrected","actor":"user_chat"}
 ```
 
@@ -607,10 +622,10 @@ different dim setups; flat independence is what makes experimentation safe.
 
 ```
 data/scholars/{id}/evaluations/
-  research_impact.jsonl
-  commercialization.jsonl
-  career_trajectory.jsonl
-  ...
+  academic_excellence.jsonl
+  tech_transfer_experience.jsonl
+  founder_potential.jsonl
+  growth_trajectory.jsonl
 data/scholars/{id}/narrative.jsonl
 ```
 
@@ -899,7 +914,7 @@ Append-only event log. Three event types:
   "claim": "2019 Nature paper retracted for image manipulation",
   "source_url": "https://retractionwatch.com/...",
   "source_summary": "Image duplication in Fig 3; editor notice Jan 2024",
-  "affected_dimensions": ["research_impact", "field_position"]
+  "affected_dimensions": ["academic_excellence"]
 }
 ```
 
@@ -931,9 +946,9 @@ any whose `id` appears as a `target_id` in a `dismissal` event. Resolution
 events update the flag's status in the projection.
 
 - `affected_dimensions` is **agent-decided per flag**, not hardcoded per
-  category. A failed venture with clawbacks affects Commercialization and
-  Founder Potential; a clean-exit failed venture may only affect
-  Commercialization. The agent justifies the choice in the `claim` field.
+  category. A failed venture with clawbacks affects both the tech-transfer
+  and founder-potential dimensions; a clean-exit failed venture may only
+  affect tech-transfer. The agent justifies the choice in the `claim` field.
 - Dismissal flows through the chat-driven correction mechanism (same path as
   phase corrections — Q2). Dismissed flags are preserved in the log for
   audit and excluded from the projection used by scoring.
@@ -992,28 +1007,189 @@ Categories are a config list, extendable without schema changes.
 
 ---
 
-## Shared Concept 8 — Relative traction rubric (helper)
+## Shared Concept 8 — LLM execution model
 
-Used by Commercialization and Founder Potential when judging a startup's or a
-scholar's commercial record. Treats traction the same way we treat citations:
-relative to peers.
+All LLM work in the scholar tracking module uses the modern **`google-genai`**
+SDK (`from google import genai`), not `langchain-google-genai`. This matches
+the portfolio module's standard and unlocks structured JSON output, the
+Interactions API for chat, grounded search, and first-class async.
 
-- **Startup traction metric** = `(funding raised OR revenue) / years since founding`
-- Percentile-mapped against typical deep-tech startups **in the same field**
-- **Unknown funding/revenue** = cannot score the startup → caps parent dimension
-  at ~70 and listed in `missing_data`
+### Three execution paths — choose by task type
 
-Example anchors (deep-tech materials, will vary by field):
+Different task types have different LLM-call shapes. The framework uses
+three paths; every LLM call in scholar tracking falls into one of them.
 
-| Traction ($/yr) | Band        |
-|-----------------|-------------|
-| < $1M           | weak        |
-| $1–5M           | median      |
-| $5–20M          | top quartile |
-| $20M+           | top 5%      |
+#### Path 1 — Single-shot with structured output (most tasks)
 
-Agent is instructed to build analogous anchors for the scholar's field when
-scoring; hardcoded numbers are only an example.
+**Used by:** D1/D2/D3/D4 scoring, all dim triage calls, narrative
+synthesizer, upload processing.
+
+**Why:** These tasks are pure judgment calls against a prepared fact store.
+They don't need to discover or fetch anything — everything is in the
+context. A single LLM call with a response schema returns a typed result,
+no parsing, no tool loop, no ReAct.
+
+```python
+from google import genai
+from google.genai import types
+from pydantic import BaseModel
+
+class DimEvalResult(BaseModel):
+    score: int
+    evidence: list[EvidenceItem]
+    uncertainty: str  # "low" | "medium" | "high"
+    missing_data: list[str]
+    mini_report: str
+    questions_for_investor: list[str]  # max 3
+    diff_from_last: DiffBlock | None
+
+client = genai.Client(api_key=settings.GEMINI_API_KEY)
+
+result = await client.aio.models.generate_content(
+    model=task_config["scoring_model"],
+    contents=[
+        {"role": "user", "parts": [
+            {"text": DIM_SYSTEM_PROMPT},     # from dimensions.json
+            {"text": fact_store_context},    # papers, metrics, patents, etc.
+            {"text": peer_group_context},    # latest peer_group.jsonl entry
+            {"text": last_eval_context},     # for diff awareness
+            {"text": red_flags_context},     # projected active flags
+        ]},
+    ],
+    config=types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=DimEvalResult,
+    ),
+)
+
+parsed: DimEvalResult = result.parsed
+```
+
+Key properties:
+- **Structured output via `response_schema`** — the Pydantic model is the
+  contract; output is guaranteed to match it
+- **Single call, no tool loop** — fact store has everything, agent judges
+- **Async** via `client.aio.models.generate_content()`
+- **Model configurable per task** via `continuous_tasks.json` (cheap model
+  for triage, expensive for scoring)
+- **Retries** wrapped in a `_retry()` helper with exponential backoff
+  (matching the portfolio pattern in `direct_llm.py`)
+
+#### Path 2 — Single-shot with grounded search (discovery tasks)
+
+**Used by:** `phase_classifier` (needs to find grants, awards, appointments),
+`news_web` source fetcher (needs to search for recent news and mentions),
+`red_flags_watch` fetcher (needs to search Retraction Watch / PubPeer / news).
+
+**Why:** These tasks need to reach outside the fact store to find new
+information. Gemini's built-in grounded search handles it in a single call
+— no custom web-search tool code, no multi-turn orchestration.
+
+```python
+result = await client.aio.models.generate_content(
+    model=task_config["classifier_model"],
+    contents=[{"role": "user", "parts": [{"text": discovery_prompt}]}],
+    config=types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+        response_mime_type="application/json",
+        response_schema=PhaseClassificationResult,
+    ),
+)
+```
+
+Key properties:
+- **Server-side search** — no custom web-search tool to maintain
+- **Still structured output** — search results + schema together
+- **Single turn, single call** — Gemini handles the search loop internally
+- **Grounded** — Gemini attaches source citations to the output
+
+#### Path 3 — Interactions API (chat)
+
+**Used by:** the per-scholar chat flow (`scholar_chat`).
+
+**Why:** Chat is genuinely multi-turn with server-side session state. The
+Interactions API in the new SDK is built for exactly this: the server
+remembers the conversation, so we don't replay history on every turn. This
+is dramatically cheaper and simpler than the current LangChain Deep Agent
+pattern, and it matches how the portfolio module handles workspace chat.
+
+```python
+# Create a session when chat starts
+interaction = client.interactions.create(
+    model=task_config["chat_model"],
+    config=types.InteractionConfig(
+        system_instruction=SCHOLAR_CHAT_SYSTEM_PROMPT,
+        tools=[
+            types.Tool(google_search=types.GoogleSearch()),
+            # Custom function declarations for fact-store reads and
+            # Layer 2 refresh triggers, bound via function declarations
+        ],
+    ),
+)
+interaction_id = interaction.name  # store in chat_sessions table
+
+# Per user turn
+response = await client.aio.interactions.send_message(
+    interaction=interaction_id,
+    contents=[{"role": "user", "parts": [{"text": user_message}]}],
+)
+```
+
+Key properties:
+- **Server-side session state** — no history replay each turn
+- **Lower cost** — only new turns are billed; context reuse is free
+- **Native tool support** — grounded search + custom function calls
+- **Resumable** — `interaction_id` stored in DB, chat can be picked up
+  after process restart
+- **Model: learn from portfolio chat** — the portfolio module's workspace
+  chat uses the same SDK path; reuse its patterns for session lifecycle,
+  tool binding, and function-call plumbing
+
+### What this replaces (legacy removal)
+
+**Removed entirely from scholar tracking:**
+- `from langchain_google_genai import ChatGoogleGenerativeAI`
+- `from deepagents import create_deep_agent` (for scoring, chat, upload
+  paths)
+- The `@tool` decorator and tool closure pattern in `domain_tools.py` for
+  LLM tool binding (the underlying functions stay; they become regular
+  async helpers called directly)
+- `agent.ainvoke(...)` / Deep Agent state threading
+- Manual JSON-text parsing of LLM output (replaced by `response_schema`)
+
+**Kept:**
+- The underlying function bodies in `domain_tools.py` — Semantic Scholar
+  client, paper fetches, web search fallback, etc. They become regular
+  async helpers, not LLM tools.
+- `google-genai >= 1.56.0` (already in `requirements.txt`)
+
+### Package alignment
+
+After the rewrite, scholar tracking depends on:
+- **`google-genai >= 1.56.0`** — for all three paths above
+- `httpx` (existing) — for direct API calls to Semantic Scholar, SerpAPI,
+  Lens.org
+- `pydantic` (existing) — for response schemas
+
+No dependency on `langchain-google-genai` or `deepagents` inside scholar
+tracking. (The portfolio module's own Deep Agent path may still use them;
+that stays.)
+
+### Why this is the right call
+
+- **One SDK across modules.** Portfolio and scholar tracking use the same
+  LLM interface, making cross-module fixes and upgrades uniform.
+- **Structured outputs** eliminate a whole class of parsing bugs and make
+  the per-dim result contracts mechanically enforceable.
+- **Interactions API** makes chat dramatically simpler and cheaper than
+  the current LangChain Deep Agent pattern.
+- **Grounded search** removes custom web-search tool code and makes
+  discovery tasks single-call.
+- **Async-first** matches the continuous monitoring architecture (many
+  scholars, many tasks, parallel dispatch).
+- **Modern and supported** — `google-genai` is the current upstream SDK;
+  `langchain-google-genai` wraps the pre-2024 `google-generativeai`
+  package, which is a deprecating surface.
 
 ---
 
@@ -1035,9 +1211,8 @@ can trace the reasoning.
 
 ## Per-dimension rewrites
 
-**Status: first-pass drafts.** These apply the shared framework (Concepts 1–8)
-with dimension-specific anchors, evidence types, and anti-patterns. We will
-review and refine each dimension one-by-one after this draft pass.
+These apply the shared framework (Concepts 1–7) with dimension-specific
+principles and anti-patterns.
 
 Each dimension section is **completely self-contained and transparent to
 the other dimensions**. A dim agent reads only its own section and has no
@@ -1515,8 +1690,9 @@ signals are absent.
 ### Dimension 4 — Growth Trajectory
 
 **What it measures:** Is this scholar's overall profile accelerating,
-plateauing, or declining? This is the derivative dimension — it scores the
-*slope* across academic work, tech-transfer activity, and founder signals.
+plateauing, or declining? This dimension scores the *slope* across the
+scholar's scientific output, commercial activity, and founder-relevant
+signals over the recent past.
 
 **Core principle:** Growth Trajectory answers "where is this person
 going?" It measures the **slope of the scholar's overall profile** —
@@ -1556,8 +1732,8 @@ recent activity:
 **What to weight:**
 
 - **Multi-axis acceleration > single-axis spike.** One big recent paper is
-  a spike, not a trajectory. A scholar with forward signals across academic
-  + tech-transfer + founder axes is on a real trajectory.
+  a spike, not a trajectory. A scholar with forward signals across
+  scientific + commercial + operator axes is on a real trajectory.
 - **Phase-sensitive interpretation.** Flat is OK at R4 (already a leader),
   concerning at R3a (should be climbing). Declining is always concerning.
 - **Recency weight.** The last 24 months matter more than the last 5 years.
@@ -1590,7 +1766,8 @@ recent activity:
 - **`data_availability: low`** → bump `uncertainty`
 
 **Anti-patterns:**
-- Scoring on level (that is D1–D3's job) rather than slope
+- Scoring on current level rather than slope — this dimension measures
+  *change over time*, not current state
 - Treating one spike paper as a trajectory
 - Ignoring stuck author-position as a negative signal
 - Rewarding new-hire count without corresponding output growth
@@ -1616,27 +1793,6 @@ recent activity:
 
 ---
 
-## (Old dim drafts removed)
-
-The following original dimensions were merged or absorbed during the
-4-dimension MECE redesign and are no longer scored independently:
-
-- **Research Impact** → merged into **D1 Academic Excellence** (as the
-  attributed-citation core)
-- **Field Position** → merged into **D1 Academic Excellence** (as the
-  recognition component)
-- **Collaboration Strength** → merged into **D1 Academic Excellence** (as
-  the network component)
-- **Career Trajectory** → renamed to **D4 Growth Trajectory**
-- **Public Profile** → absorbed into **D3 Founder Potential** as the
-  "Public presence & reachability" factor
-
-The draft text for each of these is deleted from the doc to prevent drift.
-The merged content is preserved inside the new dimension sections.
-
----
-
-
 ## Change log
 
 - **2026-04-08** — initial draft. Shared concepts 1–5 captured; 7 open questions
@@ -1661,6 +1817,25 @@ The merged content is preserved inside the new dimension sections.
   percentile anchors by band, primary vs supporting evidence, dimension-
   specific caps, cross-dimension interactions, anti-patterns. Drafts are
   first-pass — ready for dim-by-dim review and refinement.
+- **2026-04-09 (final coherence + LLM execution model)** — Added Concept 8:
+  LLM execution model standardizing on the modern `google-genai` SDK with
+  three paths (single-shot + structured output for scoring/triage/
+  synthesizer, grounded search for phase classifier + news/red-flag
+  fetchers, Interactions API for chat). Drops `langchain-google-genai` and
+  `deepagents` from scholar tracking. Added optional
+  `questions_for_investor` output field (≤3 per dim, specific to
+  ambiguities affecting the score). Final coherence pass: deleted old
+  Concept 8 (Relative traction rubric, stale and contradicting
+  principle-driven D2); fixed stale old-dim-name references in Concept 5
+  Rule 5 example, Concept 6 Q4.3 storage example, Concept 7 red flag
+  example + commentary; softened Concept 4 downstream rules to
+  framework-level principles (no specific cap %); rephrased D4 anti-
+  pattern to avoid naming D1-D3; updated D4 core principle and weight
+  sections to use conceptual "scientific / commercial / operator" axes
+  instead of dim names; removed WIP framing from title and intro; removed
+  stale "first-pass drafts" note from per-dim intro; deleted "Old dim
+  drafts removed" informational block (duplicated in changelog). Doc is
+  now coherent and ready for implementation.
 - **2026-04-09 (finalization pass)** — Made each dimension fully
   self-contained and transparent to the others: deleted all
   "Cross-dimension interactions" sections; rewrote anti-patterns to use

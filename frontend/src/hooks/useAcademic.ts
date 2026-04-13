@@ -8,9 +8,10 @@ import type {
   ScholarList,
   Scholar,
   Channel,
-  EvaluationList,
+  ContinuousTasksResponse,
+  EvaluationsResponse,
+  NarrativeReport,
   PapersResponse,
-  ReportList,
   ScholarEvent,
   AcademicChatSession,
   SignalFeedEvent,
@@ -63,27 +64,27 @@ export function useScholarPapers(scholarId: string | undefined) {
 }
 
 export function useScholarEvaluations(scholarId: string | undefined) {
-  const { data, error, isLoading, mutate } = useSWR<EvaluationList>(
+  const { data, error, isLoading, mutate } = useSWR<EvaluationsResponse>(
     scholarId ? ['scholar-evaluations', scholarId] : null,
     () => academicApi.scholars.evaluations(scholarId!),
   );
 
-  return { evaluations: data?.evaluations ?? [], isLoading, error, mutate };
+  return { evalData: data, isLoading, error, mutate };
 }
 
-export function useScholarReports(scholarId: string | undefined) {
-  const { data, error, isLoading, mutate } = useSWR<ReportList>(
-    scholarId ? ['scholar-reports', scholarId] : null,
-    () => academicApi.scholars.reports(scholarId!),
+export function useScholarNarratives(scholarId: string | undefined) {
+  const { data, error, isLoading, mutate } = useSWR<{ narratives: NarrativeReport[] }>(
+    scholarId ? ['scholar-narratives', scholarId] : null,
+    () => academicApi.scholars.narrativeHistory(scholarId!),
   );
 
-  return { reports: data?.reports ?? [], isLoading, error, mutate };
+  return { narratives: data?.narratives ?? [], isLoading, error, mutate };
 }
 
-export function useScholarEvents(scholarId: string | undefined) {
+export function useScholarEvents(scholarId: string | undefined, sortBy: 'discovered' | 'event_date' = 'discovered') {
   const { data, error, isLoading, mutate } = useSWR<ScholarEvent[]>(
-    scholarId ? ['scholar-events', scholarId] : null,
-    () => academicApi.scholars.events(scholarId!),
+    scholarId ? ['scholar-events', scholarId, sortBy] : null,
+    () => academicApi.scholars.events(scholarId!, 50, sortBy),
   );
 
   return { events: data ?? [], isLoading, error, mutate };
@@ -151,4 +152,13 @@ export function useCustomDimensions() {
   );
 
   return { dimensions: data ?? [], isLoading, error, mutate };
+}
+
+export function useContinuousTasks() {
+  const { data, error, isLoading, mutate } = useSWR<ContinuousTasksResponse>(
+    ['continuous-tasks'],
+    () => academicApi.continuousTasks.get(),
+    { refreshInterval: 10_000 },
+  );
+  return { tasks: data, isLoading, error, mutate };
 }

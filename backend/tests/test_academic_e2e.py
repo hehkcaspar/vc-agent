@@ -249,13 +249,15 @@ def run_tests():
 
         r = c.get(f"/academic/scholars/{sid}/evaluations")
         assert r.status_code == 200
-        assert len(r.json()["evaluations"]) == 0
-        print(f"  Evaluations: 0 (expected 0)")
+        data = r.json()
+        # v2 shape: {dimensions: {...}, narrative: ..., peer_group: ..., red_flags: [...]}
+        assert "dimensions" in data
+        print(f"  Evaluations: v2 shape ok")
 
-        r = c.get(f"/academic/scholars/{sid}/reports")
+        r = c.get(f"/academic/scholars/{sid}/narrative-history")
         assert r.status_code == 200
-        assert len(r.json()["reports"]) == 0
-        print(f"  Reports: 0 (expected 0)")
+        assert len(r.json()["narratives"]) == 0
+        print(f"  Narratives: 0 (expected 0)")
 
         r = c.get(f"/academic/scholars/{sid}/events")
         assert r.status_code == 200
@@ -381,7 +383,7 @@ def run_tests():
         # Create custom preset
         r = c.post("/academic/ranking/presets", json={
             "name": "Test Custom",
-            "weights": {"research_impact": 0.5, "commercialization": 0.5},
+            "weights": {"academic_excellence": 0.5, "tech_transfer_experience": 0.5},
         })
         assert r.status_code == 200
         assert r.json()["name"] == "Test Custom"

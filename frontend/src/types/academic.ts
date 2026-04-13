@@ -40,6 +40,7 @@ export interface ScholarEvent {
   significance: string; // high | medium | low
   title?: string | null;
   is_read: boolean;
+  source_url?: string | null;
   event_date?: string | null;
   created_at: string;
   payload?: Record<string, any> | null;
@@ -60,39 +61,94 @@ export interface Channel {
   created_at: string;
 }
 
-// ── Evaluations (from JSON files) ───────────────────────────
+// ── Evaluations (v2 per-dim JSONL shape) ────────────────────
 
-export interface EvaluationDimension {
-  score: number;
-  explanation: string;
-  evidence: string[];
-  archetype_used?: string | null;
+export type Uncertainty = 'low' | 'medium' | 'high';
+
+export interface EvidenceItem {
+  claim: string;
+  source: string;
+  weight: 'primary' | 'supporting';
 }
 
-export interface EvaluationDelta {
-  vs_evaluation?: string | null;
-  dimension_changes: Record<string, { old: number; new: number; change: string }>;
-  new_papers_since: number;
-  notable_events: string[];
+export interface DiffBlock {
+  prev_score?: number | null;
+  delta?: number | null;
+  drivers: string[];
 }
 
-export interface Evaluation {
+export interface DimEvalResult {
+  id?: string;
+  dimension_id: string;
+  scholar_id?: string;
+  snapshot_id?: string;
+  peer_group_ref?: string | null;
+  triage_decision?: 'material' | 'not_material';
+  scoreable?: boolean;
+  score: number | null;
+  score_before_caps?: number;
+  evidence: EvidenceItem[];
+  uncertainty: Uncertainty;
+  missing_data: string[];
+  mini_report: string;
+  questions_for_investor: string[];
+  diff_from_last?: DiffBlock | null;
+}
+
+export interface ContextModifiers {
+  institution_name?: string | null;
+  institution_tier?: 'elite' | 'strong' | 'regional' | 'emerging' | null;
+  resource_level?: 'high' | 'medium' | 'low' | null;
+  geographic_region?: string | null;
+  data_availability: 'high' | 'medium' | 'low';
+}
+
+export interface PeerGroup {
+  id?: string;
+  field: string;
+  field_parent?: string | null;
+  cohort_size_estimate: number;
+  cohort_examples: string[];
+  academic_age?: number | null;
+  academic_age_adjustments: string[];
+  gates_passed: string[];
+  phase: 'R1' | 'R2' | 'R3a' | 'R3b' | 'R3c' | 'R4';
+  phase_evidence: string[];
+  context_modifiers: ContextModifiers;
+  change_reason?: string | null;
+}
+
+export interface RedFlag {
   id: string;
   type: string;
-  trigger: string;
-  model: string;
-  created_at: string;
-
-  dimensions: Record<string, EvaluationDimension>;
-  computed_metrics: Record<string, any>;
-  field_context: Record<string, any>;
-  commercialization_signals: Record<string, any>;
-  delta?: EvaluationDelta | null;
-  agent_trace_ref?: string | null;
+  category: string;
+  severity: 'low' | 'medium' | 'high' | 'critical';
+  claim: string;
+  source_url?: string | null;
+  source_summary?: string | null;
+  affected_dimensions: string[];
+  status?: string;
 }
 
-export interface EvaluationList {
-  evaluations: Evaluation[];
+export interface DimHighlight {
+  dimension_id: string;
+  highlight: string;
+}
+
+export interface NarrativeReport {
+  id?: string;
+  headline: string;
+  summary: string;
+  per_dim_highlights: DimHighlight[];
+  red_flag_banner?: string | null;
+  open_questions: string[];
+}
+
+export interface EvaluationsResponse {
+  dimensions: Record<string, DimEvalResult | null>;
+  narrative: NarrativeReport | null;
+  peer_group: PeerGroup | null;
+  red_flags: RedFlag[];
 }
 
 // ── Papers (from papers.json) ───────────────────────────────
@@ -132,20 +188,6 @@ export interface PapersResponse {
   summary: PapersSummary;
   total: number;
   papers: Paper[];
-}
-
-// ── Reports (from markdown files) ──────────────────────────
-
-export interface Report {
-  id: string;
-  filename: string;
-  report_type: string;
-  created_at: string;
-  content?: string | null;
-}
-
-export interface ReportList {
-  reports: Report[];
 }
 
 // ── Chat ────────────────────────────────────────────────────
@@ -196,6 +238,7 @@ export interface SignalFeedEvent {
   significance: string;
   title?: string | null;
   is_read: boolean;
+  source_url?: string | null;
   event_date?: string | null;
   created_at: string;
 }
@@ -209,7 +252,7 @@ export interface RankingScholar {
   h_index?: number | null;
   tracking_priority: string;
   status: string;
-  dimensions: Record<string, number>;
+  dimensions: Record<string, number | null>;
   eval_date?: string | null;
 }
 
@@ -299,11 +342,86 @@ export function lifecycleOptionsFor(
 }
 
 export const DIMENSION_LABELS: Record<string, string> = {
-  research_impact: 'Research Impact',
-  commercialization: 'Commercialization',
-  career_trajectory: 'Career Trajectory',
-  collaboration_strength: 'Collaboration',
-  field_position: 'Field Position',
+  academic_excellence: 'Academic Excellence',
+  tech_transfer_experience: 'Tech-transfer Experience',
   founder_potential: 'Founder Potential',
-  public_profile: 'Public Profile',
+  growth_trajectory: 'Growth Trajectory',
 };
+
+export const DIMENSION_ORDER = [
+  'academic_excellence',
+  'tech_transfer_experience',
+  'founder_potential',
+  'growth_trajectory',
+] as const;
+
+export const PHASE_LABELS: Record<string, string> = {
+  R1: 'R1 Trainee',
+  R2: 'R2 Recognised',
+  R3a: 'R3a Emerging Independent',
+  R3b: 'R3b Established',
+  R3c: 'R3c Consolidated',
+  R4: 'R4 Leading',
+};
+
+export const SEVERITY_COLORS: Record<string, string> = {
+  low: '#9ca3af',
+  medium: '#eab308',
+  high: '#f97316',
+  critical: '#ef4444',
+};
+
+// ── Continuous Tasks ────────────────────────────────────────
+
+export type ContinuousTaskKind =
+  | 'source'
+  | 'dimension'
+  | 'phase_classifier'
+  | 'narrative_synthesizer';
+
+export interface TaskHealth {
+  runs_7d: number;
+  success_rate_7d: number | null;
+  avg_duration_s_7d: number | null;
+  last_run_ts: string | null;
+  last_status: string | null;
+  last_error: string | null;
+}
+
+export interface ContinuousTaskRow {
+  id: string;
+  kind: ContinuousTaskKind;
+  layer: number;
+  enabled: boolean;
+  default_cadence_days: number;
+  priority_overrides?: Record<string, number> | null;
+  description?: string | null;
+  // Dimension-only fields
+  required_sources?: string[];
+  triage_model?: string;
+  scoring_model?: string;
+  // Narrative-only
+  model?: string;
+  on_demand_only?: boolean;
+  // Phase-classifier-only
+  classifier_model?: string;
+  writes_to?: string;
+  // Source-only
+  rate_limit_per_minute?: number | null;
+  on_failure?: string | null;
+  health: TaskHealth;
+}
+
+export interface HeartbeatStatus {
+  running: boolean;
+  last_tick_at: string | null;
+  tick_interval_s: number;
+}
+
+export interface ContinuousTasksResponse {
+  heartbeat: HeartbeatStatus;
+  sources: ContinuousTaskRow[];
+  dimensions: ContinuousTaskRow[];
+  phase_classifier: ContinuousTaskRow;
+  narrative_synthesizer: ContinuousTaskRow;
+}

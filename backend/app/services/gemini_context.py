@@ -2,21 +2,17 @@
 
 from __future__ import annotations
 
-import base64
 import json
 import mimetypes
-from typing import TYPE_CHECKING, Any, List, Optional, Set, Tuple
+from typing import Any, List, Optional, Set, Tuple
 
 from google.genai import types
 
 from app.config import settings
 from app.models import WorkspaceNode
-from app.services.deep_agent_office_extractors import extract_office_text
+from app.services.office_extractors import extract_office_text
 from app.services.document_text import extract_pdf_text
 from app.services.storage import storage
-
-if TYPE_CHECKING:
-    pass
 
 MAX_ATTACHMENTS = 8
 MAX_TEXT_CHARS = 120_000
@@ -82,14 +78,37 @@ async def build_context_parts(
             warnings.append(f"Could not read node {node.id}: {e}")
             continue
 
+        mime = (node.mime_type or "").strip() or mimetypes.guess_type(node.name)[0] or "application/octet-stream"
+
+        # PDF: always compress to save tokens; handles oversized files too
+        if mime == "application/pdf":
+            from app.services.document_text import compress_pdf
+            pdf_bytes = compress_pdf(raw, target_bytes=cap)
+            if pdf_bytes is None and len(raw) <= cap:
+                pdf_bytes = raw  # gs unavailable but file fits
+            if pdf_bytes is not None:
+                parts.append(types.Part.from_bytes(
+                    data=pdf_bytes, mime_type="application/pdf",
+                ))
+                n += 1
+            else:
+                # Too large even after compression — try text extraction
+                text = extract_pdf_text(raw, max_chars=MAX_TEXT_CHARS)
+                if text.strip():
+                    parts.append(types.Part.from_text(
+                        text=f"--- {_node_label(node)} (PDF; extracted text) ---\n{_truncate_text(text)}"
+                    ))
+                    n += 1
+                else:
+                    warnings.append(f"Node {node.id} PDF too large and no extractable text.")
+            continue
+
         if len(raw) > cap:
             warnings.append(f"Node {node.id} exceeds size limit ({cap} bytes); skipped.")
             continue
 
-        mime = (node.mime_type or "").strip() or mimetypes.guess_type(node.name)[0] or "application/octet-stream"
-
         if mime in (
-            "application/pdf", "image/png", "image/jpeg", "image/jpg",
+            "image/png", "image/jpeg", "image/jpg",
             "image/webp", "image/gif", "audio/mpeg", "audio/mp3", "video/mp4",
         ) or mime.startswith("image/"):
             parts.append(
@@ -179,28 +198,31 @@ def build_harness_user_attachment_text(
             continue
 
         mime = (node.mime_type or "").strip() or mimetypes.guess_type(node.name)[0] or "application/octet-stream"
+
+        # PDF: text extraction works regardless of file size (pypdf reads page by page)
+        if mime == "application/pdf":
+            try:
+                pdf_text = extract_pdf_text(raw, max_chars=MAX_TEXT_CHARS)
+            except Exception as e:
+                warnings.append(f"Node {node.id} PDF extraction failed: {e}")
+                continue
+            if not pdf_text.strip():
+                warnings.append(f"Node {node.id} PDF has no extractable text.")
+                continue
+            chunks.append(
+                f"--- {_node_label(node)} (PDF; extracted text) ---\n{_truncate_text(pdf_text)}"
+            )
+            n += 1
+            continue
+
         if len(raw) > cap:
             warnings.append(f"Node {node.id} exceeds size limit ({cap} bytes); omitted.")
             continue
 
         if mime in (
-            "application/pdf", "image/png", "image/jpeg", "image/jpg",
+            "image/png", "image/jpeg", "image/jpg",
             "image/webp", "image/gif", "audio/mpeg", "audio/mp3", "video/mp4",
         ) or mime.startswith("image/"):
-            if mime == "application/pdf":
-                try:
-                    pdf_text = extract_pdf_text(raw, max_chars=MAX_TEXT_CHARS)
-                except Exception as e:
-                    warnings.append(f"Node {node.id} PDF extraction failed: {e}")
-                    continue
-                if not pdf_text.strip():
-                    warnings.append(f"Node {node.id} PDF has no extractable text.")
-                    continue
-                chunks.append(
-                    f"--- {_node_label(node)} (PDF; extracted text) ---\n{_truncate_text(pdf_text)}"
-                )
-                n += 1
-                continue
             warnings.append(f"Node {node.id} is binary ({mime}); text path cannot inline it.")
             continue
 
@@ -236,59 +258,46 @@ def build_harness_user_attachment_text(
     return "\n\n".join(chunks), warnings
 
 
-def build_deep_agent_multimodal_parts(
-    nodes: List[WorkspaceNode], profile_id: Optional[str],
-) -> Tuple[List[dict[str, Any]], Set[str], List[str]]:
-    """Build LangChain HumanMessage content blocks for native multimodal turns."""
-    if profile_id not in ("gemini_google", "kimi_moonshot"):
-        return [], set(), []
+def build_selected_files_pointer_list(nodes: List[WorkspaceNode]) -> str:
+    """Build a structured pointer list of user-selected files for agent mode.
 
-    blocks: List[dict[str, Any]] = []
-    used_node_ids: Set[str] = set()
-    warnings: List[str] = []
-    cap = settings.CHAT_MAX_ATTACHMENT_BYTES
-    count = 0
+    The agent uses workspace_read_file(path) to read files it needs.
+    No file content is inlined -- only metadata for triage.
+    """
+    files = [n for n in nodes if n.node_type != "folder"]
+    if not files:
+        return ""
 
-    for node in nodes:
-        if count >= MAX_ATTACHMENTS:
-            warnings.append("Attachment limit reached; some files omitted.")
-            break
-        if node.node_type != "file" or not node.storage_key:
-            continue
-        try:
-            raw = storage.read_file_sync(node.storage_key)
-        except Exception as e:
-            warnings.append(f"Could not read node {node.id}: {e}")
-            continue
-        if len(raw) > cap:
-            warnings.append(f"Node {node.id} exceeds size limit ({cap} bytes); skipped.")
-            continue
+    lines = [
+        f"## User-selected files ({len(files)} file{'s' if len(files) != 1 else ''})",
+        "The user selected these files as context for this task. "
+        "Use workspace_read_file(path) to read the ones relevant to the request.",
+        "",
+        "| # | Path | Type | Size | Description |",
+        "|---|------|------|------|-------------|",
+    ]
+    for i, node in enumerate(files, 1):
+        mime = (node.mime_type or "").strip()
+        ext = mime.split("/")[-1].upper() if mime else "—"
+        if node.size_bytes and node.size_bytes > 1024 * 1024:
+            size = f"{node.size_bytes / (1024 * 1024):.1f}MB"
+        elif node.size_bytes and node.size_bytes > 1024:
+            size = f"{node.size_bytes / 1024:.0f}KB"
+        elif node.size_bytes:
+            size = f"{node.size_bytes}B"
+        else:
+            size = "—"
+        desc = "—"
+        if node.metadata_json:
+            try:
+                meta = json.loads(node.metadata_json)
+                desc = meta.get("description") or "—"
+            except Exception:
+                pass
+        if node.node_type == "bookmark":
+            path = f"{node.path} -> {node.url or ''}"
+        else:
+            path = node.path
+        lines.append(f"| {i} | {path} | {ext} | {size} | {desc} |")
 
-        mime = (node.mime_type or "").strip() or mimetypes.guess_type(node.name)[0] or "application/octet-stream"
-        if mime not in (
-            "application/pdf", "image/png", "image/jpeg", "image/jpg",
-            "image/webp", "image/gif", "audio/mpeg", "audio/mp3", "video/mp4",
-        ) and not mime.startswith("image/"):
-            continue
-
-        normalized_mime = "image/jpeg" if mime == "image/jpg" else mime
-        b64 = base64.b64encode(raw).decode("ascii")
-
-        if profile_id == "gemini_google":
-            blocks.append({"type": "media", "mime_type": normalized_mime, "data": b64})
-            used_node_ids.add(node.id)
-            count += 1
-            continue
-
-        if normalized_mime.startswith("image/"):
-            blocks.append({"type": "image_url", "image_url": {"url": f"data:{normalized_mime};base64,{b64}"}})
-            used_node_ids.add(node.id)
-            count += 1
-            continue
-        if normalized_mime.startswith("video/"):
-            blocks.append({"type": "video_url", "video_url": {"url": f"data:{normalized_mime};base64,{b64}"}})
-            used_node_ids.add(node.id)
-            count += 1
-            continue
-
-    return blocks, used_node_ids, warnings
+    return "\n".join(lines)

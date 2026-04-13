@@ -1,12 +1,22 @@
-"""Deep Agent office extractors for DOCX/PPTX/XLSX resources."""
+"""Office document text extractors.
+
+OOXML formats (docx/pptx/xlsx) are extracted directly via zipfile XML parsing.
+Legacy binary formats (doc/ppt/xls) are converted to OOXML via LibreOffice
+headless, then extracted with the same OOXML functions.
+"""
 
 from __future__ import annotations
 
+import logging
 import re
+import subprocess
+import tempfile
 import zipfile
 from io import BytesIO
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
+logger = logging.getLogger(__name__)
 
 _XML_TAG_RE = re.compile(r"\{.*\}")
 
@@ -109,14 +119,65 @@ def extract_xlsx_text(raw: bytes, *, max_chars: int) -> str:
     return _truncate("\n".join(lines).strip(), max_chars)
 
 
+# ── Legacy binary format conversion via LibreOffice ──────────────────
+
+_LEGACY_CONVERSIONS: dict[str, tuple] = {
+    "application/msword": ("doc", "docx", extract_docx_text),
+    "application/vnd.ms-powerpoint": ("ppt", "pptx", extract_pptx_text),
+    "application/vnd.ms-excel": ("xls", "xlsx", extract_xlsx_text),
+}
+
+
+def _convert_and_extract(
+    raw: bytes, src_ext: str, dst_ext: str, extractor, *, max_chars: int,
+) -> str | None:
+    """Convert a legacy office file to modern format via LibreOffice, then extract text."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        src = Path(tmpdir) / f"input.{src_ext}"
+        src.write_bytes(raw)
+        try:
+            # Each invocation gets its own profile dir to avoid LibreOffice's
+            # single-instance profile lock when multiple conversions run concurrently.
+            profile_dir = Path(tmpdir) / "profile"
+            profile_dir.mkdir()
+            subprocess.run(
+                ["soffice", "--headless",
+                 f"-env:UserInstallation=file://{profile_dir}",
+                 "--convert-to", dst_ext,
+                 "--outdir", tmpdir, str(src)],
+                capture_output=True, timeout=30,
+            )
+        except FileNotFoundError:
+            logger.debug("soffice not installed — cannot convert .%s", src_ext)
+            return None
+        except subprocess.TimeoutExpired:
+            logger.warning("soffice timed out converting .%s", src_ext)
+            return None
+        converted = Path(tmpdir) / f"input.{dst_ext}"
+        if not converted.exists():
+            logger.warning("soffice conversion produced no output for .%s", src_ext)
+            return None
+        try:
+            return extractor(converted.read_bytes(), max_chars=max_chars)
+        except Exception:
+            logger.exception("Extraction failed after converting .%s → .%s", src_ext, dst_ext)
+            return None
+
+
 def extract_office_text(
     raw: bytes, *, mime_type: str, max_chars: int
 ) -> str | None:
     mime = (mime_type or "").strip().lower()
+    # Modern OOXML — direct extraction
     if mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
         return extract_docx_text(raw, max_chars=max_chars)
     if mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
         return extract_pptx_text(raw, max_chars=max_chars)
     if mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
         return extract_xlsx_text(raw, max_chars=max_chars)
+    # Legacy binary — convert via LibreOffice then extract
+    conv = _LEGACY_CONVERSIONS.get(mime)
+    if conv:
+        src_ext, dst_ext, extractor = conv
+        return _convert_and_extract(raw, src_ext, dst_ext, extractor, max_chars=max_chars)
     return None

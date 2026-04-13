@@ -10,9 +10,13 @@ This folder is the canonical source for technical documentation.
 - `ARCHITECTURE.md` - Backend/frontend architecture, data flow, storage model, and extension points.
 - `API_REFERENCE.md` - Endpoint contracts and data models.
 
-## Plans
+## Design History
 
-- `plans/2026-03-26-vc-portfolio-agent-harness-design-and-plan.md` — Agent harness, multimodel, tools, and artifact editing (canonical).
+Implemented design specs kept for rationale ("why did we do it this way"), not implementation guidance:
+
+- `design/MVP-prd.md` — Original MVP PRD (parking-lot ingestion, resolver isolation, StorageAdapter abstraction). Workspace model replaced Resources/Artifacts.
+- `design/ENTITY_WORKSPACE_DESIGN.md` — Unified workspace design replacing dual Resource/Artifact model.
+- `design/SCHOLAR_EVALUATION_FRAMEWORK.md` — Canonical evaluation design (8 shared concepts + 4 MECE dimensions + 3-layer architecture).
 
 ## Recommended Reading Order
 
@@ -36,8 +40,8 @@ This folder is the canonical source for technical documentation.
 - If **setup, tests, or dev workflow** change, update `DEVELOPER_GUIDE.md`.
 - If **LangSmith** changes, update `TRACING.md`.
 - If **product-level** capabilities change, update `../README.md`.
-- If **Academic Tracking v2** agent, API, storage, or models change, update `API_REFERENCE.md` (Academic section), `ARCHITECTURE.md` (Academic module section), and `../CLAUDE.md` (Academic Tracking Module). Design spec lives in `../doc/ACADEMIC_TRACKING_V2_DESIGN.md` — do not modify.
-- **Design history** lives in `docs/plans/`; **`API_REFERENCE.md` + `ARCHITECTURE.md`** are the source of truth for *current* shipped behavior.
+- If **Academic Tracking v2** agent, API, storage, or models change, update `API_REFERENCE.md` (Academic section), `ARCHITECTURE.md` (Academic module section), and `../CLAUDE.md` (Academic Tracking Module). Design spec: `design/SCHOLAR_EVALUATION_FRAMEWORK.md`.
+- **`API_REFERENCE.md` + `ARCHITECTURE.md`** are the source of truth for *current* shipped behavior; `design/` holds historical rationale.
 
 ## Workspace & chat (quick map)
 
@@ -46,14 +50,14 @@ This folder is the canonical source for technical documentation.
 | Workspace endpoints (tree, files, versioning, trash, ops) | `API_REFERENCE.md` → Workspace |
 | Chat endpoints, bodies, env summary | `API_REFERENCE.md` → Entity chat |
 | Deep agent, 13 workspace tools, provenance enforcement | `ARCHITECTURE.md` → Portfolio chat |
-| Workspace design (full spec) | `../doc/ENTITY_WORKSPACE_DESIGN.md` |
+| Workspace design (full spec) | `design/ENTITY_WORKSPACE_DESIGN.md` |
 | Local env, pytest (unit + optional real LLM E2E), manual checklist | `DEVELOPER_GUIDE.md` → Configuration, Testing |
 
 ## Academic Tracking v2 (quick map)
 
 | Topic | Where |
 |--------|--------|
-| Full design spec (storage, agent, tools, frontend, migration) | `../doc/ACADEMIC_TRACKING_V2_DESIGN.md` |
+| Full design spec (4 MECE dimensions, 8 shared concepts, 3-layer architecture) | `design/SCHOLAR_EVALUATION_FRAMEWORK.md` |
 | Architecture, two-layer storage, agent goals, service modules, SQL tables | `ARCHITECTURE.md` → Academic Tracking Module (v2) |
 | 38 API endpoints, request/response schemas, data models | `API_REFERENCE.md` → Academic Tracking (v2) |
 | E2E tests, manual testing checklist | `DEVELOPER_GUIDE.md` → Testing |

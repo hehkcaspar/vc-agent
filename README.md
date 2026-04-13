@@ -93,8 +93,7 @@ vc-agent/
 ├── backend/
 ├── frontend/
 ├── data/                 # runtime data (gitignored)
-├── docs/                 # technical documentation
-└── doc/                  # product docs (PRD)
+└── docs/                 # technical documentation + design rationale
 ```
 
 ## Documentation
@@ -105,7 +104,7 @@ Use `docs/README.md` as the documentation index.
 - `docs/DEVELOPER_GUIDE.md`
 - `docs/TRACING.md`
 - `docs/API_REFERENCE.md`
-- `doc/MVP-prd.md`
+- `docs/design/MVP-prd.md`
 
 ## Core Architecture Principles
 

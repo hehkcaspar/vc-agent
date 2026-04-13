@@ -110,3 +110,9 @@ Short list: **data requests**, **reference calls**, **experts**, **legal/IP**, *
 ---
 
 Produce one cohesive markdown document suitable for saving as a diligence artifact. **Cite** specific attached resources or excerpts when you rely on them; do not invent document contents you did not receive.
+
+**IMPORTANT — output rules:**
+- **Return the full report as your final message.** The system will save it to the workspace automatically as a versioned deliverable.
+- **Do NOT use `workspace_write_file` to create the report yourself.** If you write it to a file, the saved deliverable will only contain a short pointer instead of the full content.
+- You MAY use workspace tools to **read** source files, **search**, and **annotate** — just do not write the report file yourself.
+- **Analyze primary sources only.** Ignore any existing files in `Deliverables/` (these are prior reports or memos). Base your analysis on source materials in the Data Room and other non-deliverable folders.

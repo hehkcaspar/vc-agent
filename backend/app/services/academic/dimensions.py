@@ -24,61 +24,60 @@ class Dimension(TypedDict):
     prompt: str
 
 
+# Appended to every dim prompt so the LLM knows how to signal
+# "insufficient evidence" via score=0 sentinel.
+_SCOREABLE_GUIDANCE = (
+    "\n\nScoring zero: If there is genuinely insufficient evidence to "
+    "evaluate this dimension (e.g., zero commercial activity for "
+    "tech-transfer, no data whatsoever), set score to 0. Reserve this "
+    "for cases where the dimension is fundamentally inapplicable to "
+    "this scholar's profile — not merely because data is sparse."
+)
+
+# NOTE: these are fallback seeds used only when `data/config/dimensions.json`
+# is missing or empty. The real source of truth is the JSON file. The seeds
+# here mirror the 4 MECE dims from the scholar evaluation framework doc;
+# when we update `dimensions.json` with richer prompts those override
+# these defaults on every read.
 DEFAULT_DIMENSIONS: list[Dimension] = [
     {
-        "key": "research_impact",
-        "name": "Research Impact",
+        "key": "academic_excellence",
+        "name": "Academic Excellence",
         "prompt": (
-            "Assess citation impact, h-index (relative to career stage and field), "
-            "publication venue quality, and influence on the scholar's subfield."
+            "Holistic judgment of scientific contribution + peer standing. "
+            "Use author-position-weighted citations, field recognition "
+            "(awards, editorial roles, keynotes), and collaboration quality. "
+            "Calibrate top bands against billion-dollar-outcome potential."
         ),
     },
     {
-        "key": "commercialization",
-        "name": "Commercialization",
+        "key": "tech_transfer_experience",
+        "name": "Tech-transfer Experience",
         "prompt": (
-            "Assess commercial potential: patents filed, startups founded, "
-            "industry collaborations, licensing activity, and applicability of research."
-        ),
-    },
-    {
-        "key": "career_trajectory",
-        "name": "Career Trajectory",
-        "prompt": (
-            "Assess career momentum: recent promotions, lab growth, funding trajectory, "
-            "and upward/downward trends in output and influence."
-        ),
-    },
-    {
-        "key": "collaboration_strength",
-        "name": "Collaboration Strength",
-        "prompt": (
-            "Assess the strength and breadth of the scholar's collaboration network: "
-            "co-author quality, cross-institution work, and interdisciplinary reach."
-        ),
-    },
-    {
-        "key": "field_position",
-        "name": "Field Position",
-        "prompt": (
-            "Assess the scholar's standing within their primary field: "
-            "percentile among peers, recognition, keynotes, editorial roles, awards."
+            "Historical track record of moving research to market. Score "
+            "against commercial peers. Weight revenue > investor funding > "
+            "grants. Verify IP ownership structure. Judge ventures, patents, "
+            "licensing, and partnerships holistically."
         ),
     },
     {
         "key": "founder_potential",
         "name": "Founder Potential",
         "prompt": (
-            "Assess founder potential: prior founding experience, industry exposure, "
-            "product thinking, communication, and willingness to commercialise."
+            "Predict founder success probability. Core signals: "
+            "founder-market fit (including domain dominance), determination, "
+            "commitment/bridging, team-attracting ability, public presence, "
+            "and prior operating experience (bonus, not required)."
         ),
     },
     {
-        "key": "public_profile",
-        "name": "Public Profile",
+        "key": "growth_trajectory",
+        "name": "Growth Trajectory",
         "prompt": (
-            "Assess visibility: personal website, media coverage, social presence, "
-            "talks, and ease of outreach."
+            "Slope across scientific / commercial / operator axes over the "
+            "recent past. Multi-axis acceleration > single-axis spike. "
+            "Phase-sensitive: flat is fine at R4, concerning at R3a. "
+            "Recency weighted; last 24 months dominate."
         ),
     },
 ]
@@ -107,21 +106,9 @@ def write_dimensions(dims: list[Dimension]) -> None:
     )
 
 
-def render_dimensions_schema_block(dims: list[Dimension]) -> str:
-    """Render the JSON-shape example shown in the system prompt."""
-    lines = ["  \"dimensions\": {"]
-    for i, d in enumerate(dims):
-        comma = "," if i < len(dims) - 1 else ""
-        lines.append(
-            f'    "{d["key"]}": {{ "score": 0, "explanation": "...", "evidence": ["..."] }}{comma}'
-        )
-    lines.append("  }")
-    return "\n".join(lines)
-
-
-def render_dimensions_rubric(dims: list[Dimension]) -> str:
-    """Render the per-dimension scoring guidance block."""
-    lines = []
-    for d in dims:
-        lines.append(f"- **{d['name']}** (`{d['key']}`): {d['prompt']}")
-    return "\n".join(lines)
+    # NOTE: v1 had render_dimensions_schema_block() and
+    # render_dimensions_rubric() here — they were used by the deleted
+    # scholar_prompts.py to interpolate dim prompts into a monolithic
+    # system prompt. In v2, each dim's prompt is read directly from
+    # dimensions.json and passed to generate_structured() by
+    # dim_runner.py. The render functions are no longer needed.

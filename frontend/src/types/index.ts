@@ -99,6 +99,18 @@ export interface InboxProcessJobStatus {
   error_message?: string | null;
 }
 
+export interface ExtractionProgress {
+  status: 'idle' | 'running' | 'done';
+  total?: number;
+  completed?: number;
+  failed?: number;
+  remaining?: number;
+  current_file?: string | null;
+  errors?: Array<{ name: string; error: string }>;
+}
+
+export type AgentMode = 'one_shot' | 'react';
+
 /** Stored as assistant message content JSON when a preset or agent creates a deliverable. */
 export interface DeliverableCardPayload {
   _vc_chat: 'artifact_card';
@@ -169,6 +181,7 @@ export interface ChatMessage {
 export interface ChatSessionDetail {
   session: ChatSession;
   messages: ChatMessage[];
+  active_job_id?: string | null;
 }
 
 export interface ChatMessageResult {

@@ -12,23 +12,17 @@ import type { RankingScholar, Scholar } from '../../types/academic';
 import { DIMENSION_LABELS, getScoreColor } from '../../types/academic';
 
 const DIMENSION_KEYS = [
-  'research_impact',
-  'commercialization',
-  'career_trajectory',
-  'collaboration_strength',
-  'field_position',
+  'academic_excellence',
+  'tech_transfer_experience',
   'founder_potential',
-  'public_profile',
+  'growth_trajectory',
 ];
 
 const SHORT_LABELS: Record<string, string> = {
-  research_impact: 'Impact',
-  commercialization: 'Comm.',
-  career_trajectory: 'Career',
-  collaboration_strength: 'Collab.',
-  field_position: 'Field',
+  academic_excellence: 'Academic',
+  tech_transfer_experience: 'Tech-transfer',
   founder_potential: 'Founder',
-  public_profile: 'Profile',
+  growth_trajectory: 'Trajectory',
 };
 
 type SortKey = 'name' | 'h_index' | 'rank' | string;
@@ -72,9 +66,12 @@ export function RankingView({ onSelectScholar }: RankingViewProps) {
       if (sortKey === 'name') return dir * a.name.localeCompare(b.name);
       if (sortKey === 'h_index') return dir * ((a.h_index ?? 0) - (b.h_index ?? 0));
       if (sortKey === 'rank') return dir * (a.weightedRank - b.weightedRank);
-      // Dimension key
-      const va = a.dimensions[sortKey] ?? 0;
-      const vb = b.dimensions[sortKey] ?? 0;
+      // Dimension key — null scores sort to bottom
+      const va = a.dimensions[sortKey];
+      const vb = b.dimensions[sortKey];
+      if (va == null && vb == null) return 0;
+      if (va == null) return dir;
+      if (vb == null) return -dir;
       return dir * (va - vb);
     });
     return copy;

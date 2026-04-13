@@ -127,23 +127,23 @@ def main():
     for p in papers_data.get("papers", [])[:3]:
         print(f"  - {p['title']} ({p.get('year')}) — {p.get('citations', 0)} cit.")
 
-    # Check evaluations
+    # Check evaluations (v2 shape)
     r = c.get(f"/academic/scholars/{scholar_id}/evaluations")
-    evals = r.json().get("evaluations", [])
-    if evals:
-        e = evals[0]
+    eval_data = r.json()
+    dims = eval_data.get("dimensions", {})
+    if dims:
         print(f"\nEvaluation dimensions:")
-        for dim, data in e.get("dimensions", {}).items():
-            print(f"  {dim}: {data.get('score', '?')}")
+        for dim_id, dim_eval in dims.items():
+            if dim_eval and "score" in dim_eval:
+                print(f"  {dim_id}: {dim_eval.get('score', '?')} ({dim_eval.get('uncertainty', '?')})")
 
-    # Check reports
-    r = c.get(f"/academic/scholars/{scholar_id}/reports")
-    reports = r.json().get("reports", [])
-    if reports:
-        r = c.get(f"/academic/scholars/{scholar_id}/reports/{reports[0]['id']}")
-        content = r.json().get("content", "")
-        print(f"\nReport: {len(content)} chars")
-        print(f"  Preview: {content[:200]}...")
+    # Check narrative history (v2 replaces reports)
+    r = c.get(f"/academic/scholars/{scholar_id}/narrative-history")
+    narratives = r.json().get("narratives", [])
+    if narratives:
+        latest = narratives[0]
+        print(f"\nNarrative: {latest.get('headline', '')[:100]}")
+        print(f"  Summary: {latest.get('summary', '')[:200]}...")
 
     # Validate basic expectations
     h = scholar.get("h_index")

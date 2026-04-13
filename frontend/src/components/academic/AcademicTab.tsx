@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { ChevronUp, ChevronDown, AlertTriangle, Play, Square, Pencil, Trash2 } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
+import { ChevronUp, ChevronDown, AlertTriangle, Play, Square, Pencil, Trash2, Activity } from 'lucide-react';
 import { EventIcon } from '../../lib/eventIcons';
 import { TagMenu } from './TagMenu';
 import ReactMarkdown from 'react-markdown';
@@ -11,6 +11,7 @@ import { AddScholarModal } from './AddScholarModal';
 import { Modal } from '../ui/Modal';
 import { RankingView } from './RankingView';
 import { ScholarDetail } from './ScholarDetail';
+import { TasksView } from './TasksView';
 import type { Scholar, UserSettableStatus } from '../../types/academic';
 import { SCHOLAR_STATUS_LABELS, PRIORITY_LABELS, lifecycleOptionsFor } from '../../types/academic';
 
@@ -43,7 +44,11 @@ function timeAgo(dateStr: string): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs}h ago`;
   const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
+  if (days < 30) return `${days}d ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  const years = Math.floor(months / 12);
+  return `${years}y ago`;
 }
 
 export function AcademicTab() {
@@ -51,10 +56,24 @@ export function AcademicTab() {
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingScholar, setEditingScholar] = useState<Scholar | null>(null);
   const [feedOpen, setFeedOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'ranking'>('list');
+  const [viewMode, setViewMode] = useState<'list' | 'ranking' | 'tasks'>('list');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [digestOpen, setDigestOpen] = useState(false);
   const [digestContent, setDigestContent] = useState<string | null>(null);
+
+  const [logOpen, setLogOpen] = useState(false);
+  const [logEntries, setLogEntries] = useState<
+    Array<{
+      ts: string;
+      scholar_id: string;
+      scholar_name?: string;
+      step: string;
+      status: 'start' | 'ok' | 'done' | 'error' | 'cancelled' | 'skipped';
+      duration_s?: number;
+      detail?: unknown;
+    }>
+  >([]);
+  const [logLoading, setLogLoading] = useState(false);
 
   const [showDimModal, setShowDimModal] = useState(false);
   const [newDimName, setNewDimName] = useState('');
@@ -196,6 +215,48 @@ export function AcademicTab() {
     }
   };
 
+  const fetchLog = async () => {
+    try {
+      const entries = await academicApi.evalLog.list(300);
+      setLogEntries(entries);
+    } catch (err) {
+      console.error('Failed to load eval log:', err);
+    } finally {
+      setLogLoading(false);
+    }
+  };
+
+  const handleOpenLog = () => {
+    setLogLoading(true);
+    setLogOpen(true);
+    fetchLog();
+  };
+
+  const anyEvaluating = scholars.some((s) => s.status === 'evaluating');
+
+  useEffect(() => {
+    if (!logOpen) return;
+    const interval = setInterval(fetchLog, anyEvaluating ? 2000 : 5000);
+    return () => clearInterval(interval);
+  }, [logOpen, anyEvaluating]);
+
+  // Derive "currently running" steps: a "start" entry with no matching terminal
+  // (done/ok/error) for the same scholar_id + step that came afterwards.
+  const activeRuns = useMemo(() => {
+    const terminated = new Set<string>();
+    const active: typeof logEntries = [];
+    // logEntries are newest-first — walk forward (newest to oldest)
+    for (const e of logEntries) {
+      const key = `${e.scholar_id}::${e.step}`;
+      if (e.status === 'start') {
+        if (!terminated.has(key)) active.push(e);
+      } else {
+        terminated.add(key);
+      }
+    }
+    return active;
+  }, [logEntries]);
+
   const handleFeedEventClick = (scholarId: string) => {
     const s = scholars.find((sc) => sc.id === scholarId);
     if (s) {
@@ -263,7 +324,22 @@ export function AcademicTab() {
             >
               Ranking
             </button>
+            <button
+              className={`view-toggle-btn ${viewMode === 'tasks' ? 'active' : ''}`}
+              onClick={() => setViewMode('tasks')}
+            >
+              Tasks
+            </button>
           </div>
+          <button
+            className={`btn-secondary activity-log-btn ${anyEvaluating ? 'is-running' : ''}`}
+            onClick={handleOpenLog}
+            title="Show activity log"
+          >
+            <Activity size={14} />
+            <span>Activity</span>
+            {anyEvaluating && <span className="pulse-dot" />}
+          </button>
           <button className="btn-secondary" onClick={() => setShowDimModal(true)}>
             Dimensions
           </button>
@@ -315,7 +391,18 @@ export function AcademicTab() {
                   <span className={`signal-feed-sig sig-${evt.significance}`}>
                     {evt.significance}
                   </span>
-                  <span className="signal-feed-time">{timeAgo(evt.created_at)}</span>
+                  <span className="signal-feed-time">
+                    {evt.event_date ? (
+                      <>
+                        {new Date(evt.event_date).toLocaleDateString()}
+                        {new Date(evt.created_at).toLocaleDateString() !== new Date(evt.event_date).toLocaleDateString() && (
+                          <span className="signal-feed-discovered"> · {timeAgo(evt.created_at)}</span>
+                        )}
+                      </>
+                    ) : (
+                      timeAgo(evt.created_at)
+                    )}
+                  </span>
                 </div>
               ))}
             </div>
@@ -327,7 +414,7 @@ export function AcademicTab() {
       {digestOpen && digestContent && (
         <div className="digest-section">
           <div className="digest-header">
-            <span className="digest-title">Portfolio Digest</span>
+            <span className="digest-title">Scholar Digest</span>
             <button className="btn-text" onClick={() => setDigestOpen(false)}>Close</button>
           </div>
           <div className="digest-content">
@@ -364,6 +451,9 @@ export function AcademicTab() {
       {viewMode === 'ranking' && (
         <RankingView onSelectScholar={(s) => setSelectedScholar(s as Scholar)} />
       )}
+
+      {/* Tasks view */}
+      {viewMode === 'tasks' && <TasksView />}
 
       {/* List view */}
       {viewMode === 'list' && isLoading && <p className="text-muted">Loading...</p>}
@@ -585,6 +675,77 @@ export function AcademicTab() {
                 </button>
               </div>
             </div>
+      </Modal>
+
+      {/* Activity log modal */}
+      <Modal
+        isOpen={logOpen}
+        onClose={() => setLogOpen(false)}
+        title="Activity Log"
+        size="wide"
+      >
+        <div className="modal-body activity-log-body">
+          <div className="activity-log-subhead">
+            <span className="text-muted" style={{ fontSize: '0.85em' }}>
+              {logLoading
+                ? 'Loading…'
+                : `${logEntries.length} entr${logEntries.length === 1 ? 'y' : 'ies'} · auto-refresh ${anyEvaluating ? '2s' : '5s'}`}
+            </span>
+            <button className="btn-text" onClick={fetchLog}>
+              Refresh
+            </button>
+          </div>
+
+          <div className="activity-log-section">
+            <h4 className="activity-log-section-title">
+              Running now
+              <span className="activity-log-badge">{activeRuns.length}</span>
+            </h4>
+            {activeRuns.length === 0 ? (
+              <p className="text-muted" style={{ fontSize: '0.85em', margin: 0 }}>
+                Nothing running.
+              </p>
+            ) : (
+              <ul className="activity-log-running-list">
+                {activeRuns.map((e, i) => (
+                  <li key={`${e.scholar_id}-${e.step}-${i}`} className="activity-log-running-item">
+                    <span className="pulse-dot" />
+                    <span className="activity-log-scholar">{e.scholar_name || e.scholar_id}</span>
+                    <span className="activity-log-step">{e.step}</span>
+                    <span className="activity-log-time">
+                      started {timeAgo(e.ts)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="activity-log-section">
+            <h4 className="activity-log-section-title">Recent history</h4>
+            {logEntries.length === 0 ? (
+              <p className="text-muted" style={{ fontSize: '0.85em', margin: 0 }}>
+                No log entries yet.
+              </p>
+            ) : (
+              <div className="activity-log-table">
+                {logEntries.slice(0, 200).map((e, i) => (
+                  <div key={`${e.ts}-${i}`} className={`activity-log-row status-${e.status}`}>
+                    <span className="activity-log-ts">
+                      {new Date(e.ts).toLocaleTimeString()}
+                    </span>
+                    <span className={`activity-log-status status-${e.status}`}>{e.status}</span>
+                    <span className="activity-log-scholar">{e.scholar_name || e.scholar_id.slice(0, 8)}</span>
+                    <span className="activity-log-step">{e.step}</span>
+                    <span className="activity-log-dur">
+                      {e.duration_s != null ? `${e.duration_s.toFixed(1)}s` : ''}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </Modal>
     </div>
   );

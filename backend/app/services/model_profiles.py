@@ -131,7 +131,7 @@ def build_chat_model(
     return model
 
 
-def build_deep_agent_base_chat_model(
+def build_agent_chat_model(
     profile_id: Optional[str] = None,
 ) -> BaseChatModel:
     """

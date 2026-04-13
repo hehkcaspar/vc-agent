@@ -3,7 +3,6 @@ import { Menu, ChevronLeft, ChevronRight, Briefcase, GraduationCap, Moon, Sun } 
 import { ChatModelProfileProvider } from '../context/ChatModelProfileContext';
 import { PortfolioTab } from './PortfolioTab';
 import { AcademicTab } from './academic/AcademicTab';
-import { SidebarModelSelect } from './SidebarModelSelect';
 import './Layout.css';
 
 type TabId = 'portfolio' | 'academic';
@@ -121,7 +120,6 @@ function LayoutShell() {
           </button>
         </nav>
         <div className="sidebar-footer">
-          <SidebarModelSelect />
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle Theme">
             <span className="nav-icon">{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</span>
             <span className="theme-text">{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>

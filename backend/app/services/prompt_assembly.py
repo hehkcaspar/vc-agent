@@ -45,7 +45,7 @@ def build_portfolio_system_prompt(
 """
 
 
-def build_deep_agent_system_prompt(
+def build_agent_system_prompt(
     entity: EntityBrief,
     *,
     extras: str,
@@ -63,6 +63,11 @@ You have 13 workspace tools to browse, read, write, and organize files.
 
 **Reading:** Use workspace_read_file(path) with paths from the tree context.
 Use workspace_search_files(query, folder) when the tree doesn't have what you need.
+
+**User-selected files:** When the user selects specific files for a task, they appear as a
+pointer list in the user message with path, type, size, and description. Use
+workspace_read_file(path) to read the files relevant to the task. You do not need to read
+all of them — triage by metadata first.
 
 **Creating deliverables:** Write to Deliverables/ folder:
   - Memos: Deliverables/Memos/{{title}}.md

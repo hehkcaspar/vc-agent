@@ -5,7 +5,7 @@ Full scholar state lives in JSON/JSONL/markdown files on disk under
 ``data/scholars/{scholar_id}/``.  These SQL tables exist only for
 cross-scholar queries, scheduling, and signal feeds.
 
-See doc/ACADEMIC_TRACKING_V2_DESIGN.md §2.4.
+See docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md.
 """
 
 import uuid
@@ -64,6 +64,7 @@ class ScholarEvent(AcademicBase):
     significance = Column(String, default="medium")          # high | medium | low
     title = Column(String, nullable=True)
     is_read = Column(Boolean, default=False)
+    source_url = Column(String, nullable=True)
     event_date = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)
 
@@ -97,6 +98,10 @@ class AcademicChatSession(AcademicBase):
     id = Column(String, primary_key=True, default=_uuid)
     scholar_id = Column(String, ForeignKey("scholars.id"), nullable=False)
     title = Column(String, nullable=True)
+    # V2 — Gemini Interactions API server-side session id. Nullable;
+    # the first turn of a session has no previous_interaction_id and
+    # this field is populated once the first turn completes.
+    last_interaction_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
