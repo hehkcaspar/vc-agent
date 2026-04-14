@@ -156,13 +156,54 @@ The Deep Agent system prompt is assembled from three layers so the agent underst
 
 #### Entity-level metadata (`entities.metadata_json`)
 
-Separate from workspace-node metadata. Stores Tier 1-3 VC metadata for the company itself — company_name, legal_name, description, industry_tags, business_model, founders, team, investment_stage, raise, prior rounds, investors, signals — plus meta (`_extracted_at`, `_extraction_version`, `_files_examined[]`).
+Separate from workspace-node metadata. Stores Tier 1-3 VC metadata for the company itself — company_name, legal_name, description, industry_tags, business_model, founders, team, investment_stage, raise, prior rounds, investors, signals — plus meta (`_extracted_at`, `_extraction_version`, `_files_examined[]`), user-editable positions (`_positions[]`), and founder-status flags.
 
-- **Writer:** `extract_info` preset (agent-only, force-`react`). The agent writes `Company Profile.json` at the workspace root via `workspace_write_file`; post-processing in `routers/chat.py:run_preset_agent_job` reads that file, validates shape (`metadata_extraction.validate_entity_metadata`), merges with existing metadata (`merge_entity_metadata` — null/empty incoming doesn't clobber existing non-null), and writes to `entities.metadata_json`. Post-processing also auto-patches `Entity.name` / `Entity.website` when extraction finds clearly better values.
-- **Trusted server-side overrides:** `_extracted_at` always set to `utc_now().isoformat()` (LLMs hallucinate timestamps); `_files_examined` rebuilt by parsing `status_trace` for `Reading X...` events emitted by the `workspace_read_file` tool (more reliable than trusting the agent's self-report).
+- **Writer (extract_info):** `extract_info` preset (agent-only, force-`react`). The agent writes `Company Profile.json` at the workspace root via `workspace_write_file`; post-processing in `routers/chat.py:run_preset_agent_job` reads that file, validates shape (`metadata_extraction.validate_entity_metadata`), merges with existing metadata (`merge_entity_metadata` — null/empty incoming doesn't clobber existing non-null, meta keys + arrays always overwrite when non-empty), and writes to `entities.metadata_json`. Post-processing also auto-patches `Entity.name` / `Entity.website` when extraction finds clearly better values.
+- **Writer (legal_review):** `legal_review` preset (agent-only, force-`react`). Agent reviews user-selected legal docs against the two-tier reference system (below), writes `Legal Review.json` with a complete `legal_reviews[]` array; post-processing validates (`metadata_extraction.validate_legal_reviews`), rebuilds `documents_reviewed[]` from `status_trace`, overrides `review_date` + `checklist_version` with trusted server values, merges per `round_name` (`merge_legal_reviews`) into `entities.metadata_json.legal_reviews`, and re-persists the corrected file at workspace root. Same belt-and-suspenders pattern as extract_info: `parse_json_loose` salvage + plain-text failure message when the file is missing or unreadable.
+- **Writer (edit modal):** the portfolio edit modal (`EntityEditModal.tsx`) patches `entities.metadata_json` directly via `PATCH /entities/{id}` to set `_positions[]` and toggle each founder's `status` (`active | departed`). The modal preserves all extract_info fields by cloning `entity.metadata` before applying its changes.
+- **Trusted server-side overrides (extract_info):** `_extracted_at` always set to `utc_now().isoformat()` (LLMs hallucinate timestamps); `_files_examined` rebuilt by parsing `status_trace` for `Reading X...` events emitted by the `workspace_read_file` tool (more reliable than trusting the agent's self-report).
 - **Salvage path:** If the agent skips `workspace_write_file` entirely, post-processing tries `parse_json_loose` on the agent's final text reply and writes the file itself; if both fail, emits a plain-text failure message (not an `artifact_card`) so the UI renders a normal error rather than raw JSON.
 - **Versioning for free:** Workspace automatic versioning snapshots each prior `Company Profile.json` on overwrite, so extraction history is browsable via the UI version picker. `entities.metadata_json` itself is a single-value cache of the latest extraction.
 - **Incremental re-runs:** `render_extract_info` injects the previous `_extracted_at` + `_files_examined` + full metadata snapshot into the prompt so the agent focuses on new/changed files rather than re-reading everything.
+
+**`_positions[]` schema** — each element represents one Taihill-controlled position on the entity. A single entity can have multiple positions (e.g. Seed via Fund II, Series A via Fund III):
+
+```json
+"_positions": [
+  {
+    "fund_id": "taihill_v3_lp",           // references data/config/funds.json
+    "invested_amount": 500000,             // number, in `currency`
+    "currency": "USD",
+    "current_value": 750000,               // optional; omit → MOIC hidden
+    "round_at_entry": "Series Pre-A",
+    "instrument": "equity",                // equity | SAFE | convertible_note | warrant | other
+    "entry_date": "2026-01-15",            // ISO date, optional
+    "notes": "Co-led with Future Capital"
+  }
+]
+```
+
+`EntityHeader.tsx` aggregates positions for the header chips (invested total, MOIC) and only renders them when `deal_stage ∈ {portfolio, exited}`. Funds referenced by id but missing from `funds.json` render as the raw id until either the fund is added or the position is re-linked.
+
+#### Entity deal lifecycle (`entities.deal_stage`)
+
+Distinct from `status` (which is just `active | archived` for archival visibility). Values: `prospect → diligence → portfolio → passed → exited`. Migrated in `main.py` lifespan alongside `metadata_json`; existing rows default to `diligence`. The frontend header renders a `TagMenu` tone badge (`.tag-menu-trigger.deal-stage-*` in `EntityDetail.css`) and writes via `PATCH /entities/{id}`.
+
+#### Entity `last_content_at` (derived, not stored)
+
+`routers/entities.py:_latest_user_content_at` computes `MAX(workspace_nodes.created_at)` filtered on `deleted_at IS NULL AND origin_type IN ('upload', 'ingest', 'user')` — captures user uploads, ingestion materializations, and manual text notes, but not agent writes or overwrites. Populated only by the detail + PATCH responses (list endpoint leaves it `null` to avoid N+1 joins). Rendered as a relative-time chip ("3d ago") in the header via `lib/relativeTime.ts`.
+
+#### Fund registry (`data/config/funds.json`)
+
+File-backed registry of the Taihill-controlled funds that can appear on `_positions[].fund_id`. Loaded / validated / written atomically by `services/funds_config.py` (mirrors the `services/academic/continuous_config.py` pattern). CRUD via `routers/settings.py`. The edit modal's fund dropdown loads via SWR (`useFunds()`) and offers an inline `+ Add new fund…` option that `POST`s to the registry. Fund ids must match `^[a-z0-9_]+$`; the modal slugifies user input client-side before POST.
+
+**Prompt injection — GP identity.** Every portfolio chat / agent system prompt carries a generated "GP identity" block produced by `prompt_assembly._format_gp_identity_block()`. The block enumerates each fund's id + display name and instructs the LLM to (a) recognise those entities on cap tables / SPA signatories as "us" (loose name match) and (b) populate structured identity fields (`our_position.investor_entity` + `fund_id`) with the matched values. Without this block, the `legal_review` agent sees `_positions[].fund_id="taihill_v3_lp"` in its context but can't translate that slug to the legal name on a cap table — so the GP-identity section is the canonical bridge between the fund registry and LLM-produced output.
+
+#### Legal-review reference system (`data/config/legal_templates.json`, `data/config/legal_review_checklist.json`)
+
+The `legal_review` preset ships with a two-tier reference system. **Tier R1** is a raw-template corpus of YC SAFE + NVCA priced-round documents under `backend/app/legal_templates/{yc_safe,nvca}/`; each source doc (docx / doc / pdf) has an adjacent extracted `.txt` shipping in the repo. `build_legal_templates.py` regenerates the text files when the sources change. The catalog — 14 entries of `id`, `label`, `category`, `instrument_types`, `description`, paths — lives in `data/config/legal_templates.json` (loaded / written atomically by `services/legal_templates_config.py`; seeded on lifespan startup via `ensure_legal_templates_seed()`). The prompt receives only the catalog pointer; the agent fetches the raw text on demand via the new `legal_template_read(template_id)` tool (see the agent-tools section below).
+
+**Tier R2** is a distilled, user-tunable review checklist at `data/config/legal_review_checklist.json` — categories → items → `standard_value` + `red_flag_patterns` + `scenario_focus`. Synthesised from internal investment-checklist workbooks plus 2025-2026 VC term-sheet norms. Injected into the prompt in full via `render_legal_review`. Editable from the Settings UI (JSON editor) or directly on disk; edits take effect on the next preset run. `services/legal_review_checklist_config.py` handles load / validate (Pydantic) / write with atomic replace.
 
 #### Lazy folder scaffolding
 
@@ -216,8 +257,8 @@ Files with `status: needs_triage` or `error` stay in `Inbox/` with metadata pres
 - **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings.
 - **One-shot path:** synchronous model call (`generate_with_context`); response **`200`** with `ChatMessageResult` (no tools; no file writes from chat in this path).
 - **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → status callback). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages.
-- **Presets follow the same mode switch:** `PresetRunRequest.agent_mode` (falling back to `CHAT_DEFAULT_AGENT_MODE`). For agent modes (`react` / `deep_agent`), the preset endpoint returns **`202 Accepted`** with `PresetRunJobAccepted` (mirrors chat send): a synthetic `▶ Run preset: <label>` user message is persisted, a `chat_completion_jobs` row is created with `preset_payload_json` populated, and `run_preset_agent_job` drains in the background. The client polls the **existing** chat-job endpoint (`GET .../chat/sessions/{id}/jobs/{job_id}`) — the frontend's `agentJob` polling loop + spinner status line are reused verbatim. `extract_info` is force-pinned to `react` (must browse the workspace autonomously); `red_team` honors the toggle (no auto-promotion).
-- **Tools** (`workspace_tools.build_workspace_tools`): 13 workspace tools:
+- **Presets follow the same mode switch:** `PresetRunRequest.agent_mode` (falling back to `CHAT_DEFAULT_AGENT_MODE`). For agent modes (`react` / `deep_agent`), the preset endpoint returns **`202 Accepted`** with `PresetRunJobAccepted` (mirrors chat send): a synthetic `▶ Run preset: <label>` user message is persisted, a `chat_completion_jobs` row is created with `preset_payload_json` populated, and `run_preset_agent_job` drains in the background. The client polls the **existing** chat-job endpoint (`GET .../chat/sessions/{id}/jobs/{job_id}`) — the frontend's `agentJob` polling loop + spinner status line are reused verbatim. `extract_info` and `legal_review` are both force-pinned to `react` server-side (each has to call workspace tools autonomously and write a JSON deliverable); `red_team` honors the toggle (no auto-promotion).
+- **Tools** (`agent_harness._build_agent_core`): 13 workspace tools + 1 reference tool (`legal_template_read`) — always loaded together. Total: 14.
 
 | Tool | Purpose |
 |------|---------|
@@ -234,6 +275,7 @@ Files with `status: needs_triage` or `error` stay in `Inbox/` with metadata pres
 | `workspace_file_versions` | List version history for a file |
 | `workspace_restore_version` | Revert a file to a previous version |
 | `workspace_history` | View recent workspace operations |
+| `legal_template_read` | Fetch raw text of a YC SAFE / NVCA reference template by id from the Tier R1 catalog (entity-agnostic; the `legal_review` preset uses it for precise wording comparison when a deal term looks unusual) |
 
 - **Write zones (guardrail):** Agent tools enforce provenance-based write protection. User uploads are read-only to agents; agents create derivative files instead. See "Workspace provenance enforcement" above.
 - **Profiles:** `model_profiles.py` — `gemini_google`, `kimi_moonshot`. **`CHAT_DEFAULT_MODEL_PROFILE`** when `model_profile_id` omitted.

@@ -1,6 +1,11 @@
 import {
   Entity,
   EntityUpdateData,
+  Fund,
+  FundsConfig,
+  LegalReviewChecklist,
+  LegalTemplatesConfig,
+  LegalTemplateText,
   WorkspaceNode,
   WorkspaceTreeNode,
   InboxProcessJobStatus,
@@ -223,6 +228,35 @@ export const api = {
     retry: (id: string) =>
       fetchJson<{ message: string; ingest_id: string }>(`/parkinglot/${id}/retry`, {
         method: 'POST',
+      }),
+  },
+
+  // Portfolio settings
+  settings: {
+    getFunds: () => fetchJson<FundsConfig>('/settings/funds'),
+    upsertFund: (fund: Fund) =>
+      fetchJson<FundsConfig>('/settings/funds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fund),
+      }),
+    deleteFund: (fundId: string) =>
+      fetchJson<FundsConfig>(`/settings/funds/${encodeURIComponent(fundId)}`, {
+        method: 'DELETE',
+      }),
+    getLegalTemplates: () =>
+      fetchJson<LegalTemplatesConfig>('/settings/legal-templates'),
+    getLegalTemplateText: (templateId: string) =>
+      fetchJson<LegalTemplateText>(
+        `/settings/legal-templates/${encodeURIComponent(templateId)}/text`,
+      ),
+    getLegalReviewChecklist: () =>
+      fetchJson<LegalReviewChecklist>('/settings/legal-review-checklist'),
+    putLegalReviewChecklist: (checklist: LegalReviewChecklist) =>
+      fetchJson<LegalReviewChecklist>('/settings/legal-review-checklist', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(checklist),
       }),
   },
 

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
-import { Menu, ChevronLeft, ChevronRight, Briefcase, GraduationCap, Moon, Sun } from 'lucide-react';
+import { Menu, ChevronLeft, ChevronRight, Briefcase, GraduationCap, Moon, Sun, Settings as SettingsIcon } from 'lucide-react';
 import { ChatModelProfileProvider } from '../context/ChatModelProfileContext';
 import { PortfolioTab } from './PortfolioTab';
 import { AcademicTab } from './academic/AcademicTab';
+import { SettingsPage } from './Settings/SettingsPage';
 import './Layout.css';
 
-type TabId = 'portfolio' | 'academic';
+type TabId = 'portfolio' | 'academic' | 'settings';
 type Theme = 'light' | 'dark';
 
 function LayoutShell() {
@@ -58,6 +59,14 @@ function LayoutShell() {
         return <PortfolioTab />;
       case 'academic':
         return <AcademicTab />;
+      case 'settings':
+        return (
+          <SettingsPage
+            theme={theme}
+            onThemeChange={setTheme}
+            onNavigateTab={(tab) => setActiveTab(tab)}
+          />
+        );
       default:
         return <PortfolioTab />;
     }
@@ -120,6 +129,16 @@ function LayoutShell() {
           </button>
         </nav>
         <div className="sidebar-footer">
+          <button
+            className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('settings');
+              setIsMobileMenuOpen(false);
+            }}
+          >
+            <span className="nav-icon"><SettingsIcon size={18} /></span>
+            <span className="nav-text">Settings</span>
+          </button>
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle Theme">
             <span className="nav-icon">{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</span>
             <span className="theme-text">{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>

@@ -172,6 +172,22 @@
   color: var(--color-text-tertiary);
 }
 
+/* Inline validation error shown under a form-input */
+.form-error {
+  color: var(--color-error);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  margin-top: var(--space-1);
+}
+
+/* Muted parenthetical hint inside a form-label (e.g. "auto from name") */
+.form-label-hint {
+  color: var(--color-text-tertiary);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 /* Radio group */
 .radio-group {
   display: flex;
@@ -227,6 +243,36 @@
 }
 
 .btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Destructive confirm — same footprint as .btn-primary, error-tone. */
+.btn-danger {
+  padding: var(--space-2) var(--space-5);
+  background: var(--color-error);
+  color: #FFFFFF;
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.btn-danger:hover:not(:disabled) {
+  filter: brightness(0.92);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn-danger:active { transform: translateY(0); }
+
+.btn-danger:disabled {
   opacity: 0.5;
   cursor: not-allowed;
   transform: none;
@@ -302,3 +348,60 @@
   padding: var(--space-1) var(--space-3);
   font-size: var(--text-xs);
 }
+
+/* ── TagMenu primitive (pill + dropdown) ───────────────────── */
+/* Tone classes (status-*, priority-*, deal-stage-*) live with each feature tab. */
+
+.tag-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.tag-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  cursor: default;
+}
+
+.tag-menu-trigger.clickable { cursor: pointer; }
+.tag-menu-trigger.clickable:hover { filter: brightness(0.95); }
+.tag-menu-caret { font-size: 0.8em; opacity: 0.7; display: inline-flex; }
+
+.tag-menu-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 50;
+  min-width: 120px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tag-menu-popup button {
+  background: none;
+  border: none;
+  text-align: left;
+  padding: 6px 12px;
+  font-size: var(--text-sm);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.tag-menu-popup button:hover { background: var(--color-bg-tertiary); }

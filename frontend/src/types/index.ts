@@ -1,12 +1,124 @@
+export type DealStage = 'prospect' | 'diligence' | 'portfolio' | 'passed' | 'exited';
+
 export interface Entity {
   id: string;
   type: string;
   name: string;
   website?: string;
   status: 'active' | 'archived';
+  deal_stage: DealStage;
   metadata?: Record<string, unknown> | null;
+  /** Latest user-origin workspace content timestamp. Populated only by GET /entities/{id}. */
+  last_content_at?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Portfolio settings — fund registry + per-entity positions
+// ---------------------------------------------------------------------------
+
+export interface Fund {
+  id: string;
+  name: string;
+}
+
+export interface FundsConfig {
+  funds: Fund[];
+}
+
+// ---------------------------------------------------------------------------
+// Legal Review preset — Tier R1 (raw template catalog) + Tier R2 (checklist)
+// ---------------------------------------------------------------------------
+
+export type LegalTemplateCategory =
+  | 'safe'
+  | 'priced_round'
+  | 'side_letter'
+  | 'guidance';
+
+export type LegalTemplateRoundType = 'seed' | 'series_a_plus' | 'any';
+
+export type LegalInstrument = 'safe' | 'convertible_note' | 'priced_round';
+
+export interface LegalTemplate {
+  id: string;
+  label: string;
+  category: LegalTemplateCategory;
+  round_type: LegalTemplateRoundType;
+  instrument_types: LegalInstrument[];
+  description: string;
+  source_file: string;
+  text_file: string;
+}
+
+export interface LegalTemplatesConfig {
+  version: number;
+  templates: LegalTemplate[];
+}
+
+export interface LegalTemplateText {
+  id: string;
+  label: string;
+  text: string;
+}
+
+export type ChecklistSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export interface ChecklistRedFlagPattern {
+  pattern: string;
+  severity: ChecklistSeverity;
+  note?: string | null;
+}
+
+export interface ChecklistScenarioFocus {
+  new_investment?: string | null;
+  follow_on?: string | null;
+  retrospective?: string | null;
+}
+
+export interface ChecklistItem {
+  id: string;
+  label: string;
+  description?: string | null;
+  applies_to_instruments: LegalInstrument[];
+  standard_value?: string | null;
+  red_flag_patterns: ChecklistRedFlagPattern[];
+  why_matters?: string | null;
+  scenario_focus?: ChecklistScenarioFocus | null;
+}
+
+export interface ChecklistCategory {
+  id: string;
+  label: string;
+  description?: string | null;
+  items: ChecklistItem[];
+}
+
+export interface LegalReviewChecklist {
+  version: number;
+  updated_at?: string | null;
+  categories: ChecklistCategory[];
+}
+
+export interface FounderEntry {
+  name: string;
+  title?: string | null;
+  background?: string | null;
+  linkedin_url?: string | null;
+  /** Frontend-managed. Missing = 'active'. */
+  status?: 'active' | 'departed';
+}
+
+export interface EntityPosition {
+  fund_id: string;
+  invested_amount: number | null;
+  currency?: string | null;
+  current_value?: number | null;
+  round_at_entry?: string | null;
+  instrument?: string | null;
+  entry_date?: string | null;
+  notes?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -257,6 +369,9 @@ export interface EntityUpdateData {
   name: string;
   website?: string;
   status?: 'active' | 'archived';
+  deal_stage?: DealStage;
+  /** Full JSON string written to Entity.metadata_json on the backend. */
+  metadata_json?: string;
 }
 
 export const ENTITY_METADATA_FIELDS: EntityMetadataField[] = [

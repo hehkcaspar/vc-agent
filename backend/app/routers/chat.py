@@ -53,14 +53,17 @@ from app.services.direct_llm import (
 from app.services.json_loose import parse_json_loose
 from app.services.metadata_extraction import (
     merge_entity_metadata,
+    merge_legal_reviews,
     normalize_extraction_result,
     validate_entity_metadata,
+    validate_legal_reviews,
 )
 from app.services.model_profiles import normalize_profile_id
 from app.services.preset_registry import (
     get_preset,
     list_presets,
     render_extract_info,
+    render_legal_review,
     render_red_team,
 )
 from app.services.agent_harness import (
@@ -441,6 +444,21 @@ async def run_preset_agent_job(job_id: str) -> None:
                     entity.name, entity.website,
                     existing_metadata=existing_meta,
                 )
+            elif preset_id == "legal_review":
+                existing_meta = None
+                if entity.metadata_json:
+                    try:
+                        existing_meta = json.loads(entity.metadata_json)
+                    except json.JSONDecodeError:
+                        pass
+                meta = existing_meta or {}
+                task_body = render_legal_review(
+                    entity.name,
+                    entity.website,
+                    entity_positions=meta.get("_positions") or [],
+                    existing_legal_reviews=meta.get("legal_reviews") or [],
+                    existing_prior_rounds=meta.get("prior_rounds") or [],
+                )
             else:
                 job.status = "failed"
                 job.error_message = f"preset_not_implemented:{preset_id}"
@@ -453,6 +471,14 @@ async def run_preset_agent_job(job_id: str) -> None:
                     "Browse the workspace, read relevant files, and extract "
                     "company metadata per the schema in your instructions. "
                     "Write the result as Company Profile.json in the workspace root."
+                )
+            elif preset_id == "legal_review":
+                user_turn_core = (
+                    "Review the selected legal document(s) per the checklist in "
+                    "your instructions. Use legal_template_read for precise "
+                    "comparison whenever a term looks unusual, then call "
+                    "workspace_write_file to save Legal Review.json with the "
+                    "complete updated legal_reviews array at the workspace root."
                 )
             elif preset.output_kind == "json":
                 user_turn_core = (
@@ -744,6 +770,344 @@ async def run_preset_agent_job(job_id: str) -> None:
                     content = (
                         f"**Extract Info failed** — {preset_label_snap} "
                         f"could not produce a profile.\n\n{summary}"
+                    )
+                assistant_msg = ConversationMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=job.session_id,
+                    role="assistant",
+                    content=content,
+                    model_profile_id=normalize_profile_id(model_profile_id_snap),
+                )
+                db.add(assistant_msg)
+
+                res2 = await db.execute(
+                    select(ChatCompletionJob).where(
+                        ChatCompletionJob.id == job_id
+                    )
+                )
+                job2 = res2.scalar_one_or_none()
+                if job2 and job2.status not in ("succeeded", "failed"):
+                    job2.assistant_message_id = assistant_msg.id
+                    job2.status = "succeeded"
+                    job2.step_detail = "Done"
+                    tool_trace: dict = {
+                        "status_trace": status_trace[-40:],
+                        "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+                    }
+                    if isinstance(raw, dict):
+                        tool_trace["keys"] = list(raw.keys())
+                        tool_trace["message_count"] = len(
+                            raw.get("messages") or []
+                        )
+                    job2.tool_trace_json = json.dumps(tool_trace)
+                    job2.updated_at = utc_now()
+
+                sess = await _get_session(db, job.entity_id, job.session_id)
+                sess.updated_at = utc_now()
+                await db.commit()
+
+            return  # Skip general deliverable post-processing
+
+        # --- legal_review: sync Legal Review.json → Entity.metadata_json ---
+        if preset_id == "legal_review":
+            _log = logging.getLogger(__name__)
+            async with AsyncSessionLocal() as db:
+                # Prefer root-level Legal Review.json (convention). Accept a
+                # non-root write as a fallback with a warning so an agent that
+                # stashed the file in Deliverables/ still succeeds, and the
+                # authoritative copy gets re-persisted at root below.
+                sync_warnings: List[str] = []
+                review_node = None
+                ops_res = await db.execute(
+                    select(WorkspaceOp.node_id)
+                    .where(
+                        WorkspaceOp.entity_id == job.entity_id,
+                        WorkspaceOp.actor_type == "agent",
+                        WorkspaceOp.actor_ref == agent_run_id_snap,
+                        WorkspaceOp.op_type.in_(["create_file", "overwrite"]),
+                    )
+                )
+                written_ids = [r[0] for r in ops_res.all() if r[0]]
+                if written_ids:
+                    root_res = await db.execute(
+                        select(WorkspaceNode)
+                        .where(
+                            WorkspaceNode.id.in_(written_ids),
+                            WorkspaceNode.name == "Legal Review.json",
+                            WorkspaceNode.parent_id.is_(None),
+                            WorkspaceNode.deleted_at.is_(None),
+                        )
+                    )
+                    review_node = root_res.scalars().first()
+                    if review_node is None:
+                        any_res = await db.execute(
+                            select(WorkspaceNode)
+                            .where(
+                                WorkspaceNode.id.in_(written_ids),
+                                WorkspaceNode.name == "Legal Review.json",
+                                WorkspaceNode.deleted_at.is_(None),
+                            )
+                        )
+                        review_node = any_res.scalars().first()
+                        if review_node is not None:
+                            sync_warnings.append(
+                                f"Agent wrote Legal Review.json at "
+                                f"{review_node.path!r} — expected workspace root; "
+                                "re-persisting authoritative copy at root"
+                            )
+
+                # Load current checklist version once for annotating reviews.
+                from app.services.legal_review_checklist_config import (
+                    load_legal_review_checklist,
+                )
+                try:
+                    checklist_version = load_legal_review_checklist().version
+                except Exception:
+                    checklist_version = 1
+
+                # Rebuild the shared documents_reviewed list from status_trace.
+                # Two separate sources emit "Reading ..." notifications:
+                #   - workspace_read_file → "Reading <path>..."
+                #   - legal_template_read → "Reading template <id>..."
+                # Workspace reads populate `documents_reviewed`; template reads
+                # populate `reference_templates_consulted`. We exclude any
+                # self-read of the output file (by basename) and drop paths
+                # that don't resolve to a real workspace node (ghost reads,
+                # e.g. the agent probing Inbox/Legal Review.json before writing).
+                read_paths: List[str] = []
+                template_ids: List[str] = []
+                _seen_paths: set[str] = set()
+                _seen_templates: set[str] = set()
+                for msg in status_trace:
+                    m = re.match(r"^Reading (.+?)\.\.\.$", msg or "")
+                    if not m:
+                        continue
+                    target = m.group(1)
+                    tpl_m = re.match(r"^template (.+)$", target)
+                    if tpl_m:
+                        tid = tpl_m.group(1)
+                        if tid not in _seen_templates:
+                            _seen_templates.add(tid)
+                            template_ids.append(tid)
+                    else:
+                        # Self-read filter: any path ending in /Legal Review.json
+                        # (agent probing for its own output anywhere in the tree)
+                        basename = target.rsplit("/", 1)[-1]
+                        if basename == "Legal Review.json":
+                            continue
+                        if target not in _seen_paths:
+                            _seen_paths.add(target)
+                            read_paths.append(target)
+
+                node_lookup: dict[str, str] = {}
+                if read_paths:
+                    node_rows = await db.execute(
+                        select(WorkspaceNode.path, WorkspaceNode.id)
+                        .where(
+                            WorkspaceNode.entity_id == job.entity_id,
+                            WorkspaceNode.path.in_(read_paths),
+                            WorkspaceNode.deleted_at.is_(None),
+                        )
+                    )
+                    node_lookup = {p: nid for p, nid in node_rows.all()}
+                # Drop unresolved paths — status_trace captures read *attempts*
+                # (including failed probes), not completions. Only include real
+                # workspace nodes with node_ids.
+                documents_reviewed = [
+                    {"path": p, "node_id": node_lookup[p]}
+                    for p in read_paths
+                    if p in node_lookup
+                ]
+
+                def _annotate(review: dict) -> dict:
+                    out = dict(review)
+                    out["review_date"] = utc_now().isoformat()
+                    out["documents_reviewed"] = list(documents_reviewed)
+                    out["checklist_version"] = checklist_version
+                    # Merge agent's template list with server-observed reads,
+                    # dedup. Server-detected templates win the tail — agent's
+                    # own list (which often populates `standard_source` on
+                    # unusual_terms) stays first so hand-picked ones are visible.
+                    agent_tpls = out.get("reference_templates_consulted") or []
+                    if not isinstance(agent_tpls, list):
+                        agent_tpls = []
+                    seen = {t for t in agent_tpls if isinstance(t, str)}
+                    merged_tpls = [t for t in agent_tpls if isinstance(t, str)]
+                    for t in template_ids:
+                        if t not in seen:
+                            merged_tpls.append(t)
+                            seen.add(t)
+                    out["reference_templates_consulted"] = merged_tpls
+                    return out
+
+                # Stage 1 — extract incoming from the written file, falling back
+                # to parsing the agent's text reply if the file is missing or
+                # unreadable. parse_succeeded == True means we have a trustworthy
+                # incoming list (possibly empty == agent reports no applicable
+                # reviews); parse_succeeded == False means we didn't get usable
+                # data and should NOT touch metadata or re-persist.
+                incoming_reviews: List[dict] = []
+                parse_succeeded = False
+
+                if review_node and review_node.storage_key:
+                    try:
+                        raw_bytes = storage.read_file_sync(review_node.storage_key)
+                        review_payload = json.loads(raw_bytes.decode("utf-8"))
+                        raw_list = (
+                            review_payload.get("legal_reviews")
+                            if isinstance(review_payload, dict)
+                            else None
+                        )
+                        if raw_list is None:
+                            raw_list = (
+                                review_payload
+                                if isinstance(review_payload, list)
+                                else []
+                            )
+                        validated, v_warnings = validate_legal_reviews(raw_list)
+                        sync_warnings.extend(v_warnings)
+                        incoming_reviews = [_annotate(r) for r in validated]
+                        parse_succeeded = True
+                    except Exception:
+                        _log.warning(
+                            "Failed to parse Legal Review.json from agent run "
+                            "— falling back to text salvage",
+                            exc_info=True,
+                        )
+                        sync_warnings.append(
+                            "Legal Review.json unreadable — attempting fallback "
+                            "parse of agent reply"
+                        )
+
+                if not parse_succeeded:
+                    _log.warning(
+                        "legal_review: attempting salvage from agent reply "
+                        "(file %s)",
+                        "unreadable" if review_node else "missing",
+                    )
+                    salvaged = None
+                    try:
+                        salvaged = parse_json_loose(deliverable_body)
+                    except (json.JSONDecodeError, ValueError):
+                        salvaged = None
+                    raw_list = None
+                    if isinstance(salvaged, dict):
+                        raw_list = salvaged.get("legal_reviews")
+                    elif isinstance(salvaged, list):
+                        raw_list = salvaged
+                    if raw_list is not None:
+                        try:
+                            validated, v_warnings = validate_legal_reviews(raw_list)
+                            sync_warnings.extend(v_warnings)
+                            incoming_reviews = [_annotate(r) for r in validated]
+                            parse_succeeded = True
+                            sync_warnings.append(
+                                "Reviews recovered from agent text reply "
+                                "(file write missing or unreadable)"
+                            )
+                        except Exception:
+                            _log.warning(
+                                "legal_review salvage parse failed", exc_info=True,
+                            )
+                            sync_warnings.append(
+                                "Agent did not produce a usable Legal Review.json "
+                                "and fallback parse failed — no reviews synced"
+                            )
+                    else:
+                        sync_warnings.append(
+                            "Agent did not produce a usable Legal Review.json "
+                            "and no JSON was found in the reply — no reviews synced"
+                        )
+
+                # Stage 2 — merge + re-persist. Runs whenever parse_succeeded,
+                # even when incoming_reviews is empty: agent reporting zero
+                # applicable reviews should NOT destroy prior-round entries in
+                # metadata OR the workspace file. When incoming is empty, the
+                # file is re-persisted with the preserved prior reviews so the
+                # file and DB stay in sync (B2 fix).
+                if parse_succeeded:
+                    entity_row = await _get_entity(db, job.entity_id)
+                    existing_meta: dict = {}
+                    if entity_row.metadata_json:
+                        try:
+                            existing_meta = json.loads(entity_row.metadata_json)
+                            if not isinstance(existing_meta, dict):
+                                existing_meta = {}
+                        except json.JSONDecodeError:
+                            existing_meta = {}
+                    existing_reviews = existing_meta.get("legal_reviews") or []
+                    if not isinstance(existing_reviews, list):
+                        existing_reviews = []
+
+                    merged_reviews = merge_legal_reviews(
+                        existing_reviews, incoming_reviews,
+                    )
+                    existing_meta["legal_reviews"] = merged_reviews
+                    entity_row.metadata_json = json.dumps(
+                        existing_meta, ensure_ascii=False,
+                    )
+                    entity_row.updated_at = utc_now()
+
+                    # Always persist the authoritative copy at workspace root
+                    # so (a) the UI has a stable path to show history and
+                    # (b) file and DB stay in sync even when agent wrote
+                    # elsewhere or wrote an empty array.
+                    corrected_body = json.dumps(
+                        {"legal_reviews": merged_reviews},
+                        indent=2, ensure_ascii=False,
+                    )
+                    try:
+                        review_node = await workspace_service.write_file(
+                            db,
+                            job.entity_id,
+                            "Legal Review.json",
+                            corrected_body.encode("utf-8"),
+                            "application/json",
+                            Actor(type="system", ref=f"preset:{preset_id}"),
+                        )
+                    except Exception:
+                        _log.warning(
+                            "Failed to rewrite Legal Review.json with merged reviews",
+                            exc_info=True,
+                        )
+
+                    await db.commit()
+                    if review_node is not None:
+                        await db.refresh(review_node)
+                    _log.info(
+                        "Legal review sync: %d incoming, %d merged (entity=%s)",
+                        len(incoming_reviews), len(merged_reviews), job.entity_id,
+                    )
+                else:
+                    # Parse failed — leave metadata and the workspace file
+                    # untouched. review_node may point at the unreadable agent
+                    # write; drop it so the chat message renders plain-text
+                    # failure rather than a broken artifact_card.
+                    review_node = None
+
+                summary = deliverable_body.strip() or "Legal review complete."
+                if sync_warnings:
+                    summary += "\n\nWarnings:\n" + "\n".join(
+                        f"- {w}" for w in sync_warnings
+                    )
+
+                if review_node is not None:
+                    content = json.dumps({
+                        "_vc_chat": "artifact_card",
+                        "node_id": review_node.id,
+                        "entity_id": job.entity_id,
+                        "preset_label": preset_label_snap,
+                        "deliverable_type": default_artifact_type_snap,
+                        "artifact_title": artifact_title_snap,
+                        "version": review_node.version,
+                        "status": default_artifact_status_snap,
+                        "summary": summary,
+                        "path": review_node.path,
+                    })
+                else:
+                    content = (
+                        f"**Legal Review failed** — {preset_label_snap} "
+                        f"could not produce a review.\n\n{summary}"
                     )
                 assistant_msg = ConversationMessage(
                     id=str(uuid.uuid4()),
@@ -1427,8 +1791,10 @@ async def run_chat_preset(
     nodes = await _load_nodes(db, entity_id, body.node_ids)
     profile_id = normalize_profile_id(body.model_profile_id)
     mode = _resolve_agent_mode(body.agent_mode, body.use_deep_agent)
-    # extract_info is always agent mode — it browses workspace autonomously
-    if preset_id == "extract_info":
+    # extract_info + legal_review always run in react mode — they browse the
+    # workspace, call workspace_read_file on selected docs, and need a
+    # guaranteed workspace_write_file for the JSON deliverable.
+    if preset_id in {"extract_info", "legal_review"}:
         mode = "react"
 
     # ----- Agent path (react or deep_agent): background job, return 202 -----
@@ -1456,6 +1822,21 @@ async def run_chat_preset(
             task_body = render_extract_info(
                 entity.name, entity.website,
                 existing_metadata=existing_meta,
+            )
+        elif preset_id == "legal_review":
+            existing_meta = None
+            if entity.metadata_json:
+                try:
+                    existing_meta = json.loads(entity.metadata_json)
+                except json.JSONDecodeError:
+                    pass
+            meta = existing_meta or {}
+            task_body = render_legal_review(
+                entity.name,
+                entity.website,
+                entity_positions=meta.get("_positions") or [],
+                existing_legal_reviews=meta.get("legal_reviews") or [],
+                existing_prior_rounds=meta.get("prior_rounds") or [],
             )
         else:
             raise HTTPException(status_code=400, detail="Preset not implemented")

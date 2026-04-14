@@ -49,7 +49,12 @@ Implemented design specs kept for rationale ("why did we do it this way"), not i
 |--------|--------|
 | Workspace endpoints (tree, files, versioning, trash, ops) | `API_REFERENCE.md` → Workspace |
 | Chat endpoints, bodies, env summary | `API_REFERENCE.md` → Entity chat |
-| Deep agent, 13 workspace tools, provenance enforcement | `ARCHITECTURE.md` → Portfolio chat |
+| Agent (13 workspace + 1 reference tool), provenance enforcement | `ARCHITECTURE.md` → Portfolio chat |
+| Presets (`red_team`, `extract_info`, `legal_review`) and mode-switch behavior | `ARCHITECTURE.md` → Portfolio chat; `API_REFERENCE.md` → Entity chat → Presets |
+| Legal Review reference system (Tier R1 raw templates + Tier R2 distilled checklist) | `ARCHITECTURE.md` → Legal-review reference system; `API_REFERENCE.md` → Portfolio settings |
+| GP identity injection (funds.json → every portfolio system prompt) | `ARCHITECTURE.md` → Fund registry |
+| Unified Settings page (funds CRUD, checklist/templates UI, appearance) | `DEVELOPER_GUIDE.md` → frontend `components/Settings/`; `API_REFERENCE.md` → Portfolio settings |
+| Entity header: deal_stage, `_positions[]`, `last_content_at`, fund registry | `ARCHITECTURE.md` → Entity-level metadata / Entity deal lifecycle / Fund registry; `API_REFERENCE.md` → Entities, Portfolio settings |
 | Workspace design (full spec) | `design/ENTITY_WORKSPACE_DESIGN.md` |
 | Local env, pytest (unit + optional real LLM E2E), manual checklist | `DEVELOPER_GUIDE.md` → Configuration, Testing |
 

@@ -44,19 +44,23 @@ def coerce_orm_metadata_before_model(data: Any) -> Any:
 
 # ============== Entity Schemas ==============
 
+DealStage = Literal["prospect", "diligence", "portfolio", "passed", "exited"]
+
+
 class EntityBase(BaseModel):
     name: str
     website: Optional[str] = None
 
 
 class EntityCreate(EntityBase):
-    pass
+    deal_stage: Optional[DealStage] = None
 
 
 class EntityUpdate(BaseModel):
     name: Optional[str] = None
     website: Optional[str] = None
     status: Optional[Literal["active", "archived"]] = None
+    deal_stage: Optional[DealStage] = None
     metadata_json: Optional[str] = None
 
 
@@ -64,7 +68,11 @@ class EntityResponse(EntityBase):
     id: str
     type: str = "company"
     status: str = "active"
+    deal_stage: DealStage = "diligence"
     metadata: Optional[dict[str, Any]] = None
+    # Latest user-origin content timestamp (upload/ingest/user). Only populated
+    # by the detail endpoint; list endpoint leaves it None to avoid per-row joins.
+    last_content_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

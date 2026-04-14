@@ -1,0 +1,1649 @@
+[AMENDED AND RESTATED] VOTING AGREEMENT
+THIS [AMENDED AND RESTATED] VOTING AGREEMENT (this 
+“
+Agreement
+”
+) is made as of 
+[________], 20[__], 
+by and among [____________], a Delaware 
+corporation (the 
+“
+Company
+”
+), 
+the Investors (as defined below)
+,
+ 
+the Key Holders (as defined below)
+, and other Stockholders (as defined below)
+.
+RECITALS
+[WHEREAS
+, certain of the Investors (the “
+Existing Investors
+”) hold shares of [
+Series
+ [_]] Preferred Stock and/or shares of Common Stock issued upon conversion thereof, and certain holders of Common Stock and/or options to purchase Common Stock (the “
+Existing Key Holders
+”) previously agreed to certain voting arrangements pursuant to that certain [Amended and Restated] Voting Agreement dated as of [_________ __, 20__], by and among the Company, 
+the Existing Key Holders, and the 
+Existing Investors (the “
+Prior Agreement
+”); 
+WHEREAS
+, the undersigned Existing Investors and Existing Key Holders are 
+holders
+ of a sufficient number of the securities of the Company as are required to amend the Prior Agreement, and desire to amend and restate the Prior Agreement in its entirety and to accept the rights and obligations created pursuant to this Agreement in lieu of the rights and obligations applicable to them under the Prior Agreement;]
+WHEREAS
+, the Company and [certain of] the Investors are parties to that certain 
+Series
+ [_] Preferred Stock Purchase Agreement of even date herewith by and among the Company and such Investors (the “
+Purchase Agreement
+”), under which certain of the Company’s and such Investors’ obligations are conditioned upon the execution and delivery of this Agreement by the undersigned parties;
+WHEREAS
+, a
+s of the date hereof, t
+he Certificate of Incorporation of the Company (the 
+“
+Restated Certificate
+”
+) provides that
+, subject to certain 
+conditions specified therein
+:
+ 
+[(i) 
+the holders of record of the shares of 
+[Series [___]]
+ Preferred Stock
+, $[___] par value per share, of the Company (“
+Preferred Stock
+”)
+, exclusively and as a separate class, shall be entitled to elect 
+one
+ director of the Company (the 
+“
+Preferred
+ Directo
+r
+”
+)
+;
+ (ii)
+ the holders of record of the shares of common stock, $[___] par value per share, of the Company (
+“
+Common Stock
+”
+), exclusively and as a separate class, shall be entitled to elect 
+two
+ director
+s
+ of the Company (the 
+“
+Common Director
+s
+”
+); and (
+iii
+)
+ 
+the holders of record of the shares of Common Stock and the 
+Preferred Stock
+, voting together as a single class on an as
+-
+converted basis, shall
+ be entitled to elect the balance of the total number of directors of the Company
+]
+; and
+WHEREAS
+, th
+e parties desire to enter into this Agreement to set forth their agreements and understandings with respect to how shares of the capital stock of the Company held by them will be 
+voted in respect of the 
+election and composition of the 
+Company’s Board of Directors (the “
+Board
+”) 
+[, 
+voted on, or tendered, in connection with an acquisition of the Company
+]
+ and voted on in connection with an increase in the number of shares of Common Stock required to provide for the conversion of the Preferred Stock.
+NOW, THEREFORE,
+ the parties agree as follows:
+Voting Provisions Regarding the Board
+.
+ 
+Definitions
+. 
+For purposes of this Agreement:
+“
+Affiliate
+” means, with respect to any specified Person, any other Person who, directly or indirectly, controls, is controlled by, or is under common control with such Person, including, without limitation, 
+any
+ general partner, managing member, officer, director or trustee of such Person, or any venture capital fund or other investment fund now or hereafter existing that is controlled by one or more general partners, managing members or investment adviser
+s
+ of, or shares the same management 
+company
+ or investment adviser with, such Person.
+“
+DGCL
+” means the 
+Delaware General Corporation Law.
+“
+Investors
+” means the persons named on 
+Schedule A
+ hereto, 
+each person who hereafter becomes a party to this Agreement pursuant to 
+Section 
+7.1(a)
+ and each person to whom the rights of an Investor are assigned pursuant to 
+Section 
+7.2
+.
+“
+Key Holders
+” means the persons named on 
+Schedule B
+ hereto, 
+each person who hereafter becomes a 
+party
+ to this Agreement pursuant to 
+Section 
+7.1(b)
+ and 
+each person to whom the rights of a Key Holder are assigned pursuant to 
+Section 
+7.2
+.
+“
+Person
+” means any individual, corporation, partnership, trust, limited liability 
+company
+, association, or other entity.
+A “
+Qualified Key Holder
+” is 
+a 
+Key Holder
+ and 
+(i) if an individual, is providing services to the Company
+ or its subsidiaries
+ as a
+ [full
+-
+time]
+ employee 
+[
+or consultant
+ (excluding service solely as member of the Board)
+]
+ and 
+(ii) if an entity, is owned or controlled by an individual providing services to the Company
+ or its subsidiaries
+ as a
+ [full
+-
+time]
+ employee 
+[
+or consultant
+ (excluding service solely as member of the Board)
+]
+.
+“
+Requisite Holders
+” means the holders of [at least [___]%/a majority] of the then-outstanding shares of Preferred Stock, calculated together as a single class and on an as-converted basis.
+“
+Sale of the Company
+” means 
+either: (a) a transaction or series of related transactions in which a Person, or a group of related Persons, acquires from stockholders of the Company 
+shares representing more than 50% of the out
+standing voting power of the Company (a “
+Stock Sale
+”); or (b) a transaction that qualifies as a “
+Deemed Liquidation Event
+,
+” as defined in the Restated Certificate
+.
+“
+Sanctioned Party
+” means any Person: (i) organized under the laws of, ordinarily resident in, or located in a country or territory that is the subject of comprehensive Sanctions (“
+Restricted Countries
+”
+); (ii) 50% or more owned or controlled by the government of a Restricted Country; or (iii) (A) designated on a sanctioned parties list administered by the United States[, European Union, or United Kingdom], including, without limitation, the U.S. Department of the Treasury’s Office of Foreign Assets Control’s Specially Designated Nationals and Blocked Persons List, Foreign Sanctions Evaders List, 
+[and ]
+Sectoral Sanctions Identification List[, the Consolidated List of Persons, Groups, and Entities Subject to EU Financial Sanctions, and the UK’s Consolidated Sanctions List] (collectively, “
+Designated Parties
+”); or (B) 50% or more owned or, where relevant under applicable Sanctions, controlled, individually or in the aggregate, by one or more Designated Party, in each case only to the extent that dealings with such Person is are prohibited pursuant to applicable Sanctions
+.
+“
+Sanctions
+” 
+means 
+applicable laws and regulations pertaining to trade and economic sanctions administered by the United States[, European Union, or United Kingdom]
+.
+“
+Series 
+[___]
+ Preferred Stock
+” means shares of the Company’s Series 
+[___]
+ Preferred Stock, par value [$0.___] per share.
+“
+Shares
+”
+ shall mean and include any securities of the Company that the holders of which are entitled to vote for members of the Board, including
+,
+ without limitation, all shares of Common Stock and Preferred Stock, by whatever name called, now owned or subsequently acquired by a Stockholder, however acquired, whether through stock splits, stock dividends, reclassifications, recapitalizations, similar events or otherwise. 
+“
+Side Letters
+” has the meaning ascribed to it in the Purchase Agreement.
+“
+Stockholder
+s
+” means the Investors, 
+the 
+Key Holders
+,
+ and 
+each 
+other 
+holder of Common Stock
+ 
+of the Company that 
+becomes 
+party to this Agreement
+ 
+that is
+ not an Investor or Key Holder
+ (which other stockholders shall be set forth on 
+Schedule C
+ to this Agreement)
+.
+ 
+Any reference in this Agreement to “
+vote
+” or “
+voting
+” or similar language shall include, without limitation, action by written consent of the stockholders
+.
+Board Composition
+. Each Stockholder agrees to vote, or cause to be voted, all Shares owned by such Stockholder, or over which such Stockholder has voting control, from time to time and at all times, in whatever manner as shall be necessary to ensure that at each annual or special meeting of 
+stockholders at which an election of directors is held or pursuant to any written consent of the stockholders, subject to 
+Section 
+5
+, 
+the following persons shall be elected to the Board
+:
+ 
+ 
+[
+As 
+a Preferred
+ Director, 
+[
+Example
+ 
+1
+:
+ 
+one person designated from time to time by [
+Name of Investor
+], for so long as 
+[
+Name of Investor
+]
+ and its Affiliates 
+(i) 
+continue to beneficially 
+own 
+an aggregate of at least [______] shares of Preferred Stock, which number is subject to appropriate adjustment for any stock splits, stock dividends, combinations, recapitalizations and the like
+ and (ii) are not Sanctioned Parties
+, which individual
+ as of the date of this Agreement is
+ [_____________];
+][[
+Example
+ 
+2
+:
+ 
+A
+s 
+a Preferred 
+Director, one person designated from time to time by [
+Name of Investor
+], for so long as 
+[
+Name of Investor
+] 
+and its Affiliates 
+(i) 
+continue to beneficially 
+own 
+an aggregate of 
+at least [_____]% of the outstanding capital stock of the Company on an as
+-
+converted basis
+, and (ii) are not Sanctioned Parties
+, which individual 
+as of the date of this Agreement is
+[___________];
+]
+[As 
+a
+ Common Director
+,
+ [
+Example
+ 
+1
+:
+ one 
+individual
+ 
+who is 
+designated
+ 
+by
+ 
+Qualified
+ 
+Key Holders holding
+ a majority of the shares of Common Stock held by 
+Qualified
+ Key Holders, 
+for so long as 
+any Qualified Key Holder holds 
+any
+ shares of Common Stock
+, which individual 
+as of the date of this Agreement is 
+[___________];
+]
+ 
+[
+Example
+ 
+2
+:
+ 
+[
+name of 
+a 
+Common Director
+], for so long as 
+such 
+director
+ [
+remains a
+ 
+[
+full-time
+]
+ 
+employee 
+[
+or consultant
+ 
+(excluding service solely as member of the Board)]
+ 
+of the Company][, except that if 
+such 
+director
+ 
+resigns
+ or is unable to serve, 
+then 
+one individual who is 
+designated
+ 
+by 
+Qualified 
+Key Holders holding 
+a majority of the shares of Common Stock 
+held by 
+Qualified 
+Key 
+Holders
+ for so long as any Qualified Key Holder holds any shares of Common Stock
+]
+;
+]
+[
+As the [other] Common Director, the Company’s Chief Executive Officer (the “
+CEO Director
+”), who as of the date of this Agreement is [_____], 
+provided
+ that if for any reason the CEO Director shall cease to serve as the Chief Executive Officer of the Company, each of the Stockholders shall promptly vote their respective Shares (i) to remove the 
+former Chief Executive Officer 
+from the Board if such person has not resigned
+ from the position of CEO Director
+; and (ii) to 
+elect 
+the 
+then-
+current 
+Chief Executive Officer of the Company to serve as the new CEO Director
+;
+ and
+]
+[As [each/the] Mutual Director, 
+[
+o
+ne individual who is not otherwise an Affiliate of the Company or of any Investor and who is 
+designated by mutual agreement of the other 
+then-seated 
+members of the Board
+ 
+(the “
+Mutual Director
+”), which individual 
+as of the date of this Agreement is 
+[___________]
+]
+.
+For 
+clarity
+, t
+o the extent that 
+the 
+election of a 
+d
+irector pursuant to 
+any of 
+foregoing 
+clauses (a) through [(
+d)
+] above shall
+ 
+not be applicable
+,
+ or shall 
+cause the Company to violate
+ applicable
+ Sanctions
+, 
+any member of the Board who would otherwise have been designated in accordance with the terms thereof shall instead be voted upon by all the 
+s
+tockholders 
+of the Company 
+entitled to vote thereon in accordance with, and pursuant to, the Restated Certificate. 
+Vacancies
+. 
+A
+ny vacancies 
+in the Board
+ shall be filled
+ only
+ pursuant to the provisions of 
+Section
+ 
+1.2
+.
+ 
+Removal of Board Members
+.
+ Each Stockholder also agrees to vote, or cause to be voted, all Shares owned by such Stockholder, or over which such Stockholder has voting control, from time to 
+time and at all times
+, in whatever manner as shall be necessary to ensure that:
+ 
+a director elected or serving pursuant to 
+Section 
+1.2
+, or reelected pursuant to 
+Section 
+1.3
+, shall be
+ promptly
+ removed from office
+ upon the occurrence of any of the following:
+ 
+[
+(i)
+ 
+writ
+ten request of 
+any
+ Person
+(s) who 
+would be entitled to designate a replacement for such director 
+pursuant to 
+Section 
+1.2
+ to remove such director
+;
+ (ii)
+ 
+written request of stock
+holders
+ that hold the requisite votes to 
+approve 
+a 
+replacement for such director
+ pursuant to 
+Section 
+1.2
+ to remove such director
+; (iii) 
+if such director is the Mutual Director, 
+upon 
+the affirmative vote of 
+a majority of 
+the 
+Person(s) entitled to designate
+ such director
+; (iv) 
+if 
+such director is no longer entitled or eligible to occupy such Board seat pursuant to the applicable conditions of 
+Section 
+1.2
+;
+ 
+or
+ 
+(v) 
+either the 
+d
+irector or the
+ Person
+(s)
+ entitled to designate the 
+d
+irector 
+is a Sanctioned Party
+]
+;
+no director elected
+ or serving
+ pursuant to 
+Section 
+1.2
+, or reelected pursuant to 
+Section 
+1.3
+,
+ may be removed from office [other than for cause] unless (i)
+ 
+such removal is 
+made in accordance with
+ 
+Section 
+1.4(a)
+; 
+or 
+(i
+i
+)
+ 
+the applicable subsection of 
+Section 
+1.2
+ is no longer in effect pursuant to its terms.
+Stockholder Action
+. 
+All Stockholders agree to execute any written consents required to perform the obligations of this 
+Section 
+1
+, and the Company agrees to
+ use commercially reasonable efforts to cause to be called
+ a special meeting of stockholders for the purpose of electing
+, removing
+ 
+or replacing 
+directors
+ upon
+ 
+the written request of 
+(i) 
+any Person entitled to designate a directo
+r or 
+(ii) the holders of the requisite number of shares of capital stock entitled to approve 
+a
+ director
+ candidate
+ pursuant to 
+Section 
+1.2
+.
+No Liability for Election of 
+Designated or Approved
+ Directors
+. No Stockholder, nor any Affiliate of any Stockholder, shall have any liability 
+as a result of
+ designating 
+or approving 
+a person for election as a director for any act or omission by such designated
+ or approved
+ person 
+in such person’s capacity
+ as a director of the Company, nor shall any Stockholder have any liability as a result of voting for any such designee in accordance with the provisions of this Agreement.
+Vote to Increase Authorized Common Stock
+. Each Stockholder agrees to vote or cause to be voted all Shares owned by such Stockholder, or over which such Stockholder has voting control, from time to time and at all times, in whatever manner as shall be necessary to increase the number of authorized shares of Common Stock from time to time to ensure that there will be sufficient shares of Common Stock available for conversion of all of the shares of Preferred Stock outstanding at any given time.
+[
+Drag-Along Right
+.
+ 
+Actions to be Taken
+. In the event that
+ 
+[
+(i)
+]
+ the holders of at least [
+specify percentage
+]
+%
+ of 
+[
+the shares of Common Stock then issued or issuable upon conversion of
+]
+ the
+ 
+then-
+outstanding
+ shares of Preferred Stock (the 
+“
+Selling Investors
+”
+); [
+[and] 
+(ii) the holders of 
+[
+a majority
+]
+ of the then outstanding shares of Common Stock [(other than those issued or issuable upon conversion of the shares of Preferred Stock)]] held by 
+Qualified 
+Key Holders voting as a separate class
+;
+ 
+[and [(iii)
+]
+ the Board;]
+ 
+approve a Sale of the Company (which approval of the 
+Selling Investors [and the holders described in clause (ii)]
+ must be in writing), 
+which approval specifies
+ 
+that this 
+Section 
+3
+ shall apply to such transaction, then, subject to satisfaction of each of the conditions set forth in 
+Section 
+3.2
+ below, each Stockholder and the Company hereby agree:
+if such transaction requires stockholder approval, with respect to all Shares that such Stockholder owns or over which such Stockholder otherwise exercises voting power, to vote (in person, by proxy or by action by written consent, as applicable) all Shares in favor of, and 
+approve
+, such 
+Sale of the Company [(together with any related amendment or restatement to the Restated Certificate required to implement such Sale of the Company)]
+[and the related definitive agreement(s) pursuant to which the Sale of the Company is to be consummated]
+ and to vote in opposition to any and all other proposals that could [reasonably be expected to] delay or impair the ability of the Company to consummate such Sale of the Company;
+if such transaction is a Stock Sale, to sell the same proportion of shares of capital stock of the Company beneficially held by such Stockholder as is being sold by the Selling Investors to the Person to whom the Selling Investors propose to sell their Shares, and, except as permitted in 
+Section 
+3.2
+ below, on the same terms and conditions as the other stockholders of the Company;
+to execute and deliver all related documentation and take such other action in support of the Sale of the Company as shall reasonably be requested by the Company or the Selling Investors in order to carry out the terms and provision of this 
+Section 
+3
+, including, without limitation, 
+(i) 
+executing and delivering instruments of conveyance and transfer, and any purchase agreement, merger agreement, any associated indemnity agreement, 
+any
+ reasonably customary
+ release agreement in the capacity of a securityholder, termination of investment related documents, accredited investor forms, documents evidencing the removal of board designees as power of attorneys 
+or escrow agreement, any associated voting, support, or joinder agreement, consent, waiver, governmental filing, share certificates duly endorsed for transfer (free and clear of impermissible liens, claims and encumbrances), and any similar or related documents
+ and 
+(ii) providing any information reasonably necessary for any
+ 
+public filings with the Securities and Exchange Commission in connection with the Sale of the Company
+;
+ 
+not to deposit, and to cause their Affiliates not to deposit, except as provided in this Agreement, any Shares of the Company owned by such party or Affiliate in a voting trust or subject any Shares to any arrangement or agreement with respect to the voting of such Shares, unless specifically requested to do so by the acquirer in connection with the Sale of the Company; 
+to refrain from (i
+)
+ exercising any dissenters
+’
+ rights or rights of appraisal under applicable law at any time with respect to such Sale of the Company
+, or 
+(
+ii
+)
+ 
+asserting any claim or commencing
+, joining or participating in any way (including, without limitation, as a member of a class
+)
+ in
+ any 
+action, 
+suit
+ or proceeding
+ challenging the Sale of the Company
+,
+ this Agreement, 
+consummation of the transactions contemplated in connection with the Sale of the Company or this Agreement,
+ including,
+ without limitation, 
+(
+x
+)
+ challenging the validity of, or seeking to enjoin the operation of, the definitive agreement(s) with respect to such Sale of 
+the 
+Company 
+or (y) alleging a breach of any fiduciary duty 
+(including, without limitation, aiding and abetting a breach of any fiduciary duty) 
+by
+ the Selling Investors or any 
+A
+ffiliate or associate thereof
+, 
+the
+ 
+directors of the Company or the acquirer(s)
+ in connection with the Sale of the Company
+ or any action taken thereby with respect to such Sale of the Company
+;
+if the consideration to be paid in exchange for the Shares pursuant to this 
+Section 
+3
+ includes any securities and due receipt thereof by any Stockholder would require under applicable law (x) the registration or qualification of such securities or of any person as a broker or dealer or agent with respect to such securities; or (y) the provision to any Stockholder of any information other than such information as a prudent issuer would generally furnish in an offering made solely to 
+“
+accredited investors
+”
+ as defined in Regulation D promulgated under the Securities Act of 1933, as amended (the 
+“
+Securities Act
+”
+), the Company may cause to be paid to any such Stockholder in lieu thereof, against surrender of the Shares which would have otherwise been sold by such Stockholder, an amount in cash equal to the fair value (as determined in good faith by the Board) of the securities which such Stockholder would otherwise receive
+ 
+as of the date of the issuance of such securities in exchange for the Shares; and
+in the event that the Selling Investors, in connection with such Sale of the Company, appoint a stockholder representative (the 
+“
+Stockholder Representative
+”
+) with respect to matters affecting the Stockholders under the applicable definitive transaction agreements following consummation of such Sale of the Company, (x) to consent to (i) the appointment of such Stockholder Representative, (ii) the establishment of any applicable escrow, expense or similar fund in connection with any indemnification or similar obligations, and (iii) the payment of such Stockholder
+’
+s pro rata portion (from the applicable escrow or expense fund or otherwise) of any and all reasonable fees and expenses to such Stockholder Representative in connection with such Stockholder Representative
+’
+s services and duties in connection with such Sale of the Company and its related service as the representative of the Stockholders, and (y) not to assert any claim or commence any suit against the Stockholder Representative or any other Stockholder with respect to any action or inaction taken or failed to be taken by the Stockholder Representative, within the scope of the Stockholder Representative
+’
+s authority, in connection with its service as the Stockholder Representative, absent fraud, bad faith, [gross negligence] or willful misconduct.
+Conditions
+. Notwithstanding anything to the contrary set forth herein, a Stockholder will not be required to comply with 
+Section 
+3.1
+ above in connection with any proposed Sale of the Company (the 
+“
+Proposed Sale
+”
+), unless:
+ 
+any representations and warranties to be made by such Stockholder in connection with the Proposed Sale are 
+made severally and not jointly and are 
+limited to representations and warranties related to authority, ownership and the ability to convey title to such Shares, including, but not limited to, representations and warranties that (i) the Stockholder holds all right, title and interest in and to the Shares such Stockholder purports to hold, free and clear of all liens and encumbrances, (ii) the obligations of the Stockholder in connection with the transaction have been duly authorized, if applicable, (iii) 
+the documents to be entered into by the Stockholder have been duly executed by the Stockholder and delivered to the acquirer and are enforceable (subject to customary limitations) against the Stockholder in accordance with their respective terms;
+ and (iv) neither the execution and delivery of documents to be entered into by the 
+Stockholder in connection with the transaction, nor the performance of the Stockholder
+’
+s obligations thereunder, will cause a breach or violation of the terms of any agreement
+ (including the Company’s or such Stockholder’s organizational documents)
+ to which the Stockholder is a party, or any law or judgment, order or decree of any court or governmental agency that applies to the Stockholder;
+such Stockholder is not required to agree (unless such Stockholder is a Company officer
+, director,
+ or employee) to any restrictive covenant in connection with the Proposed Sale (including
+,
+ without limitation
+,
+ any covenant not to compete or covenant not to solicit customers, employees or suppliers of any party to the Proposed Sale) or any 
+release of claims other than a release in customary form of claims arising solely in such Stockholder
+’
+s capacity as a stockholder of the Company
+;
+such Stockholder and its Affiliates are not required to amend, extend or terminate any contractual or other relationship with the Company, the acquirer or their respective Affiliates, except that the Stockholder may be required to agree to terminate the investment-related documents between or among such Stockholder, the Company and/or other stockholders of the Company;
+the Stockholder is not liable for the breach of any representation, warranty or covenant made by any other Person in connection with the Proposed Sale, other than the Company [(except to the extent that funds may be paid out of an escrow established to cover breach of representations, warranties and covenants of the Company as well as breach by any stockholder of any of identical representations, warranties and covenants provided by all stockholders)];
+ 
+liability shall be limited to such Stockholder
+’
+s applicable share (determined based on the respective proceeds payable to each Stockholder in connection with such Proposed Sale in accordance with the provisions of the Restated Certificate) of a negotiated aggregate indemnification amount that in no event exceeds the amount of consideration otherwise payable to such Stockholder in connection with such Proposed Sale
+ in such person’s capacity as a stockholder of the Company
+, except with respect to claims related to fraud by such Stockholder, the liability for which need not be limited as to such Stockholder;
+ 
+[and]
+u
+pon 
+the consummation of the Proposed Sale (i) each holder of each class or series of the capital stock of the Company will receive the same form of consideration for their shares of such class or series as is received by other holders in respect of their shares of such same class or series of stock, (ii) each holder of a series of Preferred Stock will receive the same amount of consideration per share of such series of Preferred Stock as is received by other holders in respect of their shares of such same series, (iii) each holder of Common Stock will receive the same amount of consideration per share of Common Stock as is received by other holders in respect of their shares of Common Stock, and (iv) unless waived pursuant to the terms of the Restated Certificate 
+or
+ as may be required by law, the aggregate consideration receivable by all holders of the Preferred Stock and Common Stock shall be allocated among the holders of Preferred Stock and Common Stock on the basis of the relative liquidation preferences to which the holders of each respective series of Preferred Stock and the holders of Common Stock are entitled in a Deemed Liquidation Event (assuming for this purpose that the Proposed Sale is a Deemed Liquidation Event) in accordance with the Company
+’
+s Restated Certificate in effect immediately prior to the Proposed Sale; 
+provided
+, 
+however
+,
+ that, notwithstanding the foregoing provisions of this 
+Section
+ 
+3.2(f)
+, if the consideration to be paid in exchange for the Shares held by the 
+Stockholder
+ pursuant to this 
+Section
+ 
+3.2(f)
+ 
+includes any securities and due receipt thereof by any 
+Stockholder 
+would require under applicable law (x) the registration or qualification of such securities or of any person as a broker or dealer or agent with respect to such securities; or (y) the provision to any 
+Stockholder 
+of any information other than such information as a prudent issuer would generally furnish in an offering made solely to 
+“
+accredited investors
+”
+ as defined in Regulation D promulgated under the Securities Act, the Company may cause to be paid to any such 
+Stockholder 
+in lieu thereof, against surrender of the Shares held by the 
+Stockholder
+, which would have otherwise been sold by such 
+Stockholder
+, an amount in cash equal to the fair value (as determined in good 
+faith by the Board) of the securities which such 
+Stockholder 
+would otherwise receive as of the date of the issuance of such securities in exchange for the Shares held by the 
+Stockholder
+[
+;
+ and][.]
+[subject to 
+Section
+ 
+3.2(f)
+ above, requiring the same form of consideration to be available to the holders of any single class or series of capital stock, if any holders of any capital stock of the Company are given an option as to the form and amount of consideration to be received as a result of the Proposed Sale, all holders of such capital stock will be given the same option; 
+provided
+, 
+however
+, that nothing in this 
+Section 
+3.2(g)
+ shall entitle any holder to receive any form of consideration that such holder would be ineligible to receive as a result of such holder
+’
+s failure to satisfy any condition, requirement or limitation that is generally applicable to the Company
+’
+s 
+stockholders.]
+Restrictions on Sales of Control of the Company
+.
+ No Stockholder shall be a party to any Stock Sale unless (a) all holders of Preferred Stock are allowed to participate in such transaction(s) and (b) the consideration received pursuant to such transaction is allocated among the parties thereto in the manner specified in the Company
+’
+s Restated Certificate in effect immediately prior to the Stock Sale (as if such transaction(s) were a Deemed Liquidation Event), unless the holders of at least the requisite percentage required to waive treatment of the transaction(s) as a Deemed Liquidation Event pursuant to the terms of the Restated Certificate, elect to allocate the consideration differently by written notice given to the Company at least [__] days prior to the effective date of any such transaction or series of related transactions.
+Effect of Sanctioned Party Status
+.
+ 
+For 
+clarity
+, if any Stockholder is a Sanctioned Party, such Stockholder will not be required to take any action described in 
+Section 
+3.1
+, and will not be entitled to receive any benefit described in 
+Section 
+3.2
+, if such action would cause the Company or any other party to violate applicable Sanctions.
+ 
+The 
+Shares
+ held by such Stockholders shall be disregarded for the purpose of 
+calculating 
+any voting threshold set forth
+ in th
+is
+ 
+Agreement
+.
+]
+Waiver of Statutory Notices
+. 
+Each Stockholder hereby waives the right to receive any notices that would otherwise be required to be given to it under Sections 228 and/or 262 of the DGCL in connection with a Sale of the Company in which the Stockholder is required to comply with the provisions of 
+Section 3.1
+.
+Additional Agreements; 
+Remedies
+.
+Covenants of the Company
+. 
+In addition to its obligations pursuant to 
+Section 
+1.5
+ above, the Company covenants and agrees to call a special meeting of stockholders for the purpose
+s
+ of 
+[
+(a)
+]
+ 
+increasing the number of authorized shares of Common Stock as contemplated by 
+Section 
+2
+,
+ upon the 
+written request of any holder of Preferred Stock
+[
+,
+ and (b) approving a Sale of the Company
+,
+ upon the written request of the Selling Investors in accordance with 
+Section
+ 
+3.1
+]
+.
+ 
+Irrevocable Proxy and Power of Attorney
+. Each party to this Agreement hereby constitutes and appoints as the proxies of the party and hereby grants a power of attorney to the [President of the Company
+ and the Chairperson of the Board
+]
+ 
+and a designee of the 
+Requisite Holders 
+(each, a “
+Proxyholder
+”)
+, and each of them, with full power of substitution, with respect to the matters set forth herein, including, without limitation, votes regarding the composition of the Board, 
+[and ]
+votes to increase authorized shares 
+[
+and votes
+, waivers, and other actions required to be taken pursuant to 
+Section 3
+ of this Agreement in connection with a 
+Sale of the Company, 
+]
+and hereby authorizes each of them to represent and vote
+ [and take such other actions]
+, if and only if the party (i) fails to vote
+ 
+[and take such other actions] 
+within five business days after request by the Company
+,
+ (ii) is prohibited from voting due to Sanctions or other applicable laws,
+ or (
+i
+ii) attempts to vote (whether by proxy, in person or by written consent)
+ [or take actions]
+ in a manner which is inconsistent with the terms of this Agreement, all of such party
+’
+s Shares in favor of the election
+ or removal
+ of persons as members of the Board determined pursuant to and in accordance with the terms and provisions of this Agreement or the increase of authorized shares 
+[
+or approval of any Sale of the Company 
+]
+pursuant to and in accordance with the terms and provisions of this Agreement or to take any action reasonably necessary to effect this Agreement. The power of attorney granted hereunder shall authorize 
+each Proxyholder
+ to execute and deliver 
+any 
+documentation 
+required by this Agreement
+ on behalf of any party failing to do so within five business days 
+after
+ request by the Company. Each of the proxy and power of attorney granted pursuant to this 
+Section 
+4.2
+ is given in consideration of the agreements and covenants of the Company and the parties in connection with the transactions contemplated by this Agreement and, as such, each is coupled with an interest and shall be irrevocable unless and until this Agreement terminates or expires pursuant to 
+Section 
+6
+ hereof. Each party hereto hereby revokes any and all previous proxies or powers of attorney with respect to the Shares and shall not hereafter, unless and until this Agreement terminates or expires pursuant to 
+Section 
+6
+ hereof, purport to grant any other proxy or power of attorney with respect to any of the Shares, deposit any of the Shares into a voting trust or enter into any agreement (other than this Agreement), arrangement or understanding with any person, directly or indirectly, to vote, grant any proxy or give instructions with respect to the voting of any of the Shares, in each case, with respect to any of the matters set forth herein.
+Specific Enforcement
+. Each party acknowledges and agrees that each party hereto will be irreparably damaged in the event any of the provisions of this Agreement are not performed by the parties in accordance with their specific terms or are otherwise breached. Accordingly, it is agreed that each of the Company and the Stockholders shall be entitled to an injunction to prevent breaches of this Agreement, and to specific enforcement of this Agreement and its terms and provisions in any action instituted in any court 
+of the United States or any state having subject matter jurisdiction
+; 
+provided
+ that no party that is regulated as a bank holding company under the Bank Holding Company Act of 1956, as amended, shall have the right to enforce against any Stockholder any provisions of this Agreement that (a) requires a Stockholder to vote for or against any matter or (b) restricts or conditions the ability of a Stockholder to transfer its Shares
+. 
+Each party to this Agreement agrees to use commercially reasonable efforts to cooperate in seeking and agreeing to an expedited schedule in any litigation seeking an injunction or order of specific performance.
+Remedies Cumulative
+. All remedies, either under this Agreement or by law or otherwise afforded to any party, shall be cumulative and not alternative.
+“
+Bad Actor
+”
+ 
+and Sanctioned Party 
+Matters
+.
+Additional 
+Definitions
+. 
+For purposes of this Agreement:
+“
+Company Covered Person
+”
+ means, with respect to the Company as an 
+“
+issuer
+”
+ for purposes of Rule 506 promulgated under the Securities Act, any Person listed in the first paragraph of Rule 506(d)(1).
+ 
+“
+Disqualified Designee
+”
+ means any director designee to whom any Disqualification Event is applicable, except for a Disqualification Event as to which Rule 506(d)(2)(ii) or (iii) or (d)(3) is applicable.
+“
+Disqualification Event
+”
+ means a 
+“
+bad actor
+”
+ disqualifying event described in Rule 506(d)(1)(i)-(viii) promulgated under the Securities Act
+ or any event which results in a director designee becoming a Sanctioned Party
+.
+“
+Rule 506(d) Related Party
+”
+ means, with respect to any Person, any other Person that is a beneficial owner of such first Person
+’
+s securities for purposes of Rule 506(d) under the Securities Act. 
+Representations
+.
+Each Person with the right to designate or participate in the designation of a director pursuant to this Agreement hereby represents that (i) such Person has exercised reasonable care to determine whether any Disqualification Event is applicable to such Person, any director designee designated by such Person pursuant to this Agreement or any of such Person
+’
+s Rule 506(d) Related Parties and (ii) no Disqualification Event is applicable to such Person, any Board member designated by such Person pursuant to this Agreement or
+, to such Person’s knowledge,
+ any of such Person
+’
+s Rule 506(d) Related Parties, except, if applicable, for a Disqualification Event as to which Rule 506(d)(2)(ii) or (iii) or (d)(3) is applicable.
+ Notwithstanding anything to the contrary in this Agreement, each Investor makes no representation regarding any Person that may be deemed to be a beneficial owner of the Company
+’
+s voting 
+equity securities held by such Investor solely by virtue of that Person being or becoming a party to (x) this Agreement, as may be subsequently amended, or (y) any other contract or written agreement to which the Company and such Investor are parties regarding (1) the voting power, which includes the power to vote or to direct the voting of, such security; and/or (2) the investment power, which includes the power to dispose, or to direct the disposition of, such security. 
+The Company hereby represents and warrants to the Investors that no Disqualification Event is applicable to the Company or, to the Company
+’
+s knowledge, any Company Covered Person, except for a Disqualification Event as to which Rule 506(d)(2)(ii)-(iv) or (d)(3) is applicable. 
+Covenants
+.
+ 
+Each Person with the right to designate or participate in the designation of a director pursuant to this Agreement covenants and agrees (i) not to designate or participate in the designation of any director designee who, to such Person
+’
+s knowledge, is a Disqualified Designee, (ii) to exercise reasonable care to determine whether any director designee designated by such person is a Disqualified Designee, (iii) that in the event such Person becomes aware that any individual previously designated by any such Person is or has become a Disqualified Designee, such Person shall as promptly as practicable take such actions as are necessary to remove such Disqualified Designee from the Board and designate a replacement designee who is not a Disqualified Designee, and (iv) to notify the Company promptly in writing in the event a Disqualification Event becomes applicable to such Person or any of its Rule 506(d) Related Parties, or, to such Person
+’
+s knowledge, to such Person
+’
+s initial designee named in 
+Section 
+1.2
+, except, if applicable, for a Disqualification Event as to which Rule 506(d)(2)(ii) or (iii) or (d)(3) is applicable.
+ 
+Term
+.
+ 
+This Agreement shall be effective as of the date hereof and shall continue in effect until and shall terminate upon the earliest to occur of (a) the consummation of the Company
+’
+s first underwritten public offering of its Common Stock
+ (other than a registration statement relating either to the sale of securities to employees of the Company pursuant to its stock option, stock purchase or similar plan or an SEC Rule 145 transaction)
+[, 
+or 
+Qualified 
+Direct Listing
+ (as defined in the Restated Certificate)
+]
+;
+ 
+(
+b) the consummation of a Sale of the Company and
+, if applicable,
+ distribution of proceeds to or escrow for the benefit of the Stockholders in accordance with the Restated Certificate
+[
+, 
+provided
+ that the provisions of 
+Section 
+3
+ hereof will continue after the closing of any Sale of the Company to the extent necessary to enforce the provisions of 
+Section 
+3
+ with respect to such Sale of the Company
+]
+; 
+[and] 
+(
+c
+)
+ termination of this Agreement in accordance with 
+Section 
+7.8
+ below[; and (d) _____ __, 20__].
+ 
+Miscellaneous
+.
+Additional Parties
+.
+Notwithstanding anything to the contrary contained herein, if the Company issues additional shares of Preferred Stock after the date hereof, 
+the Person acquiring such shares of Preferred Stock, 
+as a condition to the issuance of such shares 
+by 
+the Company
+,
+ shall become a party to this Agreement by executing and delivering 
+a counterpart signature page to this Agreement
+ 
+agreeing to be bound by and subject to the terms of this Agreement as an Investor and Stockholder hereunder
+. E
+ach such 
+P
+erson shall thereafter be deemed an Investor and Stockholder for all purposes under this Agreement.
+ The Company shall amend 
+Schedule A
+ to include such purchaser as an Investor
+ and Stockholder
+, but failure to update 
+Schedule A
+ shall not negate such Investor’s rights and obligations pursuant to this Agreement.
+In the event that after the date of this Agreement, the Company enters into an agreement with any Person to issue shares of capital stock 
+[or options or warrants to purchase shares of capital stock] 
+to such Person (other than to a purchaser of Preferred Stock described in 
+Section 
+7.1
+(a)
+ above), [following which such Person shall hold Shares constituting 1% or more of the then outstanding capital stock of the Company (treating for this purpose all shares of Common Stock issuable upon exercise or conversion of outstanding options, warrants or convertible securities, as if exercised and/or converted or exchanged)], then such Person, as a condition precedent to entering into such agreement
+ or acquiring such shares[, options, or warrants] shall
+ become a party to this Agreement by executing
+ and delivering
+ 
+a counterpart signature page to this Agreement
+ 
+agreeing to be bound by and subject to the terms of this Agreement as a
+ 
+Stockholder
+ and, if applicable, a Key Holder
+. Each such Person shall thereafter be deemed a Stockholder
+ and, if applicable, a Key Holder
+ for all purposes under this Agreement.
+ 
+If such Person is not a Key Holder, then the
+ 
+Company shall amend 
+Schedule 
+C
+ 
+to include such purchaser as 
+Stockholder
+.  Alternatively, if such Person is a Key Holder, the Company
+ shall amend 
+Schedule 
+B
+ 
+to include such 
+Person
+ 
+as a
+ 
+Key Holder
+.  Notwithstanding anything herein to the contrary,
+ failure to update 
+Schedule B
+ 
+or 
+Schedule C
+, as applicable
+,
+ 
+shall not negate such 
+Stockholder’s 
+(and, if applicable
+,
+ Key Holder’s) 
+rights and obligations pursuant to this Agreement.
+ 
+A
+ Person who becomes party to this Agreement pursuant to this 
+Section 7.1(b)
+ 
+shall
+ 
+solely
+ be
+ a “Stockholder”
+,
+ 
+unless
+ 
+such Person being 
+designated 
+a 
+“Key Holder” 
+is
+ 
+approved by
+ 
+[
+the Company in its sole discretion
+]
+.
+Transfers
+. Each transferee or assignee of any Shares subject to this Agreement shall continue to be subject to the terms hereof, and, as a condition precedent to the Company
+’
+s recognition of such transfer, each transferee or assignee shall agree in writing to be subject to each of the terms of this Agreement by executing and delivering 
+a counterpart signature page in this Agreement, 
+agreeing to be bound by and subject to the terms of this Agreement in the same capacity as the transferor
+. Upon the execution and delivery of a
+ counterpart signature page to
+ 
+this Agreement
+ by any transferee, such transferee shall be deemed to be a party hereto as if such transferee were the transferor and such transferee
+’
+s signature appeared on the signature pages of this Agreement and shall be deemed to be an Investor and Stockholder, or Key Holder and Stockholder, as applicable. The Company shall not permit the transfer of the Shares subject to this Agreement on its books or issue a new certificate representing any such Shares unless and until such transferee shall have complied with the terms of this 
+Section 
+7.2
+. Each certificate instrument, or book entry representing the Shares subject to this Agreement if issued on or after the date of this Agreement shall be notated by the Company with the legend set forth in 
+Section 
+7.12
+.
+ 
+The Company shall amend 
+the applicable Schedules
+ to include such transferee as a
+n
+ 
+Investor
+, Key Holder,
+ and
+/or
+ Stockholder, as applicable
+, but the Company’s failure to update 
+the Schedules to this Agreement
+ shall not negate such Stockholder’s rights and obligations pursuant to this Agreement
+.
+Successors and Assigns
+. The terms and conditions of this Agreement shall inure to the benefit of and be binding upon the respective successors and assigns of the parties
+; 
+provided
+, 
+however
+, that the rights to designate members of the Board in 
+Section[s] [
+1.2(a)
+-
+(b)
+]
+ are nontransferable (and shall not be binding upon or inure to the benefit of successors and assigns) other than pursuant to an amendment effected in accordance with 
+Section 
+7.8
+ below
+. Nothing in this Agreement, express or implied, is intended to confer upon any party other than the parties hereto or their respective successors and assigns any rights, remedies, obligations, or liabilities under or by reason of this Agreement, except as expressly provided in this Agreement.
+ 
+Governing Law
+.
+ This Agreement shall be governed by the internal law of the State of Delaware, without regard to conflict of law principles that would result in the application of any law other than the law of the State of Delaware.
+Counterparts
+. This Agreement may be executed in two or more counterparts, each of which shall be deemed an original, but all of which together shall constitute one and the same instrument. 
+Counterparts may be delivered via electronic mail (including pdf or any electronic signature complying with the U.S. ESIGN Act of 2000, 
+e.g.
+, www.docusign.com) or other transmission method and any counterpart so delivered shall be deemed to have been duly and validly delivered and be valid and effective for all purposes. 
+Titles and Subtitles
+. The titles and subtitles used in this Agreement are used for convenience only and are not to be considered in construing or interpreting this Agreement.
+Notices
+.
+General
+. All
+ notices and other communications given or made pursuant to this Agreement shall be in writing
+ (including electronic mail as permitted in this Agreement)
+ and shall be deemed effectively given upon the earlier of actual receipt or (a) personal delivery to the party to be notified, (b) when sent, if sent by electronic mail during normal business hours of the recipient, and if not sent during normal business hours, then on the recipient
+’
+s next business day, (c) five days after having been sent by registered or certified mail, return receipt requested, postage prepaid, or (d) one business day after the business day of deposit with a nationally recognized overnight courier, freight prepaid, specifying next business day delivery, with written verification of receipt. All communications shall be sent to the respective parties at their address as set forth on 
+the Schedules to this Agreement
+, or (as to the Company) to the 
+address set forth on the signature page hereto
+, or, in any case, to such e
+lectronic 
+mail address or address as subsequently modified by written notice given in accordance with this 
+Section 
+7.7
+. 
+If notice is given to the Company, a copy (which copy shall not constitute notice) shall also be sent to [
+Company counsel name and address
+]
+, and if notice is given to any Investor, a copy (which copy shall not constitute notice) shall also be given to 
+any 
+“cc” address noted on 
+Schedule A
+ for such Investor
+.
+ 
+Consent
+ to Electronic Notice
+. Each 
+Stockholder
+ consents to the delivery of any stockholder notice pursuant to the 
+DGCL
+, as amended or superseded from time to time, by electronic 
+mail 
+pursuant to Section 232 of the DGCL (or any successor thereto) at the electronic mail address set forth below such 
+Stockh
+older
+’
+s name on the Schedules hereto, 
+as updated from time to time by notice to the Company
+, or as on the books of the Company. To the extent that any notice given by means of electronic 
+mail 
+is returned or undeliverable for any reason, the foregoing consent shall be deemed to have been revoked until a new or corrected electronic mail address has been provided, and such attempted electronic notice shall be ineffective and deemed to not have been given. Each 
+Stockholder
+ agrees to promptly notify the Company of any change in its electronic mail address, and that failure to do so shall not affect the foregoing.
+Consent Required to Amend, Modify, Terminate or Waive
+. 
+This Agreement may be amended, modified or terminated (other than pursuant to 
+Section 
+6
+) and the observance of any term hereof may be waived (either generally or in a particular instance and either retroactively or prospectively)
+ 
+only by a written instrument executed by (
+i
+) the Company; (
+ii
+) the 
+[
+Qualified
+]
+ 
+Key Holders holding [
+specify percentage
+]
+%
+ of the Shares then held by the 
+[
+Qualified
+]
+ 
+Key Holders [
+provided
+ that such consent shall not be required if the 
+[
+Qualified
+]
+ 
+Key Holders do not then own Shares representing at least [
+specify percentage
+]% of the outstanding capital stock of the Company]; and (
+iii
+) 
+the Requisite Holders
+; 
+provided
+ that
+ Shares held by a Sanctioned Party shall be disregarded for the purpose of 
+calculating the percentages
+ set forth 
+in th
+is
+ section
+ (including determination of Requisite Holders)
+. 
+Notwithstanding the foregoing:
+ 
+this Agreement may not be amended, modified or terminated and the obser
+vance of any term of this Agreement may not be waived with respect to any Investor or Key Holder without the written consent of such Investor or Key Holder unless such amendment, modification, termination or waiver applies to all Investors or Key Holders
+, as the case may be, in
+ the same fashion;
+[
+the provisions of 
+Section 
+1.2(a)
+ and this 
+Section 
+7.8(b)(ii)
+ may not be amended, modified, terminated or waived without the written consent of [
+Name of Investor 1
+]
+ for so long as [
+Name of Investor 1
+] continues to have rights pursuant to 
+Section 
+1.2(a)
+;
+]
+[
+the provisions of 
+Section 
+1.2(a)
+ and this 
+Section 
+7.8(b)(iii)
+ may not be amended, modified, terminated or waived without the written consent of [
+Name of Investor 2
+]
+ for so long as [
+Name of Investor 2
+] continues to have rights pursuant to 
+Section 
+1.2(a)
+;
+]
+[
+the provisions of
+ Section 
+1.2(b)
+ and this 
+Section 
+7.8(b)(iv)
+ may not be amended, modified, terminated or waived without the written consent of [the 
+[Qualified] 
+Key Holders][the holders of [
+specify percentage
+] of shares of Common Stock];
+]
+the consent of the Key Holders shall not be required for any amendment, modification, termination or waiver if such amendment, modification, termination, or waiver either (A) is not directly applicable to the rights of the Key Holders hereunder; or (B) does not adversely affect the rights of the Key Holders in a manner that is different than the effect on the rights of the other parties hereto;
+the Schedules to this Agreement
+ 
+may be amended by the Company from time to time in accordance with
+ 
+Sections 
+7.1
+ and 
+7.2
+ without the consent of the other parties hereto; and
+any provision hereof may be waived by the waiving party on such party
+’
+s 
+own behalf, without the consent of any other party.
+The Company shall give prompt written notice of any amendment, modification, termination, or waiver hereunder to any party 
+whose rights and/or obligations were affected by such amendment, modification, termination, or waiver and 
+that did not consent in writing 
+to such amendment, modification, termination, or waiver
+; provided that the failure to provide such notice shall not invalidate any amendment, modification, termination
+, or waiver
+ in accordance with this 
+Section 
+7.8
+. 
+Any amendment, modification, termination, or waiver effected in accordance with this 
+Section 
+7.8
+ shall be binding on each party and all of such party
+’
+s successors and permitted assigns, whether or not any such party, successor or assignee entered into or approved such amendment, modification, termination or waiver
+ or received notice thereof
+. 
+For purposes of this 
+Section 
+7.8
+, the requirement of a written instrument may be satisfied in the form of an action by written consent of the Stockholders circulated by the Company and executed by the Stockholder parties specified, whether or not such action by written consent makes explicit reference to the terms of this Agreement. 
+Delays or Omissions
+. No delay or omission to exercise any right, power or remedy accruing to any party under this Agreement, upon any breach or default of any other party under this Agreement, shall impair any such right, power or remedy of such non-breaching or non-defaulting party nor shall it be construed to be a waiver of any such breach or default, or an acquiescence therein, or of or in any similar breach or default thereafter occurring; nor shall any waiver of any single breach or default be deemed a waiver of any other breach or default previously or thereafter occurring. Any waiver, permit, consent or approval of any kind or character on the part of any party of any breach or default under this Agreement, or any waiver on the part of any party of any provisions or conditions of this Agreement, must be in writing and shall be effective only to the extent specifically set forth in such writing. All remedies, either under this Agreement or by law or otherwise afforded to any party, shall be cumulative and not alternative. 
+Severability
+. The invalidity or unenforceability of any provision hereof shall in no way affect the validity or enforceability of any other provision.
+Entire Agreement
+. 
+[Upon the effectiveness of this Agreement, the Prior Agreement shall be deemed amended and restated and superseded and replaced in its entirety by this Agreement, and shall be of no further force or effect.]
+ 
+This Agreement (including the Exhibits and Schedules hereto) together with the Restated Certificate and other Transaction Agreements (as defined in the Purchase Agreement)
+ and any Side Letters
+ constitute the full and entire understanding and agreement among the parties with respect to the subject matter hereof, and any other written or oral agreement relating to the subject matter hereof existing between or among any of the parties are expressly canceled
+.
+ 
+Share Certificate Legend
+. Each certificate, instrument, or book entry representing any Shares issued after the date hereof shall be notated by the Company with a legend reading substantially as follows:
+“
+The Shares REPRESENTED hereby are subject to a Voting Agreement, AS MAY BE AMENDED FROM TIME TO TIME (a copy of which may be obtained upon written request from the Company), and by accepting any interest in such Shares the person accepting such interest shall be deemed to agree to and shall become bound by all the provisions of that Voting Agreement, including certain restrictions on transfer and ownership set forth therein.
+”
+The Company, by its execution of this Agreement, agrees that it will cause the certificates, instruments, or book entry evidencing the Shares issued after the date hereof to be notated with the legend required by this 
+Section 
+7.12
+ of this Agreement, and it shall supply, free of charge, a copy of this Agreement to any holder of such Shares upon written request from such holder to the Company at its principal office. The parties to this Agreement do hereby agree that the failure to cause the certificates, instruments, or book entry evidencing the Shares to be notated with the legend required by this 
+Section 
+7.12
+ herein and/or the failure of the Company to supply, free of charge, a copy of this Agreement as provided hereunder shall not affect the validity or enforcement of this Agreement.
+Stock Splits, Dividends and Recapitalizations
+.
+ In the event of any issuance of Shares or the voting securities of the Company hereafter to any of the Stockholders (including, without limitation, in connection with any stock split, stock dividend, recapitalization, reorganization, or the like), such Shares shall become subject to this Agreement and shall be notated with the legend set forth in 
+Section 
+7.12
+.
+Manner of Voting
+. The voting of Shares pursuant to this Agreement may be effected in person, by proxy, by written consent or in any other manner permitted by applica
+ble law. For the avoidance of doubt, voting of the Shares pursuant to the Agreement need not make explicit reference to the terms of this Agreement.
+Further Assurances
+. At any time or from time to time after the date hereof, the parties agree to cooperate with each other, and at the request of any other party, to execute and deliver any further instruments or documents and to take all such further action as the other party may reasonably request 
+in order to
+ carry out the intent of the parties hereunder.
+Dispute Resolution
+.
+[
+Alternative 1:
+ 
+E
+xcept 
+as (i) otherwise provided in this Agreement, or (ii) any 
+disputes,
+ 
+controversies
+,
+ or claims arising out of either party’s intellectual property rights for which a provisional remedy or equitable relief is sought, 
+any unresolved dispute, controversy, or claim arising out of or relating to this Agreement or the breach, termination, enforcement, interpretation, or validity thereof, including the determination of the scope or applicability of this agreement to arbitrate, shall be resolved by 
+arbitration 
+before a single 
+arbitrator
+. Such arbitrator shall be
+ mutually agreed upon by the parties, and if no agreement can be reached within 30 days after names of potential arbitrators have been proposed by Judicial Arbitration and Mediation Services, Inc. (“
+JAMS
+”),
+ then 
+JAMS shall choose 
+one arbitrator having reasonable experience in corporate finance transactions of the type provided for in this Agreement. The arbitration shall take place in [
+location
+], 
+pursuant to the JAMS Comprehensive Arbitration Rules and Procedures [and 
+in accordance with the 
+Expedited Procedures in those 
+r
+ules] [or pursuant to JAMS’ Streamlined Arbitration Rules and Procedures]; provided, however, that there 
+shall be limited discovery prior to the arbitration hearing as follows: (
+x
+) exchange of witness lists and copies of documentary evidence and documents relating to the issues to be arbitrated, (
+y
+) depositions of all party witnesses, and (
+z
+) such 
+other depositions as may be allowed by the arbitrators upon a showing of good cause. Depositions shall be conducted in accordance with the [
+state
+] Code of Civil Procedure, the arbitrator shall be required to provide in writing to the parties the basis for the award or order of such arbitrator, and a court reporter shall record all hearings, with such record constituting the official transcript of such proceedings.
+ Judgment on the 
+a
+ward may be entered in any court having jurisdiction.
+]
+[
+Alternative 2:
+The parties (
+i
+) hereby irrevocably and unconditionally submit to the jurisdiction of the state courts of [
+state
+] and to the jurisdiction of the United States District Court for the District of [judicial district] for the purpose of any suit, action or other proceeding arising out of or based upon this Agreement, (
+ii
+) agree not to commence any suit, action or other proceeding arising out of or based upon this Agreement except in the state courts of [
+state
+]
+ 
+or the United States District Court for the District of [
+judicial district
+], and (
+iii
+) hereby waive, and agree not to assert, by way of motion, as a defense, or otherwise, in any such suit, action or proceeding, any claim that it is not subject personally to the jurisdiction of the above-named courts, that its property is exempt or immune from attachment or execution, that the suit, action or proceeding is brought in an inconvenient forum, that the venue of the suit, action or proceeding is improper or that this Agreement or the subject matter hereof may not be enforced in or by such court.
+]
+ 
+Each of the parties to this Agreement consents to personal jurisdiction for any equitable action sought in the U.S. District Court for the District of [_____] or any 
+state 
+court of [
+state
+] having subject matter jurisdiction.
+ 
+(
+c)
+Waiver of Jury Trial
+:
+ 
+EACH PARTY HEREBY WAIVES ITS RIGHTS TO A JURY TRIAL OF ANY CLAIM OR CAUSE OF ACTION BASED UPON OR ARISING OUT OF THIS AGREEMENT, THE OTHER TRANSACTION AGREEMENTS, THE SECURITIES OR THE SUBJECT MATTER HEREOF OR THEREOF. THE SCOPE OF THIS WAIVER IS INTENDED TO BE ALL-ENCOMPASSING OF ANY AND ALL DISPUTES THAT MAY BE FILED IN ANY COURT AND THAT RELATE TO THE SUBJECT MATTER OF THIS TRANSACTION, INCLUDING, WITHOUT LIMITATION, CONTRACT CLAIMS, TORT CLAIMS (INCLUDING NEGLIGENCE), BREACH OF DUTY CLAIMS, AND ALL OTHER COMMON LAW AND STATUTORY CLAIMS. THIS SECTION HAS BEEN FULLY DISCUSSED BY EACH OF THE PARTIES HERETO AND THESE PROVISIONS WILL NOT BE SUBJECT TO ANY EXCEPTIONS. EACH PARTY HERETO HEREBY FURTHER WARRANTS AND REPRESENTS THAT SUCH PARTY HAS REVIEWED THIS WAIVER WITH ITS LEGAL COUNSEL, AND THAT SUCH PARTY KNOWINGLY AND VOLUNTARILY WAIVES ITS JURY TRIAL RIGHTS FOLLOWING CONSULTATION WITH LEGAL COUNSEL.
+Costs of Enforcement
+. 
+[Each party will bear its own costs in respect of any disputes arising under this Agreement.] [The prevailing party shall be entitled to reasonable attorney’s fees, costs, and necessary disbursements in addition to any other relief to which such party may be entitled.]
+Aggregation of Stock
+. All Shares held or acquired by a Stockholder and/or its Affiliates shall be aggregated together for the purpose of determining the availability of any rights under this Agreement, and such Affiliate
+s
+ 
+may apportion such rights as among themselves in any manner they deem appropriate.
+[Signature Page Follows]
+IN WITNESS WHEREOF, the parties have executed this [Amended and Restated] Voting Agreement as of the date first written above.
+COMPANY:
+[
+Insert Company Name
+]
+By:
+Name:
+Title:
+Address: 
+Email: 
+ 
+ 
+INVESTORS:
+[
+Insert Investor Name]
+By:
+Name:
+Title:
+KEY HOLDERS: 
+[
+Insert Key Holder Name]
+Signature:
+SCHEDULE A
+INVESTORS
+Investor Name
+Address
+Phone Number
+Email
+[Counsel cc, if any]
+Investor Name
+Address
+Phone Number
+Email
+[Counsel cc, if any]
+Investor Name
+Address
+Phone Number
+Email
+[Counsel cc, if any]
+SCHEDULE B
+KEY HOLDERS
+[Key Holder Name
+Personal
+ 
+Address
+Personal 
+Email]
+[Key Holder Name
+Personal 
+Address
+Personal 
+Email]
+[Key Holder Name
+Personal 
+Address
+Personal 
+Email]

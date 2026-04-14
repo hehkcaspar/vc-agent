@@ -9,7 +9,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.academic_database import init_academic_db
 from app.database import init_db
-from app.routers import entities, parkinglot, ingest, chat, academic, workspace
+from app.routers import (
+    academic,
+    chat,
+    entities,
+    ingest,
+    parkinglot,
+    settings as settings_router,
+    workspace,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -125,7 +133,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("agent_mode migration failed", exc_info=True)
 
-    # Add metadata_json column to entities (entity-level extracted metadata)
+    # Add metadata_json + deal_stage columns to entities
     try:
         from app.database import engine as portfolio_engine  # noqa: F811
         async with portfolio_engine.begin() as conn:
@@ -138,8 +146,14 @@ async def lifespan(app: FastAPI):
                     "ALTER TABLE entities ADD COLUMN metadata_json TEXT"
                 )
                 logger.info("Added metadata_json column to entities")
+            if "deal_stage" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE entities ADD COLUMN deal_stage TEXT "
+                    "NOT NULL DEFAULT 'diligence'"
+                )
+                logger.info("Added deal_stage column to entities")
     except Exception:
-        logger.warning("metadata_json migration failed", exc_info=True)
+        logger.warning("entities column migration failed", exc_info=True)
 
     # Reset any scholars stuck in "evaluating" (no background tasks survive restart)
     try:
@@ -165,6 +179,18 @@ async def lifespan(app: FastAPI):
         rotate_if_needed()
     except Exception:
         logger.warning("eval_log rotation check failed", exc_info=True)
+
+    # Seed legal-review config files if they don't exist yet. Both files are
+    # idempotent — no-op when already present.
+    try:
+        from app.services.legal_templates_config import ensure_legal_templates_seed
+        from app.services.legal_review_checklist_config import (
+            ensure_legal_review_checklist_seed,
+        )
+        ensure_legal_templates_seed()
+        ensure_legal_review_checklist_seed()
+    except Exception:
+        logger.warning("legal_review config seeding failed", exc_info=True)
 
     # Start academic heartbeat scheduler
     from app.services.academic.heartbeat import HeartbeatScheduler
@@ -204,6 +230,7 @@ app.include_router(parkinglot.router)
 app.include_router(ingest.router)
 app.include_router(workspace.router)
 app.include_router(academic.router)
+app.include_router(settings_router.router)
 
 
 @app.get("/")

@@ -26,6 +26,14 @@
   --color-warning: #D97706;
   --color-error: #DC2626;
   --color-info: #2563EB;
+  /* Subtle / strong backgrounds for semantic tones — used by severity
+     badges, inline status chips, danger buttons. Tokenised so dark mode
+     can override without every consumer hand-rolling RGBA literals. */
+  --color-info-bg-subtle: rgba(37, 99, 235, 0.10);
+  --color-warning-bg-subtle: rgba(217, 119, 6, 0.12);
+  --color-error-bg-subtle: rgba(220, 38, 38, 0.10);
+  --color-error-bg-strong: rgba(220, 38, 38, 0.18);
+  --color-neutral-bg-subtle: rgba(120, 120, 115, 0.12);
   
   /* Border & Divider */
   --color-border: #E5E5E0;
@@ -110,6 +118,14 @@
   /* Border & Divider */
   --color-border: #2A2D35;
   --color-border-hover: #373B46;
+
+  /* Dark-mode subtle/strong semantic backgrounds — pushed up so they
+     read through the darker base background. */
+  --color-info-bg-subtle: rgba(129, 140, 248, 0.18);
+  --color-warning-bg-subtle: rgba(234, 179, 8, 0.22);
+  --color-error-bg-subtle: rgba(248, 113, 113, 0.18);
+  --color-error-bg-strong: rgba(248, 113, 113, 0.30);
+  --color-neutral-bg-subtle: rgba(156, 163, 175, 0.15);
 
   /* Adjust Shadows for Dark Mode */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);

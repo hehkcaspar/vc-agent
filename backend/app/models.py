@@ -20,6 +20,9 @@ class Entity(Base):
     website = Column(String, nullable=True)
     metadata_json = Column(Text, nullable=True)
     status = Column(String, default="active")
+    # Deal lifecycle stage: prospect | diligence | portfolio | passed | exited.
+    # Distinct from `status` (active | archived); lifecycle vs archival visibility.
+    deal_stage = Column(String, nullable=False, default="diligence")
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 

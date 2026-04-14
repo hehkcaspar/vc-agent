@@ -3,9 +3,11 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Plus, Sparkles, Loader2, Copy, Maximize2, X, ChevronDown, ChevronRight, MoreVertical, Folder, Check, Clock, AlertTriangle } from 'lucide-react';
 import { Modal } from './ui/Modal';
-import { Entity, WorkspaceTreeNode, DeliverableCardPayload, InboxProcessJobStatus, ExtractionProgress } from '../types';
-import { useWorkspaceTree } from '../hooks/useEntities';
+import { Entity, WorkspaceTreeNode, DeliverableCardPayload, InboxProcessJobStatus, ExtractionProgress, DealStage } from '../types';
+import { useEntity, useFunds, useWorkspaceTree } from '../hooks/useEntities';
 import { api } from '../services/api';
+import { EntityHeader } from './EntityHeader';
+import { EntityEditModal } from './EntityEditModal';
 import {
   resolveEffectiveMime,
   isImageType,
@@ -124,9 +126,23 @@ interface EntityDetailProps {
 
 export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const { tree, isLoading: treeLoading, mutate: mutateTree } = useWorkspaceTree(entity.id);
+  // Load the detail-endpoint response so last_content_at + fresh metadata are available.
+  const { entity: entityDetail, mutate: mutateEntity } = useEntity(entity.id);
+  const liveEntity = entityDetail ?? entity;
+  const { funds, mutate: mutateFunds } = useFunds();
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [previewNode, setPreviewNode] = useState<WorkspaceTreeNode | null>(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
   const [agentMode, setAgentMode] = useState<AgentMode>('react'); // default unlimited until child reports
+
+  const handleDealStageChange = useCallback(async (stage: DealStage) => {
+    try {
+      await api.entities.update(entity.id, { deal_stage: stage });
+      await mutateEntity();
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : 'Could not update deal stage', 'error');
+    }
+  }, [entity.id, mutateEntity]);
 
   const handleAgentModeChange = useCallback((mode: AgentMode) => {
     setAgentMode(mode);
@@ -228,17 +244,22 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
 
   return (
     <div className="entity-detail">
-      <div className="entity-detail-header">
-        <button className="back-button" onClick={onBack}>← Back</button>
-        <h2>{entity.name}</h2>
-        <div className="entity-meta">
-          {entity.website && (
-            <a href={entity.website} target="_blank" rel="noopener noreferrer">
-              {entity.website}
-            </a>
-          )}
-        </div>
-      </div>
+      <EntityHeader
+        entity={liveEntity}
+        funds={funds}
+        onBack={onBack}
+        onEdit={() => setEditModalOpen(true)}
+        onDealStageChange={handleDealStageChange}
+      />
+      {editModalOpen && (
+        <EntityEditModal
+          entity={liveEntity}
+          funds={funds}
+          isOpen={editModalOpen}
+          onClose={() => setEditModalOpen(false)}
+          onSaved={() => { void mutateEntity(); void mutateFunds(); }}
+        />
+      )}
 
       <div className="entity-zones entity-zones--notebook">
         {/* Left: Workspace tree */}

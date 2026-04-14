@@ -78,6 +78,16 @@ class Settings(BaseSettings):
     # requires reasoning_content on prior tool messages; LangChain agent history omits it → HTTP 400.
     KIMI_DISABLE_THINKING_FOR_SEARCH: bool = True
 
+    # Portfolio settings — fund registry for our positions
+    FUNDS_CONFIG_PATH: Path = PROJECT_ROOT / "data" / "config" / "funds.json"
+
+    # Portfolio — legal-review preset
+    # Tier R1: raw template corpus shipped with the codebase (YC SAFE, NVCA, etc.)
+    LEGAL_TEMPLATES_DIR: Path = PROJECT_ROOT / "backend" / "app" / "legal_templates"
+    LEGAL_TEMPLATES_CONFIG_PATH: Path = PROJECT_ROOT / "data" / "config" / "legal_templates.json"
+    # Tier R2: distilled review checklist (user-tunable rubric)
+    LEGAL_REVIEW_CHECKLIST_CONFIG_PATH: Path = PROJECT_ROOT / "data" / "config" / "legal_review_checklist.json"
+
     # Academic Tracking v2 — separate DB + document-oriented storage
     ACADEMIC_DATABASE_URL: str = f"sqlite+aiosqlite:///{PROJECT_ROOT / 'data' / 'academic.db'}"
     ACADEMIC_SCHOLARS_DIR: Path = PROJECT_ROOT / "data" / "scholars"

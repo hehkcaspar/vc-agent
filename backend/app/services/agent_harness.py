@@ -19,6 +19,7 @@ from app.config import settings
 from app.services.model_profiles import build_agent_chat_model
 from app.services.prompt_assembly import EntityBrief, build_agent_system_prompt
 from app.services.storage import storage
+from app.services.legal_template_tools import build_legal_template_tools
 from app.services.workspace import WorkspaceService
 from app.services.workspace_tools import build_workspace_tools
 
@@ -106,6 +107,9 @@ def _build_agent_core(
         on_status=on_status,
         model_profile_id=model_profile_id,
     )
+    # Add the entity-agnostic legal-template reader (Tier R1 reference corpus).
+    # Read-only and harmless for presets that don't use it.
+    tools = tools + build_legal_template_tools(on_status=on_status)
     system_prompt = build_agent_system_prompt(
         entity,
         extras=system_prompt_extras,

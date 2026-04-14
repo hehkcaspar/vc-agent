@@ -78,11 +78,18 @@ List all entities (sorted by updated_at desc).
     "name": "Company Name",
     "website": "https://example.com",
     "status": "active",
+    "deal_stage": "diligence",
+    "metadata": { "...parsed entities.metadata_json (or null)..." },
+    "last_content_at": null,
     "created_at": "2024-01-01T00:00:00",
     "updated_at": "2024-01-01T00:00:00"
   }
 ]
 ```
+
+- `deal_stage` — lifecycle enum: `prospect | diligence | portfolio | passed | exited` (default `diligence`). Distinct from `status` (`active | archived`) which controls archival visibility.
+- `metadata` — parsed Tier 1-3 extract_info payload (see ARCHITECTURE.md → "Entity-level metadata"). Includes `_positions[]` and founder `status` when populated by the edit modal.
+- `last_content_at` — always `null` on list responses. Populated only by the detail endpoint.
 
 #### POST /entities
 Create a new entity directly.
@@ -91,27 +98,162 @@ Create a new entity directly.
 ```json
 {
   "name": "Company Name",
-  "website": "https://example.com"
+  "website": "https://example.com",
+  "deal_stage": "diligence"
 }
 ```
 
+`deal_stage` is optional; defaults to `diligence`.
+
 #### GET /entities/{id}
-Get entity details.
+Get entity details. Response includes `last_content_at` — MAX(`workspace_nodes.created_at`) filtered on `origin_type IN ('upload', 'ingest', 'user')` and excluding soft-deleted rows. Captures "last genuine new content" (skips agent writes and overwrites). `null` if the entity has no user-origin content yet.
 
 #### PATCH /entities/{id}
-Update entity.
+Update entity. All fields optional; `metadata_json` is the raw JSON string written to the `entities.metadata_json` column (the edit modal serializes its merged payload here).
 
 **Request Body:**
 ```json
 {
   "name": "New Name",
   "website": "https://new-website.com",
-  "status": "archived"
+  "status": "archived",
+  "deal_stage": "portfolio",
+  "metadata_json": "{\"...\": \"...\"}"
 }
 ```
 
+Detail + PATCH responses recompute `last_content_at` from the workspace.
+
 #### DELETE /entities/{id}
 Delete entity and all associated workspace nodes.
+
+---
+
+### Portfolio settings
+
+File-backed configuration under `data/config/`. Validated via Pydantic on read and write; atomic `tmp → os.replace` on write.
+
+#### GET /settings/funds
+Return the Taihill fund registry used by the entity edit modal.
+
+**Response:**
+```json
+{
+  "funds": [
+    { "id": "taihill_v3_lp", "name": "Taihill Venture Series III LP" },
+    { "id": "newlight_i_lp", "name": "Newlight Fund I LP" }
+  ]
+}
+```
+
+Fund ids must match `^[a-z0-9_]+$` and are unique. Returns `{"funds": []}` when the config file does not exist.
+
+#### POST /settings/funds
+Upsert a fund by id. Preserves list order; appends when id is new.
+
+**Request Body:**
+```json
+{ "id": "taihill_v3_lp", "name": "Taihill Venture Series III LP" }
+```
+
+**Response:** the full updated `FundsConfig` (list after upsert).
+
+Validation errors (non-snake_case id, empty name, etc.) return `400 Bad Request`.
+
+#### DELETE /settings/funds/{fund_id}
+Remove a fund. No-op when id is not present.
+
+**Response:** the full updated `FundsConfig`.
+
+> Note: deleting a fund does not touch `_positions` already recorded on entities. Orphaned `fund_id` references render in the UI as the raw id until cleaned up manually.
+
+#### GET /settings/legal-templates
+Return the Tier R1 legal-template catalog used by the `legal_review` preset.
+
+**Response:**
+```json
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "nvca_term_sheet_2020",
+      "label": "NVCA Model Term Sheet (2020)",
+      "category": "priced_round",
+      "round_type": "series_a_plus",
+      "instrument_types": ["priced_round"],
+      "description": "NVCA industry-standard term sheet summarising economic + governance terms for a Series A (or later) priced equity round.",
+      "source_file": "nvca/term_sheet_2020.docx",
+      "text_file": "nvca/term_sheet_2020.txt"
+    }
+  ]
+}
+```
+
+Returns `{"version": 1, "templates": []}` when the config file does not exist. Seeded on startup via `ensure_legal_templates_seed()` with 14 templates (YC post-money SAFE variants + pro-rata side letter + NVCA priced-round suite).
+
+#### GET /settings/legal-templates/{template_id}/text
+Return the extracted text for one template — the same content the agent sees when it calls the `legal_template_read` tool.
+
+**Response:**
+```json
+{
+  "id": "nvca_term_sheet_2020",
+  "label": "NVCA Model Term Sheet (2020)",
+  "text": "NVCA MODEL TERM SHEET\n\nSeries A Preferred Stock Financing of [Company]...\n"
+}
+```
+
+`404 Not Found` when the id is unknown; `404` when the catalog references a missing text file (out-of-sync catalog vs `backend/app/legal_templates/`).
+
+#### GET /settings/legal-review-checklist
+Return the Tier R2 distilled review checklist. The payload is injected in full into the `legal_review` preset prompt.
+
+**Response (abbreviated):**
+```json
+{
+  "version": 1,
+  "updated_at": null,
+  "categories": [
+    {
+      "id": "economic_terms",
+      "label": "Economic terms",
+      "description": "Financial rights attaching to the preferred stock — liquidation, anti-dilution, dividends, pay-to-play.",
+      "items": [
+        {
+          "id": "liquidation_preference_multiple",
+          "label": "Liquidation preference multiple",
+          "applies_to_instruments": ["priced_round"],
+          "standard_value": "1x",
+          "red_flag_patterns": [
+            { "pattern": "multiple > 1x", "severity": "high",     "note": "…" },
+            { "pattern": "multiple > 2x", "severity": "critical", "note": "…" }
+          ],
+          "why_matters": "Most impactful term in downside / moderate-outcome scenarios.",
+          "scenario_focus": {
+            "new_investment": "Primary negotiation item — push back on anything above 1x",
+            "follow_on":     "Check if this round's pref stacks senior to ours",
+            "retrospective": "Review cap-table stack; confirm our seniority"
+          }
+        }
+      ]
+    }
+  ]
+}
+```
+
+Seeded on startup via `ensure_legal_review_checklist_seed()` with 6 categories / 27 items.
+
+#### PUT /settings/legal-review-checklist
+Replace the checklist. The body must be the full config object (same shape as GET). Validated via Pydantic with `extra="forbid"` — unknown keys are rejected.
+
+**Response:** the updated checklist (same shape as GET).
+
+| Status | When |
+|---|---|
+| `200 OK` | Saved and re-validated |
+| `400 Bad Request` | Pydantic `ValidationError` — `detail` is the `e.errors()` array (field locations + reasons). Also fires for id-format errors (`detail` is a string). |
+
+> The Settings UI editor surfaces the error inline in the JSON editor so the user can fix and retry without losing their draft.
 
 ---
 
@@ -604,13 +746,14 @@ Other: `CHAT_ENABLE_GOOGLE_SEARCH`, attachment/history limits. Deep-agent steps 
 
 **Chat-mode file handling:** In Chat (one-shot) mode, selected files are inlined into a single Gemini call. PDFs are compressed via ghostscript; images sent as native binary. Capped at 10 files / 200k chars per file (backend truncates silently; frontend prevents over-selection).
 
-**Deep-agent workspace tools (13 total):** `workspace_get_tree`, `workspace_list_files`, `workspace_read_file`, `workspace_search_files`, `workspace_create_folder`, `workspace_move`, `workspace_rename`, `workspace_write_file`, `workspace_annotate`, `workspace_delete`, `workspace_file_versions`, `workspace_restore_version`, `workspace_history`.
+**Agent tools (14 total):** 13 workspace tools — `workspace_get_tree`, `workspace_list_files`, `workspace_read_file`, `workspace_search_files`, `workspace_create_folder`, `workspace_move`, `workspace_rename`, `workspace_write_file`, `workspace_annotate`, `workspace_delete`, `workspace_file_versions`, `workspace_restore_version`, `workspace_history` — plus 1 reference tool `legal_template_read(template_id)` that fetches raw text of a YC SAFE / NVCA template from the catalog (see `GET /settings/legal-templates`). Always loaded together via `agent_harness._build_agent_core`.
 
 ### `GET /entities/{entity_id}/chat/presets`
 
-List shortcut presets. Each preset has an `id` (for example `red_team`, `extract_info`), display fields, and output hints. **Preset run** behavior is defined in `backend/app/services/preset_registry.py`:
+List shortcut presets. Each preset has an `id` (for example `red_team`, `extract_info`, `legal_review`), display fields, and output hints. **Preset run** behavior is defined in `backend/app/services/preset_registry.py`:
 - `red_team` — markdown report at `Deliverables/Reports/risk_analyze.md`. Honors the chat/agent toggle (can run one-shot or react).
 - `extract_info` — agent-only (force-`react` server-side). Agent browses the workspace autonomously, extracts Tier 1-3 VC metadata (~26 fields), writes `Company Profile.json` at the workspace root, and post-processing syncs the JSON into `Entity.metadata_json`. Auto-updates `Entity.name` / `Entity.website` when extraction finds better values. On re-runs, the agent receives the previous extraction as incremental context and focuses on new/changed files. Workspace versioning snapshots prior versions automatically.
+- `legal_review` — agent-only (force-`react` server-side). Reviews **user-selected** legal documents for a single funding round against a two-tier reference system: Tier R1 raw templates (YC SAFE + NVCA — fetched on demand via `legal_template_read`) and Tier R2 distilled checklist (injected into the prompt). Auto-detects scenario per round (`new_investment` / `follow_on` / `retrospective`) from `metadata._positions[]` + prior `legal_reviews[]`. Writes `Legal Review.json` at the workspace root; post-processing validates, rebuilds `documents_reviewed[]` + `checklist_version` from trusted server sources, merges by `round_name` into `Entity.metadata_json.legal_reviews[]`, and re-persists the authoritative copy. Same belt-and-suspenders pattern as extract_info: salvage from agent text reply + plain-text failure message when the deliverable is missing/unreadable.
 
 ### `GET /entities/{entity_id}/chat/sessions`
 
@@ -699,9 +842,10 @@ Run a preset and **create a new workspace file** (markdown or JSON, depending on
 
 Notes:
 - `session_id` is **required** for any agent-mode preset run (the job + assistant card message attach to a session).
-- `extract_info` is force-pinned to `agent_mode="react"` server-side regardless of the client toggle — it must browse the workspace.
+- `extract_info` and `legal_review` are both force-pinned to `agent_mode="react"` server-side regardless of the client toggle — each must browse the workspace and write a JSON deliverable via workspace tools.
 - `red_team` honors the client toggle exactly — it does NOT auto-promote to agent mode.
 - `extract_info` post-processing trusts the workspace file, not the agent's text reply: `_extracted_at` is overwritten with the real server timestamp, and `_files_examined` is rebuilt from the status_trace (files the `workspace_read_file` tool actually touched). If the agent skips `workspace_write_file`, post-processing attempts `parse_json_loose` on the agent's final text as a salvage path and writes the file itself; if that also fails, the chat card falls back to a plain-text failure message.
+- `legal_review` post-processing mirrors extract_info: `review_date` + `checklist_version` are stamped server-side, `documents_reviewed[]` is rebuilt from status_trace (template reads routed to `reference_templates_consulted` instead — separate tool emits a different notification prefix), each review is merged by `round_name` into `Entity.metadata_json.legal_reviews[]`, and the `Legal Review.json` file is re-persisted at workspace root with the merged array so file + DB stay in sync. Salvage path via `parse_json_loose` covers the agent-skipped-write case.
 
 ---
 
@@ -715,7 +859,7 @@ Notes:
 | name | string | Entity name (required); auto-updated by `extract_info` when extraction finds a better value |
 | website | string | Optional website URL; auto-updated by `extract_info` when extraction finds a better value |
 | status | string | "active" or "archived" |
-| metadata | object \| null | Parsed from `metadata_json` TEXT column. Populated by the `extract_info` preset with Tier 1-3 VC schema (company_name, legal_name, one_liner, description, industry_tags, business_model, hq_location, website, founded_date, incorporation_jurisdiction, incorporation_entity_type, founders[], team_size, key_team[], investment_stage, raise_amount, raise_currency, raise_instrument, valuation_cap, pre_money_valuation, prior_rounds[], existing_investors[], referral_source, priority_indicators[], red_flags[], competitors[], plus meta: `_extracted_at`, `_extraction_version`, `_files_examined[]`). The same JSON lives as `Company Profile.json` in the workspace root (workspace versioning = extraction history). |
+| metadata | object \| null | Parsed from `metadata_json` TEXT column. Populated by the `extract_info` preset with Tier 1-3 VC schema (company_name, legal_name, one_liner, description, industry_tags, business_model, hq_location, website, founded_date, incorporation_jurisdiction, incorporation_entity_type, founders[], team_size, key_team[], investment_stage, raise_amount, raise_currency, raise_instrument, valuation_cap, pre_money_valuation, prior_rounds[], existing_investors[], referral_source, priority_indicators[], red_flags[], competitors[], plus meta: `_extracted_at`, `_extraction_version`, `_files_examined[]`). Also carries `_positions[]` (user-edited via `EntityEditModal`) and `legal_reviews[]` (populated by the `legal_review` preset, one entry per round — see the preset write-up above). `Company Profile.json` and `Legal Review.json` in the workspace root mirror the extract_info / legal_review slices respectively; workspace versioning keeps extraction / review history. |
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
 

@@ -59,7 +59,7 @@ $env:GEMINI_API_KEY = "your-key"
 $env:GOOGLE_API_KEY = "your-key"
 ```
 
-Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info` and for **per-row metadata pre-process** / file-lookup enrichment), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_HISTORY_MESSAGES`.
+Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EXTRACTION_MODEL` (default `gemini-3.1-flash-lite-preview`, used for structured JSON extraction presets such as `extract_info` + `legal_review`, and for **per-row metadata pre-process** / file-lookup enrichment), `CHAT_ENABLE_GOOGLE_SEARCH` (default true), `CHAT_MAX_ATTACHMENT_BYTES`, `CHAT_MAX_HISTORY_MESSAGES`.
 
 **Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (server default when the client omits `use_deep_agent`), `CHAT_DEFAULT_MODEL_PROFILE`, per-message `model_profile_id` / **`use_deep_agent`** body field, `CHAT_AGENT_RECURSION_LIMIT`, Moonshot / Kimi Code keys and URLs (`MOONSHOT_*`, `KIMI_CODE_*`, see `config.py`).
 
@@ -115,14 +115,17 @@ vc-agent/
 │   │   ├── routers/
 │   │   │   ├── entities.py          # Entity CRUD (workspace scaffold on create)
 │   │   │   ├── workspace.py         # Workspace tree: upload (file/folder/zip), browse, move, rename, versions, trash, ops, metadata-preprocess, Process Inbox
-│   │   │   ├── chat.py              # Gemini chat sessions, messages, presets
+│   │   │   ├── chat.py              # Gemini chat sessions, messages, presets (includes legal_review post-processing)
 │   │   │   ├── ingest.py            # Ingestion endpoint
-│   │   │   └── parkinglot.py        # Parking lot management
-│   │   ├── prompts/                 # Markdown prompts (extract_info, file_lookup_preprocess, inbox_grouping, inbox_folder_routing, …)
+│   │   │   ├── parkinglot.py        # Parking lot management
+│   │   │   └── settings.py          # Portfolio settings — funds CRUD, legal templates catalog, legal-review checklist GET/PUT
+│   │   ├── prompts/                 # Markdown prompts (extract_info, red_team, legal_review, file_lookup_preprocess, inbox_grouping, inbox_folder_routing)
+│   │   ├── legal_templates/         # Raw reference corpus (YC SAFE + NVCA, source docx + extracted txt); rebuilt via `scripts/build_legal_templates.py`
 │   │   └── services/
 │   │       ├── storage.py             # Storage adapter
 │   │       ├── workspace.py           # WorkspaceService — unified hierarchical file system per entity; WORKSPACE_TAXONOMY constant
-│   │       ├── workspace_tools.py     # 13 agent tools for workspace operations (Deep Agent)
+│   │       ├── workspace_tools.py     # 13 agent tools for workspace operations
+│   │       ├── legal_template_tools.py # 1 reference tool `legal_template_read` — always loaded alongside workspace tools
 │   │       ├── parking.py             # Parking lot manager
 │   │       ├── resolver.py            # Entity resolver
 │   │       ├── materializer.py        # Workspace materializer (ingest → Inbox/)
@@ -130,17 +133,22 @@ vc-agent/
 │   │       ├── document_text.py       # PDF text extraction (pypdf) + compression (ghostscript)
 │   │       ├── direct_llm.py          # Stateful Gemini Interactions API + Kimi dispatch (replaces gemini_runner)
 │   │       ├── gemini_context.py      # One-shot context (Gemini native binary / Kimi text) + agent pointer list
-│   │       ├── preset_registry.py     # Chat presets + loaders for file_lookup_preprocess / inbox_grouping / inbox_folder_routing
-│   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent)
-│   │       ├── metadata_extraction.py # Tier 1-3 entity metadata: validate_entity_metadata + merge_entity_metadata used by extract_info sync path
+│   │       ├── preset_registry.py     # Chat presets (red_team, extract_info, legal_review) + renderers with incremental/GP-identity injection
+│   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent) + GP-identity block from funds.json
+│   │       ├── metadata_extraction.py # Tier 1-3 entity metadata + legal_reviews: validate/merge helpers used by extract_info + legal_review sync paths
+│   │       ├── funds_config.py        # data/config/funds.json loader/writer (fund registry — seeds the GP-identity prompt block)
+│   │       ├── legal_templates_config.py  # data/config/legal_templates.json loader/writer + read_template_text — Tier R1 catalog
+│   │       ├── legal_review_checklist_config.py  # data/config/legal_review_checklist.json loader/writer — Tier R2 rubric
 │   │       ├── file_lookup_normalize.py  # Normalize Gemini file-lookup JSON (pre-process)
 │   │       ├── metadata_preprocess_jobs.py # In-memory single-file async jobs; merge native + gemini + description into metadata_json
 │   │       ├── inbox_processing_jobs.py    # Process Inbox: Path A (per-file extract + synoptic grouping) + Path B (folder routing); in-memory job registry
 │   │       ├── native_file_metadata.py    # Programmatic hints (mime, size, etc.)
 │   │       ├── json_loose.py          # Tolerant JSON decode for model output
 │   │       ├── model_profiles.py      # Gemini / Kimi ChatModel wiring for harness
-│   │       ├── agent_harness.py        # ReAct agent harness (langchain.agents.create_agent + middleware)
+│   │       ├── agent_harness.py        # ReAct agent harness (langchain.agents.create_agent + middleware); wires workspace + legal_template tools
 │   │       └── deep_agent_compat.py   # Legacy Deep Agent compat (removable)
+│   ├── scripts/
+│   │   └── build_legal_templates.py # Regenerates extracted .txt alongside each source file under legal_templates/
 │   ├── requirements.txt
 │   └── run.py                       # Development server
 │
@@ -148,14 +156,29 @@ vc-agent/
 │   ├── src/
 │   │   ├── App.tsx                  # Root shell; mounts ToastHost for global toasts
 │   │   ├── components/
-│   │   │   ├── Layout.tsx           # App layout; sidebar with Portfolio + Academic tabs
+│   │   │   ├── Layout.tsx           # App layout; sidebar with Portfolio + Academic + Settings tabs, theme toggle
 │   │   │   ├── PortfolioTab.tsx     # Main portfolio view (list/grid segmented toggle)
 │   │   │   ├── EntityDetail.tsx     # Entity workspace: workspace tree, chat, file viewer
 │   │   │   ├── EntityConversation.tsx  # Chat UI: presets, Agent toggle, async job polling, composer shell
+│   │   │   ├── EntityEditModal.tsx   # Edit entity (deal stage, positions, founders) — inline +Add fund redirects to registry
+│   │   │   ├── EntityHeader.tsx     # Entity header chips (deal stage, Invested, MOIC, Last update)
 │   │   │   ├── CreateEntityModal.tsx
-│   │   │   ├── EditEntityModal.tsx  # Edit entity metadata
+│   │   │   ├── EditEntityModal.tsx  # Legacy entity metadata editor
 │   │   │   ├── EntityMetadataForm.tsx
 │   │   │   ├── ParkingLotModal.tsx
+│   │   │   ├── Settings/            # Unified Settings page (sidebar-mounted)
+│   │   │   │   ├── SettingsPage.tsx    # Two-column layout: left nav + right content, active-section state
+│   │   │   │   ├── SettingsNav.tsx     # Grouped nav (Portfolio / Academic / Application)
+│   │   │   │   ├── Settings.css        # Layout + table + checklist viewer + templates grid + JSON editor styles
+│   │   │   │   └── sections/
+│   │   │   │       ├── FundsSettings.tsx       # Fund registry CRUD table + add/edit/delete modals
+│   │   │   │       ├── ChecklistSettings.tsx   # Tier R2 rubric viewer + Edit-as-JSON modal
+│   │   │   │       ├── TemplatesSettings.tsx   # Tier R1 catalog grid + click-to-preview text modal
+│   │   │   │       ├── TasksSettings.tsx       # Embeds existing academic/TasksView
+│   │   │   │       ├── DimensionsSettings.tsx  # Deep-link to Academic tab
+│   │   │   │       ├── RankingSettings.tsx     # Deep-link to Academic tab
+│   │   │   │       ├── AppearanceSettings.tsx  # Light / Dark radio group (fieldset/legend)
+│   │   │   │       └── AboutSettings.tsx       # Version + repo/docs links
 │   │   │   └── ui/
 │   │   │       └── Modal.tsx        # Shared modal primitive — every popup uses this
 │   │   ├── context/
@@ -171,8 +194,8 @@ vc-agent/
 │   │   ├── store/
 │   │   │   └── TabContext.tsx       # Tab state persistence
 │   │   ├── styles/
-│   │   │   ├── variables.css        # Design tokens (colors, spacing, radii, modal widths)
-│   │   │   ├── primitives.css       # Shared .modal*, .btn-*, .form-* rules (single source of truth)
+│   │   │   ├── variables.css        # Design tokens (colors, spacing, radii, modal widths, semantic bg subtle/strong tokens)
+│   │   │   ├── primitives.css       # Shared .modal*, .btn-* (primary/secondary/text/icon/danger/sm), .form-* (group/input/label/error/label-hint) rules (single source of truth)
 │   │   │   ├── segmented-toggle.css # Shared list/grid and Form/Raw JSON toggle styling
 │   │   │   └── global.css           # Global baseline (imports segmented-toggle)
 │   │   └── types/
@@ -497,10 +520,28 @@ curl -X POST http://localhost:8000/entities \
   -H "Content-Type: application/json" \
   -d '{"name": "Test Company", "website": "https://test.com"}'
 
-# Update entity status
+# Update entity status / deal stage / metadata
 curl -X PATCH http://localhost:8000/entities/{id} \
   -H "Content-Type: application/json" \
   -d '{"status": "archived"}'
+
+# Promote to portfolio + set positions (metadata_json is the full JSON string)
+curl -X PATCH http://localhost:8000/entities/{id} \
+  -H "Content-Type: application/json" \
+  -d '{"deal_stage": "portfolio", "metadata_json": "{\"_positions\":[{\"fund_id\":\"taihill_v3_lp\",\"invested_amount\":500000,\"currency\":\"USD\"}]}"}'
+
+# --- Portfolio settings (fund registry) ---
+
+# List funds
+curl http://localhost:8000/settings/funds
+
+# Add / update a fund (id must match ^[a-z0-9_]+$)
+curl -X POST http://localhost:8000/settings/funds \
+  -H "Content-Type: application/json" \
+  -d '{"id": "taihill_v3_lp", "name": "Taihill Venture Series III LP"}'
+
+# Remove a fund (does not touch existing _positions references)
+curl -X DELETE http://localhost:8000/settings/funds/taihill_v3_lp
 
 # Ingest with hint
 curl -X POST http://localhost:8000/ingest/resources \
