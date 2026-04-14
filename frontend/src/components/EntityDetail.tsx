@@ -23,6 +23,8 @@ import {
 import { init as initPptxPreview } from 'pptx-preview';
 import { EntityConversation } from './EntityConversation';
 import { showToast } from '../lib/appToast';
+import { ONE_SHOT_MAX_FILES } from '../lib/chatLimits';
+import type { AgentMode } from '../types';
 import './EntityDetail.css';
 
 // ---------------------------------------------------------------------------
@@ -124,24 +126,63 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const { tree, isLoading: treeLoading, mutate: mutateTree } = useWorkspaceTree(entity.id);
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [previewNode, setPreviewNode] = useState<WorkspaceTreeNode | null>(null);
+  const [agentMode, setAgentMode] = useState<AgentMode>('react'); // default unlimited until child reports
+
+  const handleAgentModeChange = useCallback((mode: AgentMode) => {
+    setAgentMode(mode);
+    if (mode === 'one_shot') {
+      setSelectedNodeIds((prev) => {
+        if (prev.size <= ONE_SHOT_MAX_FILES) return prev;
+        const keep = Array.from(prev).slice(0, ONE_SHOT_MAX_FILES);
+        const trimmed = prev.size - ONE_SHOT_MAX_FILES;
+        showToast(
+          `Chat mode is limited to ${ONE_SHOT_MAX_FILES} files — ${trimmed} deselected.`,
+          'info',
+        );
+        return new Set(keep);
+      });
+    }
+  }, []);
 
   const toggleNode = useCallback((id: string) => {
     setSelectedNodeIds(prev => {
+      if (prev.has(id)) {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      }
+      if (agentMode === 'one_shot' && prev.size >= ONE_SHOT_MAX_FILES) {
+        showToast(`Chat mode is limited to ${ONE_SHOT_MAX_FILES} files. Switch to Agent for unlimited.`, 'info');
+        return prev;
+      }
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      next.add(id);
       return next;
     });
-  }, []);
+  }, [agentMode]);
 
   const setAllNodes = useCallback((ids: string[], checked: boolean) => {
     setSelectedNodeIds(prev => {
       const next = new Set(prev);
-      for (const id of ids) {
-        if (checked) next.add(id); else next.delete(id);
+      if (checked) {
+        if (agentMode === 'one_shot') {
+          for (const id of ids) {
+            if (next.size >= ONE_SHOT_MAX_FILES) break;
+            next.add(id);
+          }
+          const skipped = ids.filter(id => !next.has(id)).length;
+          if (skipped > 0) {
+            showToast(`Chat mode is limited to ${ONE_SHOT_MAX_FILES} files — ${skipped} not selected.`, 'info');
+          }
+        } else {
+          for (const id of ids) next.add(id);
+        }
+      } else {
+        for (const id of ids) next.delete(id);
       }
       return next;
     });
-  }, []);
+  }, [agentMode]);
 
   const allFileIds = tree ? collectFileIds(tree) : [];
   const allSelected = allFileIds.length > 0 && allFileIds.every(id => selectedNodeIds.has(id));
@@ -165,6 +206,16 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
       return changed ? next : prev;
     });
   }, [tree]);
+
+  // Select-all: if any are selected → deselect all; otherwise → select up to limit.
+  const atLimit = agentMode === 'one_shot' && selectedNodeIds.size >= ONE_SHOT_MAX_FILES;
+  const handleSelectAllToggle = useCallback(() => {
+    if (someSelected || atLimit) {
+      setAllNodes(allFileIds, false);
+    } else {
+      setAllNodes(allFileIds, true);
+    }
+  }, [someSelected, atLimit, allFileIds, setAllNodes]);
 
   const selectAllRef = useRef<HTMLInputElement | null>(null);
   useEffect(() => {
@@ -237,13 +288,17 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             {tree && tree.length > 0 && (
               <div className="resource-list" style={{ display: previewNode ? 'none' : 'flex' }}>
                 <div className="select-all-row">
-                  <span className="select-all-label">Select all</span>
-                  <label className="resource-chat-toggle" onClick={e => e.stopPropagation()}>
+                  <label className="select-all-label" onClick={e => e.stopPropagation()}>
+                    <span>Select all</span>
+                    {selectedNodeIds.size > 0 && (
+                      <span className="select-all-count">{selectedNodeIds.size}/{allFileIds.length}</span>
+                    )}
                     <input
                       ref={selectAllRef}
                       type="checkbox"
+                      className="select-all-checkbox"
                       checked={allSelected}
-                      onChange={e => setAllNodes(allFileIds, e.target.checked)}
+                      onChange={handleSelectAllToggle}
                     />
                   </label>
                 </div>
@@ -277,6 +332,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
                 const found = findNodeById(tree || [], card.node_id);
                 if (found) setPreviewNode(found);
               }}
+              onAgentModeChange={handleAgentModeChange}
             />
           </div>
         </div>

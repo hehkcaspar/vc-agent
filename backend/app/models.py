@@ -18,6 +18,7 @@ class Entity(Base):
     type = Column(String, default="company")
     name = Column(String, nullable=False)
     website = Column(String, nullable=True)
+    metadata_json = Column(Text, nullable=True)
     status = Column(String, default="active")
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)

@@ -4,6 +4,7 @@ export interface Entity {
   name: string;
   website?: string;
   status: 'active' | 'archived';
+  metadata?: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }

@@ -14,8 +14,8 @@ from app.services.office_extractors import extract_office_text
 from app.services.document_text import extract_pdf_text
 from app.services.storage import storage
 
-MAX_ATTACHMENTS = 8
-MAX_TEXT_CHARS = 120_000
+MAX_ATTACHMENTS = 10
+MAX_TEXT_CHARS = 200_000
 
 
 def _truncate_text(text: str, max_chars: int = MAX_TEXT_CHARS) -> str:

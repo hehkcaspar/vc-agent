@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any, List, Optional, Sequence, Tuple
 
@@ -50,7 +51,11 @@ from app.services.direct_llm import (
     generate_with_kimi,
 )
 from app.services.json_loose import parse_json_loose
-from app.services.metadata_extraction import normalize_extraction_result
+from app.services.metadata_extraction import (
+    merge_entity_metadata,
+    normalize_extraction_result,
+    validate_entity_metadata,
+)
 from app.services.model_profiles import normalize_profile_id
 from app.services.preset_registry import (
     get_preset,
@@ -425,6 +430,17 @@ async def run_preset_agent_job(job_id: str) -> None:
                     industry=payload.get("industry"),
                     stage=payload.get("stage"),
                 )
+            elif preset_id == "extract_info":
+                existing_meta = None
+                if entity.metadata_json:
+                    try:
+                        existing_meta = json.loads(entity.metadata_json)
+                    except json.JSONDecodeError:
+                        pass
+                task_body = render_extract_info(
+                    entity.name, entity.website,
+                    existing_metadata=existing_meta,
+                )
             else:
                 job.status = "failed"
                 job.error_message = f"preset_not_implemented:{preset_id}"
@@ -432,7 +448,13 @@ async def run_preset_agent_job(job_id: str) -> None:
                 await db.commit()
                 return
 
-            if preset.output_kind == "json":
+            if preset_id == "extract_info":
+                user_turn_core = (
+                    "Browse the workspace, read relevant files, and extract "
+                    "company metadata per the schema in your instructions. "
+                    "Write the result as Company Profile.json in the workspace root."
+                )
+            elif preset.output_kind == "json":
                 user_turn_core = (
                     "Using only the attached materials, output one JSON object "
                     "exactly as requested."
@@ -500,6 +522,265 @@ async def run_preset_agent_job(job_id: str) -> None:
                 )
 
         deliverable_body, raw = await asyncio.to_thread(_run_agent)
+
+        # --- extract_info: sync Company Profile.json → Entity.metadata_json ---
+        if preset_id == "extract_info":
+            _log = logging.getLogger(__name__)
+            async with AsyncSessionLocal() as db:
+                # Find Company Profile.json written by this agent run
+                profile_node = None
+                ops_res = await db.execute(
+                    select(WorkspaceOp.node_id)
+                    .where(
+                        WorkspaceOp.entity_id == job.entity_id,
+                        WorkspaceOp.actor_type == "agent",
+                        WorkspaceOp.actor_ref == agent_run_id_snap,
+                        WorkspaceOp.op_type.in_(["create_file", "overwrite"]),
+                    )
+                )
+                written_ids = [r[0] for r in ops_res.all() if r[0]]
+                if written_ids:
+                    nodes_res = await db.execute(
+                        select(WorkspaceNode)
+                        .where(
+                            WorkspaceNode.id.in_(written_ids),
+                            WorkspaceNode.name == "Company Profile.json",
+                            WorkspaceNode.deleted_at.is_(None),
+                        )
+                    )
+                    profile_node = nodes_res.scalars().first()
+
+                # Read, validate, merge to entity
+                sync_warnings: List[str] = []
+                if profile_node and profile_node.storage_key:
+                    try:
+                        raw_bytes = storage.read_file_sync(profile_node.storage_key)
+                        profile_data = json.loads(raw_bytes.decode("utf-8"))
+                        validated, v_warnings = validate_entity_metadata(profile_data)
+                        sync_warnings.extend(v_warnings)
+
+                        # Override agent-generated meta fields with trusted values.
+                        # LLMs hallucinate timestamps; status_trace reliably
+                        # captures which files the agent actually read.
+                        read_paths: List[str] = []
+                        _seen: set[str] = set()
+                        for msg in status_trace:
+                            m = re.match(r"^Reading (.+?)\.\.\.$", msg or "")
+                            if m:
+                                p = m.group(1)
+                                if p not in _seen:
+                                    _seen.add(p)
+                                    read_paths.append(p)
+                        validated["_extracted_at"] = utc_now().isoformat()
+                        validated["_extraction_version"] = 1
+                        validated["_files_examined"] = read_paths
+
+                        # Persist corrected meta back to workspace file so the
+                        # user-visible Company Profile.json matches Entity.metadata.
+                        corrected_body = json.dumps(
+                            validated, indent=2, ensure_ascii=False,
+                        )
+                        try:
+                            await workspace_service.write_file(
+                                db,
+                                job.entity_id,
+                                profile_node.path,
+                                corrected_body.encode("utf-8"),
+                                "application/json",
+                                Actor(type="system", ref=f"preset:{preset_id}"),
+                            )
+                        except Exception:
+                            _log.warning(
+                                "Failed to rewrite Company Profile.json with "
+                                "corrected meta", exc_info=True,
+                            )
+
+                        entity_row = await _get_entity(db, job.entity_id)
+                        existing = None
+                        if entity_row.metadata_json:
+                            try:
+                                existing = json.loads(entity_row.metadata_json)
+                            except json.JSONDecodeError:
+                                pass
+
+                        merged = merge_entity_metadata(existing, validated)
+                        entity_row.metadata_json = json.dumps(
+                            merged, ensure_ascii=False,
+                        )
+
+                        # Auto-update name/website if extraction found better values
+                        extracted_name = merged.get("company_name")
+                        if (
+                            extracted_name
+                            and isinstance(extracted_name, str)
+                            and extracted_name.strip()
+                            and extracted_name.strip() != entity_row.name
+                        ):
+                            entity_row.name = extracted_name.strip()
+                            _log.info(
+                                "extract_info updated entity name to %r",
+                                entity_row.name,
+                            )
+
+                        extracted_website = merged.get("website")
+                        if (
+                            extracted_website
+                            and isinstance(extracted_website, str)
+                            and extracted_website.strip()
+                            and extracted_website.strip() != (entity_row.website or "")
+                        ):
+                            entity_row.website = extracted_website.strip()
+
+                        entity_row.updated_at = utc_now()
+                        await db.commit()
+                        _log.info(
+                            "Synced extract_info metadata to entity %s",
+                            job.entity_id,
+                        )
+                    except Exception:
+                        _log.warning(
+                            "Failed to sync extract_info metadata", exc_info=True,
+                        )
+                        sync_warnings.append(
+                            "Metadata sync to entity failed — check Company Profile.json"
+                        )
+                else:
+                    # Fallback: agent forgot workspace_write_file. Try to salvage
+                    # by parsing JSON from the agent's final text reply.
+                    _log.warning(
+                        "extract_info agent did not write Company Profile.json "
+                        "— attempting fallback parse of agent reply"
+                    )
+                    salvaged = None
+                    try:
+                        salvaged = parse_json_loose(deliverable_body)
+                    except (json.JSONDecodeError, ValueError):
+                        salvaged = None
+
+                    if isinstance(salvaged, dict) and salvaged:
+                        try:
+                            validated, v_warnings = validate_entity_metadata(
+                                salvaged,
+                            )
+                            sync_warnings.extend(v_warnings)
+                            validated["_extracted_at"] = utc_now().isoformat()
+                            validated["_extraction_version"] = 1
+                            read_paths: List[str] = []
+                            _seen: set[str] = set()
+                            for msg in status_trace:
+                                m = re.match(
+                                    r"^Reading (.+?)\.\.\.$", msg or "",
+                                )
+                                if m and m.group(1) not in _seen:
+                                    _seen.add(m.group(1))
+                                    read_paths.append(m.group(1))
+                            validated["_files_examined"] = read_paths
+
+                            # Write the file ourselves as a system recovery
+                            corrected_body = json.dumps(
+                                validated, indent=2, ensure_ascii=False,
+                            )
+                            profile_node = await workspace_service.write_file(
+                                db,
+                                job.entity_id,
+                                "Company Profile.json",
+                                corrected_body.encode("utf-8"),
+                                "application/json",
+                                Actor(type="system", ref=f"preset:{preset_id}"),
+                            )
+                            entity_row = await _get_entity(db, job.entity_id)
+                            entity_row.metadata_json = json.dumps(
+                                validated, ensure_ascii=False,
+                            )
+                            entity_row.updated_at = utc_now()
+                            await db.commit()
+                            await db.refresh(profile_node)
+                            sync_warnings.append(
+                                "Agent skipped workspace_write_file — metadata "
+                                "recovered from final text reply"
+                            )
+                            _log.info(
+                                "Recovered extract_info metadata from agent "
+                                "reply for entity %s", job.entity_id,
+                            )
+                        except Exception:
+                            _log.warning(
+                                "Fallback recovery failed", exc_info=True,
+                            )
+                            profile_node = None
+                            sync_warnings.append(
+                                "Agent did not write Company Profile.json and "
+                                "fallback parse failed — no metadata synced"
+                            )
+                    else:
+                        sync_warnings.append(
+                            "Agent did not write Company Profile.json and no "
+                            "JSON was found in the reply — no metadata synced"
+                        )
+
+                # Build chat message: artifact_card on success, plain-text on
+                # failure (prevents raw JSON showing in the chat UI).
+                summary = deliverable_body.strip() or "Extraction complete."
+                if sync_warnings:
+                    summary += "\n\nWarnings:\n" + "\n".join(
+                        f"- {w}" for w in sync_warnings
+                    )
+
+                if profile_node is not None:
+                    content = json.dumps({
+                        "_vc_chat": "artifact_card",
+                        "node_id": profile_node.id,
+                        "entity_id": job.entity_id,
+                        "preset_label": preset_label_snap,
+                        "deliverable_type": "other",
+                        "artifact_title": artifact_title_snap,
+                        "version": profile_node.version,
+                        "status": "draft",
+                        "summary": summary,
+                        "path": profile_node.path,
+                    })
+                else:
+                    # Plain text — renders as a normal assistant message
+                    content = (
+                        f"**Extract Info failed** — {preset_label_snap} "
+                        f"could not produce a profile.\n\n{summary}"
+                    )
+                assistant_msg = ConversationMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=job.session_id,
+                    role="assistant",
+                    content=content,
+                    model_profile_id=normalize_profile_id(model_profile_id_snap),
+                )
+                db.add(assistant_msg)
+
+                res2 = await db.execute(
+                    select(ChatCompletionJob).where(
+                        ChatCompletionJob.id == job_id
+                    )
+                )
+                job2 = res2.scalar_one_or_none()
+                if job2 and job2.status not in ("succeeded", "failed"):
+                    job2.assistant_message_id = assistant_msg.id
+                    job2.status = "succeeded"
+                    job2.step_detail = "Done"
+                    tool_trace: dict = {
+                        "status_trace": status_trace[-40:],
+                        "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+                    }
+                    if isinstance(raw, dict):
+                        tool_trace["keys"] = list(raw.keys())
+                        tool_trace["message_count"] = len(
+                            raw.get("messages") or []
+                        )
+                    job2.tool_trace_json = json.dumps(tool_trace)
+                    job2.updated_at = utc_now()
+
+                sess = await _get_session(db, job.entity_id, job.session_id)
+                sess.updated_at = utc_now()
+                await db.commit()
+
+            return  # Skip general deliverable post-processing
 
         # Fallback: if the agent wrote a report via workspace tools instead of
         # returning the full content, recover it from the written file.
@@ -1146,9 +1427,9 @@ async def run_chat_preset(
     nodes = await _load_nodes(db, entity_id, body.node_ids)
     profile_id = normalize_profile_id(body.model_profile_id)
     mode = _resolve_agent_mode(body.agent_mode, body.use_deep_agent)
-    # extract_info is a one-shot JSON extraction — never route through the agent
+    # extract_info is always agent mode — it browses workspace autonomously
     if preset_id == "extract_info":
-        mode = "one_shot"
+        mode = "react"
 
     # ----- Agent path (react or deep_agent): background job, return 202 -----
     if mode in ("react", "deep_agent"):
@@ -1164,6 +1445,17 @@ async def run_chat_preset(
                 startup_name=entity.name,
                 industry=body.industry,
                 stage=body.stage,
+            )
+        elif preset_id == "extract_info":
+            existing_meta = None
+            if entity.metadata_json:
+                try:
+                    existing_meta = json.loads(entity.metadata_json)
+                except json.JSONDecodeError:
+                    pass
+            task_body = render_extract_info(
+                entity.name, entity.website,
+                existing_metadata=existing_meta,
             )
         else:
             raise HTTPException(status_code=400, detail="Preset not implemented")

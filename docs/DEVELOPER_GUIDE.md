@@ -132,7 +132,7 @@ vc-agent/
 │   │       ├── gemini_context.py      # One-shot context (Gemini native binary / Kimi text) + agent pointer list
 │   │       ├── preset_registry.py     # Chat presets + loaders for file_lookup_preprocess / inbox_grouping / inbox_folder_routing
 │   │       ├── prompt_assembly.py     # System prompts (portfolio + deep agent)
-│   │       ├── metadata_extraction.py # VC-normalized JSON for extract_info preset
+│   │       ├── metadata_extraction.py # Tier 1-3 entity metadata: validate_entity_metadata + merge_entity_metadata used by extract_info sync path
 │   │       ├── file_lookup_normalize.py  # Normalize Gemini file-lookup JSON (pre-process)
 │   │       ├── metadata_preprocess_jobs.py # In-memory single-file async jobs; merge native + gemini + description into metadata_json
 │   │       ├── inbox_processing_jobs.py    # Process Inbox: Path A (per-file extract + synoptic grouping) + Path B (folder routing); in-memory job registry
@@ -148,7 +148,7 @@ vc-agent/
 │   ├── src/
 │   │   ├── App.tsx                  # Root shell; mounts ToastHost for global toasts
 │   │   ├── components/
-│   │   │   ├── Layout.tsx           # App layout; sidebar may include chat model selector
+│   │   │   ├── Layout.tsx           # App layout; sidebar with Portfolio + Academic tabs
 │   │   │   ├── PortfolioTab.tsx     # Main portfolio view (list/grid segmented toggle)
 │   │   │   ├── EntityDetail.tsx     # Entity workspace: workspace tree, chat, file viewer
 │   │   │   ├── EntityConversation.tsx  # Chat UI: presets, Agent toggle, async job polling, composer shell
@@ -276,8 +276,8 @@ On **Entity detail**, the layout is a two-column **notebook**: Workspace Tree | 
 
 - The **Workspace Tree** replaces the old flat Resources and Artifacts columns with a unified hierarchical file browser. Users can expand folders, upload files to any folder (default Inbox), create deliverables, move/rename/copy nodes, and view version history.
 - **Presets** (`EntityConversation`): labeled **Run preset** — **one-shot** actions (dashed pills); they call `POST .../chat/presets/{id}/run` and create workspace files via the **legacy** Gemini pipeline (`preset_registry.py`).
-- **Agent** pill: **persistent mode** for ordinary messages (`use_deep_agent` in the POST body, preference in `localStorage`). **On** → deep agent path → typically **`202`** + poll `GET .../jobs/{job_id}`; status text can appear in the composer while the user switches sessions elsewhere. **Off** → **`200`** one-shot `generate_with_context`. See `API_REFERENCE.md`.
-- **Context:** workspace node selections send `node_ids` (optional; Agent tools can still list/read entity files via workspace tools). The Deep Agent uses 13 workspace tools (`workspace_tools.py`) to browse, read, create, move, and annotate files.
+- **Chat / Agent toggle**: segmented toggle (persistent in `localStorage`). **Agent** → `agent_mode: "react"` → **`202`** + poll `GET .../jobs/{job_id}`; status text appears in the composer. **Chat** → `agent_mode: "one_shot"` → **`200`** synchronous reply. See `API_REFERENCE.md`.
+- **Context:** workspace node selections send `node_ids` (optional; Agent tools can still list/read entity files via workspace tools). Chat mode enforces a 10-file selection limit (frontend blocks over-selection, trims on mode switch). Agent mode uses 13 workspace tools (`workspace_tools.py`) to browse, read, create, move, and annotate files on demand.
 - **Workspace refresh:** when an Agent job finishes successfully, `EntityConversation` calls **`onWorkspaceChanged`** so SWR refetches the workspace tree (new files appear without reloading the page). Preset runs invoke the same callback.
 
 ### Entity detail workspace tree

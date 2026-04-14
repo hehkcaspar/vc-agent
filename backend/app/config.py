@@ -26,17 +26,31 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = _DEFAULT_GEMINI_CHAT_MODEL
     GEMINI_METADATA_EXTRACTION_MODEL: str = _DEFAULT_GEMINI_METADATA_EXTRACTION_MODEL
+    # ── Chat: shared settings ──
     CHAT_MAX_HISTORY_MESSAGES: int = 40
-    CHAT_MAX_ATTACHMENT_BYTES: int = 20 * 1024 * 1024
+    CHAT_DEFAULT_MODEL_PROFILE: str = "gemini_google"
     CHAT_ENABLE_GOOGLE_SEARCH: bool = True
 
-    # Deep Agents harness (LangChain). When False, chat uses direct google-genai / Kimi path.
-    CHAT_USE_DEEP_AGENT: bool = False
-    # Tri-state mode: "one_shot" | "react" | "deep_agent". Used when client
-    # does not send an explicit agent_mode or use_deep_agent.
+    # ── Chat: mode selection ──
+    # "one_shot" — synchronous single Gemini/Kimi call; selected files are
+    #   inlined into the prompt (capped by MAX_ATTACHMENTS / MAX_TEXT_CHARS
+    #   in gemini_context.py). Fast, no tools.
+    # "react" (Agent) — async background job via LangChain ReAct agent with
+    #   13 workspace tools. Files NOT inlined; agent reads on demand via
+    #   workspace_read_file. No file-count limit.
+    # "deep_agent" — legacy compat (removable). Same as react but adds
+    #   9 SDK built-in tools via deepagents.
     CHAT_DEFAULT_AGENT_MODE: str = "one_shot"
-    CHAT_AGENT_RECURSION_LIMIT: int = 100
-    CHAT_DEFAULT_MODEL_PROFILE: str = "gemini_google"
+    CHAT_USE_DEEP_AGENT: bool = False          # legacy; overridden by agent_mode
+
+    # ── Chat: one-shot-only limits ──
+    # These apply ONLY to one_shot mode. Agent mode has no attachment limits.
+    CHAT_MAX_ATTACHMENT_BYTES: int = 20 * 1024 * 1024  # 20 MB per file
+    # File count + text-char limits are hardcoded in gemini_context.py:
+    #   MAX_ATTACHMENTS = 10, MAX_TEXT_CHARS = 200_000
+
+    # ── Chat: agent-only settings ──
+    CHAT_AGENT_RECURSION_LIMIT: int = 100      # LangGraph recursion limit (react/deep_agent only)
 
     # Gemini Interactions API: TTL in days (paid tier retains 55 days; 0 = free tier / disabled)
     GEMINI_INTERACTION_TTL_DAYS: int = 50

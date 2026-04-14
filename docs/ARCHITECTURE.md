@@ -154,6 +154,16 @@ The Deep Agent system prompt is assembled from three layers so the agent underst
 - **File format support:** PDFs are compressed via ghostscript (`/ebook` 150 DPI → `/screen` 72 DPI fallback) then sent as native binary to Gemini; oversized PDFs fall back to pypdf text extraction. OOXML (docx/pptx/xlsx) extracted via zipfile XML parsing. Legacy office (doc/ppt/xls) converted via LibreOffice headless then extracted. All extraction flows through `office_extractors.extract_office_text()` and `document_text.extract_pdf_text()` / `compress_pdf()`.
 - **Caveats (MVP):** No SQL-backed job table — status is **lost on API restart**. Idempotency: starting pre-process for the same entity + node while **pending/running** returns the existing **`job_id`**.
 
+#### Entity-level metadata (`entities.metadata_json`)
+
+Separate from workspace-node metadata. Stores Tier 1-3 VC metadata for the company itself — company_name, legal_name, description, industry_tags, business_model, founders, team, investment_stage, raise, prior rounds, investors, signals — plus meta (`_extracted_at`, `_extraction_version`, `_files_examined[]`).
+
+- **Writer:** `extract_info` preset (agent-only, force-`react`). The agent writes `Company Profile.json` at the workspace root via `workspace_write_file`; post-processing in `routers/chat.py:run_preset_agent_job` reads that file, validates shape (`metadata_extraction.validate_entity_metadata`), merges with existing metadata (`merge_entity_metadata` — null/empty incoming doesn't clobber existing non-null), and writes to `entities.metadata_json`. Post-processing also auto-patches `Entity.name` / `Entity.website` when extraction finds clearly better values.
+- **Trusted server-side overrides:** `_extracted_at` always set to `utc_now().isoformat()` (LLMs hallucinate timestamps); `_files_examined` rebuilt by parsing `status_trace` for `Reading X...` events emitted by the `workspace_read_file` tool (more reliable than trusting the agent's self-report).
+- **Salvage path:** If the agent skips `workspace_write_file` entirely, post-processing tries `parse_json_loose` on the agent's final text reply and writes the file itself; if both fail, emits a plain-text failure message (not an `artifact_card`) so the UI renders a normal error rather than raw JSON.
+- **Versioning for free:** Workspace automatic versioning snapshots each prior `Company Profile.json` on overwrite, so extraction history is browsable via the UI version picker. `entities.metadata_json` itself is a single-value cache of the latest extraction.
+- **Incremental re-runs:** `render_extract_info` injects the previous `_extracted_at` + `_files_examined` + full metadata snapshot into the prompt so the agent focuses on new/changed files rather than re-reading everything.
+
 #### Lazy folder scaffolding
 
 New entities are created with only **`Inbox/`** + **`WORKSPACE_NOTES.md`** at the root. The taxonomy folders (`Data Room/`, `Data Room/Financials/`, `Data Room/Legal/`, `Technical/`, `Deliverables/`, `Deliverables/Memos/`, `Deliverables/Reports/`, `Deliverables/Factsheets/`) are NOT pre-created — they materialize lazily via `_ensure_parents` the first time a file lands in them. The full taxonomy lives as a Python constant `WORKSPACE_TAXONOMY` in `services/workspace.py` and is consumed by the intake router (Process Inbox) for routing decisions.
@@ -206,7 +216,7 @@ Files with `status: needs_triage` or `error` stay in `Inbox/` with metadata pres
 - **Effective mode** for `POST .../messages`: `use_deep_agent` in the JSON body if provided, otherwise `CHAT_USE_DEEP_AGENT` in settings.
 - **One-shot path:** synchronous model call (`generate_with_context`); response **`200`** with `ChatMessageResult` (no tools; no file writes from chat in this path).
 - **Deep Agent path:** user message is saved immediately; a **`chat_completion_jobs`** row is created; response **`202`** with `job_id` and `user_message`. **`run_chat_agent_job`** runs after the response (FastAPI `BackgroundTasks`), executes the graph in **`asyncio.to_thread`**, updates **`step_detail`** for polling (tool hooks → status callback). Client calls **`GET .../chat/sessions/{id}/jobs/{job_id}`** until `succeeded` / `failed`, then loads messages.
-- **Presets follow the same mode switch:** `PresetRunRequest.use_deep_agent` (falling back to `CHAT_USE_DEEP_AGENT`). When `true`, the preset endpoint now returns **`202 Accepted`** with `PresetRunJobAccepted` (mirrors chat send): a synthetic `▶ Run preset: <label>` user message is persisted, a `chat_completion_jobs` row is created with `preset_payload_json` populated, and `run_preset_agent_job` drains in the background. The client polls the **existing** chat-job endpoint (`GET .../chat/sessions/{id}/jobs/{job_id}`) — the frontend's `agentJob` polling loop + spinner status line are reused verbatim. `extract_info` is force-pinned to one-shot; `red_team` honors the toggle (no auto-promotion).
+- **Presets follow the same mode switch:** `PresetRunRequest.agent_mode` (falling back to `CHAT_DEFAULT_AGENT_MODE`). For agent modes (`react` / `deep_agent`), the preset endpoint returns **`202 Accepted`** with `PresetRunJobAccepted` (mirrors chat send): a synthetic `▶ Run preset: <label>` user message is persisted, a `chat_completion_jobs` row is created with `preset_payload_json` populated, and `run_preset_agent_job` drains in the background. The client polls the **existing** chat-job endpoint (`GET .../chat/sessions/{id}/jobs/{job_id}`) — the frontend's `agentJob` polling loop + spinner status line are reused verbatim. `extract_info` is force-pinned to `react` (must browse the workspace autonomously); `red_team` honors the toggle (no auto-promotion).
 - **Tools** (`workspace_tools.build_workspace_tools`): 13 workspace tools:
 
 | Tool | Purpose |
@@ -347,9 +357,11 @@ SQLite **`create_all`** runs on startup. Optional offline reset: `backend/script
 entities (
     id TEXT PRIMARY KEY,
     type TEXT DEFAULT 'company',
-    name TEXT NOT NULL,
-    website TEXT,
+    name TEXT NOT NULL,           -- auto-updated by extract_info preset when better value found
+    website TEXT,                 -- auto-updated by extract_info preset when better value found
     status TEXT DEFAULT 'active',
+    metadata_json TEXT,           -- Tier 1-3 VC metadata from extract_info preset
+                                  -- (mirrors workspace Company Profile.json)
     created_at TIMESTAMP,
     updated_at TIMESTAMP
 )
@@ -463,7 +475,7 @@ App (ToastHost for global toasts, e.g. metadata pre-process)
                 │   └── .zone-content (scrolls)
                 │       ├── File tree with folders
                 │       └── FilePreview (PDF/Image/Text/HTML viewer)
-                ├── EntityConversation (.zone--chat-main): sessions, transcript, **Run preset** dashed shortcuts (mode follows Agent On/Off), **Agent** pill (persistent mode, On/Off + `use_deep_agent`), composer shell (+ / send), **async polling** on `202` + status line in textarea; optional `ChatModelProfileContext` / sidebar model selector (Layout)
+                ├── EntityConversation (.zone--chat-main): sessions, transcript, **Run preset** dashed shortcuts, segmented **Chat / Agent** toggle (persistent mode), Gemini model selector, send button, **async polling** on `202` + status line in textarea; one-shot file limit enforced (10 files max, trimmed on mode switch)
                 └── Workspace details/viewer panel
 ```
 

@@ -125,6 +125,22 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("agent_mode migration failed", exc_info=True)
 
+    # Add metadata_json column to entities (entity-level extracted metadata)
+    try:
+        from app.database import engine as portfolio_engine  # noqa: F811
+        async with portfolio_engine.begin() as conn:
+            res = await conn.exec_driver_sql(
+                "PRAGMA table_info(entities)"
+            )
+            cols = {row[1] for row in res.fetchall()}
+            if "metadata_json" not in cols:
+                await conn.exec_driver_sql(
+                    "ALTER TABLE entities ADD COLUMN metadata_json TEXT"
+                )
+                logger.info("Added metadata_json column to entities")
+    except Exception:
+        logger.warning("metadata_json migration failed", exc_info=True)
+
     # Reset any scholars stuck in "evaluating" (no background tasks survive restart)
     try:
         from sqlalchemy import update

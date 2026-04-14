@@ -57,17 +57,23 @@ class EntityUpdate(BaseModel):
     name: Optional[str] = None
     website: Optional[str] = None
     status: Optional[Literal["active", "archived"]] = None
+    metadata_json: Optional[str] = None
 
 
 class EntityResponse(EntityBase):
     id: str
     type: str = "company"
     status: str = "active"
+    metadata: Optional[dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_metadata(cls, data: Any) -> Any:
+        return coerce_orm_metadata_before_model(data)
 
 
 # ============== Workspace Schemas ==============

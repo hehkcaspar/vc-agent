@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Trash2, Bot, ArrowUp, ChevronDown, FileText, ArrowUpRight, Zap } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ChevronDown, FileText, ArrowUpRight } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { useChatModelProfile } from '../context/ChatModelProfileContext';
 import { parseDeliverableCardMessage } from '../lib/chatArtifactCard';
@@ -10,11 +10,12 @@ import {
   CLI_SPINNER_DOTS_INTERVAL_MS,
 } from '../lib/cliSpinnerDots';
 import { api } from '../services/api';
+import { ONE_SHOT_MAX_FILES } from '../lib/chatLimits';
 import type { ChatMessage, ChatSession, ChatModelProfileId, DeliverableCardPayload, PresetInfo, AgentMode } from '../types';
 
 const MODEL_OPTIONS: { value: ChatModelProfileId; label: string }[] = [
   { value: 'gemini_google', label: 'Gemini' },
-  { value: 'kimi_moonshot', label: 'Kimi' },
+  // { value: 'kimi_moonshot', label: 'Kimi' },  // disabled — will re-enable after Kimi Files API integration
 ];
 
 function formatSessionTimestamp(iso: string): string {
@@ -61,6 +62,7 @@ interface EntityConversationProps {
   selectedNodeIds: Set<string>;
   onArtifactsChanged: () => void;
   onViewDeliverable: (card: DeliverableCardPayload) => void;
+  onAgentModeChange: (mode: AgentMode) => void;
 }
 
 export function EntityConversation({
@@ -68,6 +70,7 @@ export function EntityConversation({
   selectedNodeIds,
   onArtifactsChanged,
   onViewDeliverable,
+  onAgentModeChange,
 }: EntityConversationProps) {
   const { profileId, setProfileId } = useChatModelProfile();
   const sessionIdRef = useRef<string | null>(null);
@@ -96,6 +99,7 @@ export function EntityConversation({
   const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
   const [spinnerFrame, setSpinnerFrame] = useState(0);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
   const [showModelSwapConfirm, setShowModelSwapConfirm] = useState(false);
   const pendingModelRef = useRef<ChatModelProfileId | null>(null);
 
@@ -110,6 +114,11 @@ export function EntityConversation({
       return next;
     });
   }, []);
+
+  // Notify parent of mode changes (including initial mount)
+  useEffect(() => {
+    onAgentModeChange(agentMode);
+  }, [agentMode, onAgentModeChange]);
 
   // Derived for backwards-compat and convenience
   const chatAgentOn = agentMode !== 'one_shot';
@@ -311,6 +320,10 @@ export function EntityConversation({
     return () => window.clearInterval(id);
   }, [agentActiveHere, busy]);
 
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, busy, agentActiveHere]);
+
   const humanizedWarnings = useMemo(() => {
     if (warnings.length === 0) return warnings;
     return warnings.map((warning) => {
@@ -385,6 +398,12 @@ export function EntityConversation({
     setError(null);
     setBusy(true);
     setWarnings([]);
+    const optimisticId = `pending-${Date.now()}`;
+    setMessages(prev => [...prev, {
+      id: optimisticId, session_id: sessionId, role: 'user',
+      content: text, created_at: new Date().toISOString(),
+    }]);
+    setInput('');
     try {
       const out = await api.chat.postMessage(entityId, sessionId, {
         text,
@@ -392,7 +411,6 @@ export function EntityConversation({
         model_profile_id: profileId,
         agent_mode: agentMode,
       });
-      setInput('');
       if (out.kind === 'accepted') {
         setWarnings(out.warnings);
         setAgentJob({ sessionId, jobId: out.jobId });
@@ -413,6 +431,7 @@ export function EntityConversation({
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setMessages(prev => prev.filter(m => m.id !== optimisticId));
     } finally {
       setBusy(false);
     }
@@ -616,6 +635,18 @@ export function EntityConversation({
             </div>
           );
         })}
+        {(busy || agentActiveHere) && (
+          <div className="entity-conversation-msg entity-conversation-msg--assistant">
+            <span className="entity-conversation-msg-role">Assistant</span>
+            <div className="entity-conversation-msg-bubble entity-conversation-msg-bubble--assistant">
+              <span className="entity-conversation-thinking">
+                {CLI_SPINNER_DOTS_FRAMES[spinnerFrame]}{' '}
+                {agentActiveHere ? activeAgentStatusText : 'Thinking\u2026'}
+              </span>
+            </div>
+          </div>
+        )}
+        <div ref={messagesEndRef} />
       </div>
 
       <div className="entity-conversation-footer">
@@ -649,68 +680,44 @@ export function EntityConversation({
                 }
               }}
               placeholder={
-                agentActiveHere
-                  ? `${CLI_SPINNER_DOTS_FRAMES[spinnerFrame]} ${activeAgentStatusText}`
-                  : busy
-                  ? `${CLI_SPINNER_DOTS_FRAMES[spinnerFrame]} Working…`
-                  : 'Message…'
+                agentActiveHere || busy
+                  ? `${CLI_SPINNER_DOTS_FRAMES[spinnerFrame]} Working hard\u2026`
+                  : 'Message\u2026'
               }
               rows={2}
               disabled={busy || !sessionId || agentActiveHere}
-              title={
-                agentActiveHere
-                  ? 'Agent progress for this conversation'
-                  : undefined
-              }
             />
             <div className="entity-conversation-compose-toolbar">
               <div className="entity-conversation-compose-toolbar-left">
-                <button
-                  type="button"
-                  className="entity-conversation-attach-chip"
-                  title="Add context: select files in the workspace to include as sources with this message."
-                  aria-label="Context: select files in workspace"
-                >
-                  <Plus size={18} strokeWidth={2} aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={chatAgentOn}
-                  aria-label={chatAgentOn ? 'Agent on' : 'Agent off'}
+                <div
                   className={
-                    'entity-conversation-agent-pill' +
-                    (chatAgentOn ? ' entity-conversation-agent-pill--react' : '')
+                    'agent-toggle' +
+                    (chatAgentOn ? ' agent-toggle--agent' : '') +
+                    (busy || agentActiveHere ? ' agent-toggle--disabled' : '')
                   }
-                  onClick={() => toggleAgentMode()}
-                  disabled={busy || agentActiveHere}
-                  title={
-                    chatAgentOn
-                      ? 'ReAct agent: workspace tools + context management. Click to turn off.'
-                      : 'One-shot mode: quick reply, no tools. Click to enable agent.'
-                  }
+                  role="radiogroup"
+                  aria-label="Chat mode"
                 >
-                  <span className="entity-conversation-agent-pill__icon" aria-hidden>
-                    {chatAgentOn ? (
-                      <Zap size={16} strokeWidth={1.75} />
-                    ) : (
-                      <Bot size={16} strokeWidth={1.75} />
-                    )}
-                  </span>
-                  <span className="entity-conversation-agent-pill__label">
-                    {chatAgentOn ? 'ReAct' : 'Agent'}
-                  </span>
-                  <span
-                    className={
-                      'entity-conversation-agent-pill__state' +
-                      (chatAgentOn
-                        ? ' entity-conversation-agent-pill__state--on'
-                        : ' entity-conversation-agent-pill__state--off')
-                    }
-                  >
-                    {chatAgentOn ? 'On' : 'Off'}
-                  </span>
-                </button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={!chatAgentOn}
+                    className={'agent-toggle__seg' + (!chatAgentOn ? ' agent-toggle__seg--active' : '')}
+                    onClick={() => chatAgentOn && toggleAgentMode()}
+                    disabled={busy || agentActiveHere}
+                    title="One-shot mode: quick reply, no tools."
+                  >Chat</button>
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={chatAgentOn}
+                    className={'agent-toggle__seg' + (chatAgentOn ? ' agent-toggle__seg--active' : '')}
+                    onClick={() => !chatAgentOn && toggleAgentMode()}
+                    disabled={busy || agentActiveHere}
+                    title="Agent mode: workspace tools + context management."
+                  >Agent</button>
+                  <span className="agent-toggle__thumb" />
+                </div>
                 <label className="entity-conversation-model-pill" title="LLM used for this chat">
                   <select
                     className="entity-conversation-model-select"
@@ -742,7 +749,9 @@ export function EntityConversation({
           <p className="entity-conversation-context-line" role="status">
             {contextCount === 0
               ? 'No sources in context — select files in the workspace.'
-              : `${contextCount} source${contextCount === 1 ? '' : 's'} in context`}
+              : chatAgentOn
+                ? `${contextCount} source${contextCount === 1 ? '' : 's'} in context`
+                : `${contextCount}/${ONE_SHOT_MAX_FILES} source${contextCount === 1 ? '' : 's'} in context`}
           </p>
         </div>
       </div>

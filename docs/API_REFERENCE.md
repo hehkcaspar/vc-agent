@@ -576,13 +576,13 @@ The server computes an **effective** deep-agent flag per request:
 use_deep_agent = body.use_deep_agent if body.use_deep_agent is not None else CHAT_USE_DEEP_AGENT
 ```
 
-- **`agent_mode: "react"`** (or legacy `use_deep_agent: true`): ReAct agent (`langchain.agents.create_agent` in `agent_harness.py`) with 13 workspace tools + SummarizationMiddleware. The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API and **poll** job status for step text.
+- **`agent_mode: "react"`** (Agent mode, or legacy `use_deep_agent: true`): ReAct agent (`langchain.agents.create_agent` in `agent_harness.py`) with 13 workspace tools + SummarizationMiddleware. The HTTP handler **persists the user message**, enqueues a **`chat_completion_jobs`** row, returns **`202 Accepted`**, and runs the agent in a **background task** so the client can keep using the API and **poll** job status for step text. No file count limit — agent reads files on demand.
 - **`agent_mode: "deep_agent"`**: Legacy Deep Agent (`deepagents.create_deep_agent` in `deep_agent_compat.py`). Same async job pattern. Removable — falls back to ReAct if `deep_agent_compat.py` is deleted.
-- **`agent_mode: "one_shot"`** (or legacy `use_deep_agent: false`): one-shot model call. Returns **`200 OK`** with the assistant message in the body (no job).
+- **`agent_mode: "one_shot"`** (Chat mode, or legacy `use_deep_agent: false`): one-shot model call. Returns **`200 OK`** with the assistant message in the body (no job). Files inlined into the prompt; capped at `MAX_ATTACHMENTS = 10` files, `MAX_TEXT_CHARS = 200,000` per file. Frontend enforces the limit (blocks selection beyond 10, trims on mode switch).
 
-The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) also accept `use_deep_agent` and `model_profile_id`, so shortcut runs can follow the same mode/profile selection.
+The SPA persists a **Chat / Agent** segmented toggle in `localStorage`; that overrides the server default when set. **Presets** (`POST .../presets/.../run`) also accept `agent_mode` and `model_profile_id`, so shortcut runs can follow the same mode/profile selection.
 
-**Context selection:** Selected `node_ids` inline excerpts from workspace files into the user turn and help edit resolution. They are **optional** in Agent mode: tools can **list/read** all entity workspace nodes without prior selection.
+**Context selection:** Selected `node_ids` inline excerpts from workspace files into the user turn and help edit resolution. They are **optional** in Agent mode: tools can **list/read** all entity workspace nodes without prior selection. In Chat mode, frontend enforces a 10-file selection limit with toast notifications.
 
 ### Environment (summary)
 
@@ -600,13 +600,17 @@ The SPA persists an **Agent** on/off toggle (`use_deep_agent` on each send) in `
 
 Other: `CHAT_ENABLE_GOOGLE_SEARCH`, attachment/history limits. Deep-agent steps are pushed to `chat_completion_jobs.step_detail` for UI polling.
 
-**Deep-agent file handling:** In agent mode, user-selected files are passed as a **pointer list** (path, type, size, description) — no file content is pre-injected. The agent reads files on demand via `workspace_read_file`. For PDFs, Gemini receives compressed native binary (multimodal tool response); Kimi receives pypdf-extracted text. Office formats (docx/pptx/xlsx + legacy doc/ppt/xls via LibreOffice) are extracted to text. No file count limit.
+**Agent-mode file handling:** In Agent mode, user-selected files are passed as a **pointer list** (path, type, size, description) — no file content is pre-injected. The agent reads files on demand via `workspace_read_file`. For PDFs, Gemini receives compressed native binary (multimodal tool response). Office formats (docx/pptx/xlsx + legacy doc/ppt/xls via LibreOffice) are extracted to text. No file count limit.
+
+**Chat-mode file handling:** In Chat (one-shot) mode, selected files are inlined into a single Gemini call. PDFs are compressed via ghostscript; images sent as native binary. Capped at 10 files / 200k chars per file (backend truncates silently; frontend prevents over-selection).
 
 **Deep-agent workspace tools (13 total):** `workspace_get_tree`, `workspace_list_files`, `workspace_read_file`, `workspace_search_files`, `workspace_create_folder`, `workspace_move`, `workspace_rename`, `workspace_write_file`, `workspace_annotate`, `workspace_delete`, `workspace_file_versions`, `workspace_restore_version`, `workspace_history`.
 
 ### `GET /entities/{entity_id}/chat/presets`
 
-List shortcut presets. Each preset has an `id` (for example `red_team`, `extract_info`), display fields, and output hints. **Preset run** behavior is defined in `backend/app/services/preset_registry.py`: markdown-style outputs are stored as `.md` files; `extract_info` produces a versioned **JSON** file (title `extract_info`) with structured company metadata.
+List shortcut presets. Each preset has an `id` (for example `red_team`, `extract_info`), display fields, and output hints. **Preset run** behavior is defined in `backend/app/services/preset_registry.py`:
+- `red_team` — markdown report at `Deliverables/Reports/risk_analyze.md`. Honors the chat/agent toggle (can run one-shot or react).
+- `extract_info` — agent-only (force-`react` server-side). Agent browses the workspace autonomously, extracts Tier 1-3 VC metadata (~26 fields), writes `Company Profile.json` at the workspace root, and post-processing syncs the JSON into `Entity.metadata_json`. Auto-updates `Entity.name` / `Entity.website` when extraction finds better values. On re-runs, the agent receives the previous extraction as incremental context and focuses on new/changed files. Workspace versioning snapshots prior versions automatically.
 
 ### `GET /entities/{entity_id}/chat/sessions`
 
@@ -694,10 +698,10 @@ Run a preset and **create a new workspace file** (markdown or JSON, depending on
   The frontend reuses its `agentJob` polling loop and spinner status line verbatim for preset runs.
 
 Notes:
-- `session_id` is **required** when `use_deep_agent=true` (the job + assistant card message attach to a session).
-- `extract_info` is force-pinned to `use_deep_agent=false` server-side (always one-shot).
+- `session_id` is **required** for any agent-mode preset run (the job + assistant card message attach to a session).
+- `extract_info` is force-pinned to `agent_mode="react"` server-side regardless of the client toggle — it must browse the workspace.
 - `red_team` honors the client toggle exactly — it does NOT auto-promote to agent mode.
-- `extract_info` applies tolerant JSON parsing (raw JSON, fenced JSON, or prose-wrapped JSON object) before normalization.
+- `extract_info` post-processing trusts the workspace file, not the agent's text reply: `_extracted_at` is overwritten with the real server timestamp, and `_files_examined` is rebuilt from the status_trace (files the `workspace_read_file` tool actually touched). If the agent skips `workspace_write_file`, post-processing attempts `parse_json_loose` on the agent's final text as a salvage path and writes the file itself; if that also fails, the chat card falls back to a plain-text failure message.
 
 ---
 
@@ -708,11 +712,14 @@ Notes:
 |-------|------|-------------|
 | id | UUID | Primary key |
 | type | string | "company" (MVP only) |
-| name | string | Entity name (required) |
-| website | string | Optional website URL |
+| name | string | Entity name (required); auto-updated by `extract_info` when extraction finds a better value |
+| website | string | Optional website URL; auto-updated by `extract_info` when extraction finds a better value |
 | status | string | "active" or "archived" |
+| metadata | object \| null | Parsed from `metadata_json` TEXT column. Populated by the `extract_info` preset with Tier 1-3 VC schema (company_name, legal_name, one_liner, description, industry_tags, business_model, hq_location, website, founded_date, incorporation_jurisdiction, incorporation_entity_type, founders[], team_size, key_team[], investment_stage, raise_amount, raise_currency, raise_instrument, valuation_cap, pre_money_valuation, prior_rounds[], existing_investors[], referral_source, priority_indicators[], red_flags[], competitors[], plus meta: `_extracted_at`, `_extraction_version`, `_files_examined[]`). The same JSON lives as `Company Profile.json` in the workspace root (workspace versioning = extraction history). |
 | created_at | datetime | Creation timestamp |
 | updated_at | datetime | Last update timestamp |
+
+`PATCH /entities/{id}` accepts raw `metadata_json` as a JSON string if programmatic updates are needed; typical flow is to let `extract_info` manage it.
 
 ### WorkspaceNode
 | Field | Type | Description |
