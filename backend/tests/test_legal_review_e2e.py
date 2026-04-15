@@ -225,61 +225,91 @@ def _select_by_path_substring(nodes: list[dict], substrings: list[str]) -> list[
 # ---------------------------------------------------------------------------
 
 
-REVIEW_TOP_KEYS = {
-    "round_name", "review_date", "scenario", "instrument_type",
-    "documents_reviewed", "reference_templates_consulted",
-    "checklist_version",
-    "company_terms", "safe_terms", "priced_round_terms",
-    "governance", "investor_rights", "transfer_restrictions", "regulatory",
-    "our_position", "unusual_terms", "red_flags",
+# Post Facts-vs-Opinions refactor:
+# - Legal Review.json (workspace) holds OPINIONS per round — run metadata +
+#   unusual_terms / red_flags / priority_indicators / killer_questions /
+#   narrative_summary. No term blocks; those lift to prior_rounds[] in metadata.
+# - entity.metadata_json has no `legal_reviews` key; round facts live in
+#   `prior_rounds[round_name=X]` with full term blocks + our_position.
+
+OPINION_TOP_KEYS = {
+    "round_name", "review_date", "documents_reviewed",
+    "reference_templates_consulted", "checklist_version",
+    "unusual_terms", "red_flags",
     "priority_indicators", "killer_questions", "narrative_summary",
+}
+
+# Fact fields that should lift into prior_rounds[round_name=X] fact bag.
+PRIOR_ROUND_FACT_NESTED = {
+    "company_terms", "safe_terms", "priced_round_terms",
+    "governance", "investor_rights", "transfer_restrictions",
+    "regulatory",
 }
 
 VALID_SCENARIOS = {"new_investment", "follow_on", "retrospective"}
 VALID_INSTRUMENTS = {"safe", "convertible_note", "priced_round"}
 
 
-def evaluate_review(
-    review: dict,
+def evaluate_opinion_block(
+    opinion: dict,
+    prior_round_entry: dict | None,
     expected_scenario_in: set[str] | None,
     expected_instrument_in: set[str] | None,
 ) -> dict:
-    """Score a single legal_reviews[i] entry."""
+    """Score a single opinion entry (from Legal Review.json) + its corresponding
+    prior_rounds[round_name=] fact-bag entry (from Entity.metadata_json).
+
+    The split contract: opinions live in the workspace file; facts must lift to
+    prior_rounds[]. We check both sides.
+    """
+    pr = prior_round_entry or {}
     out: dict[str, Any] = {
-        "has_all_top_keys": REVIEW_TOP_KEYS.issubset(set(review)),
-        "missing_top_keys": sorted(REVIEW_TOP_KEYS - set(review)),
-        "round_name": review.get("round_name"),
-        "scenario": review.get("scenario"),
-        "instrument_type": review.get("instrument_type"),
-        "review_date_populated": bool(review.get("review_date")),
-        "checklist_version": review.get("checklist_version"),
-        "documents_reviewed_count": len(review.get("documents_reviewed") or []),
+        "round_name": opinion.get("round_name"),
+        # Opinion-side checks
+        "has_all_opinion_keys": OPINION_TOP_KEYS.issubset(set(opinion)),
+        "missing_opinion_keys": sorted(OPINION_TOP_KEYS - set(opinion)),
+        "opinion_has_fact_leakage": sorted(
+            PRIOR_ROUND_FACT_NESTED & set(opinion)
+        ),
+        "review_date_populated": bool(opinion.get("review_date")),
+        "checklist_version": opinion.get("checklist_version"),
+        "documents_reviewed_count": len(opinion.get("documents_reviewed") or []),
         "documents_reviewed_with_node_id": sum(
-            1 for d in (review.get("documents_reviewed") or [])
+            1 for d in (opinion.get("documents_reviewed") or [])
             if isinstance(d, dict) and d.get("node_id")
         ),
         "reference_templates_consulted": list(
-            review.get("reference_templates_consulted") or []
+            opinion.get("reference_templates_consulted") or []
         ),
-        "unusual_terms_count": len(review.get("unusual_terms") or []),
-        "red_flags_count": len(review.get("red_flags") or []),
-        "killer_questions_count": len(review.get("killer_questions") or []),
-        "narrative_summary_length": len(review.get("narrative_summary") or ""),
-        "our_position_present": bool(review.get("our_position")),
+        "unusual_terms_count": len(opinion.get("unusual_terms") or []),
+        "red_flags_count": len(opinion.get("red_flags") or []),
+        "killer_questions_count": len(opinion.get("killer_questions") or []),
+        "narrative_summary_length": len(opinion.get("narrative_summary") or ""),
+        # Fact-side checks (lift to prior_rounds[round_name=X])
+        "fact_bag_present": bool(prior_round_entry),
+        "fact_bag_scenario": pr.get("scenario"),
+        "fact_bag_instrument_type": pr.get("instrument_type"),
+        "fact_bag_our_position_present": bool(pr.get("our_position")),
+        "fact_bag_nested_blocks_present": sorted(
+            k for k in PRIOR_ROUND_FACT_NESTED
+            if isinstance(pr.get(k), dict) and pr.get(k)
+        ),
     }
-    out["scenario_valid"] = review.get("scenario") in (VALID_SCENARIOS | {None})
-    out["instrument_valid"] = review.get("instrument_type") in (VALID_INSTRUMENTS | {None})
+    out["scenario_valid"] = pr.get("scenario") in (VALID_SCENARIOS | {None})
+    out["instrument_valid"] = pr.get("instrument_type") in (
+        VALID_INSTRUMENTS | {None}
+    )
     out["scenario_as_expected"] = (
         expected_scenario_in is None
-        or review.get("scenario") in expected_scenario_in
+        or pr.get("scenario") in expected_scenario_in
     )
     out["instrument_as_expected"] = (
         expected_instrument_in is None
-        or review.get("instrument_type") in expected_instrument_in
+        or pr.get("instrument_type") in expected_instrument_in
     )
-    # Unusual terms have the expected shape?
+    # Unusual terms shape?
     bad_unusual = [
-        u for u in (review.get("unusual_terms") or [])
+        u for u in (opinion.get("unusual_terms") or [])
         if not (isinstance(u, dict) and u.get("term") and "value" in u)
     ]
     out["unusual_terms_shape_ok"] = len(bad_unusual) == 0
@@ -308,14 +338,16 @@ async def run_scenario(
     entity_before = await _get_entity(client, entity_id)
     tree_before = await _list_workspace(client, entity_id)
     print(f"  entity: {entity_before['name']}")
-    has_positions = bool(
-        (entity_before.get("metadata") or {}).get("_positions")
-    )
-    prior_reviews = (
-        (entity_before.get("metadata") or {}).get("legal_reviews") or []
-    )
+    meta_before = entity_before.get("metadata") or {}
+    has_positions = bool(meta_before.get("_positions"))
+    prior_rounds_before = meta_before.get("prior_rounds") or []
     print(f"  _positions present: {has_positions}")
-    print(f"  prior legal_reviews: {len(prior_reviews)}")
+    print(f"  prior_rounds (fact bags): {len(prior_rounds_before)}")
+    if "legal_reviews" in meta_before:
+        print(
+            f"  WARN: legacy metadata.legal_reviews key still present "
+            f"(len={len(meta_before['legal_reviews'])}); will be dropped on this run"
+        )
 
     selected = select_files(tree_before)
     if not selected:
@@ -382,24 +414,45 @@ async def run_scenario(
         report["error"] = str(e)
         return report
 
-    reviews_from_file = (
+    opinions_from_file = (
         file_payload.get("legal_reviews") if isinstance(file_payload, dict) else None
     )
     print(
-        f"  Reviews in file: "
-        f"{len(reviews_from_file) if isinstance(reviews_from_file, list) else 'N/A'}"
+        f"  Opinion entries in Legal Review.json: "
+        f"{len(opinions_from_file) if isinstance(opinions_from_file, list) else 'N/A'}"
     )
 
-    # Verify entity.metadata.legal_reviews
+    # After refactor: metadata.legal_reviews must be absent; round facts live
+    # in metadata.prior_rounds[round_name=X] with full term blocks.
     entity_after = await _get_entity(client, entity_id)
     meta = entity_after.get("metadata") or {}
-    reviews_in_meta = meta.get("legal_reviews") or []
-    print(f"  entity.metadata.legal_reviews: {len(reviews_in_meta)}")
+    legacy_legal_reviews = meta.get("legal_reviews")
+    prior_rounds_after = meta.get("prior_rounds") or []
+    prior_round_by_name: dict[str, dict] = {
+        pr.get("round_name"): pr
+        for pr in prior_rounds_after
+        if isinstance(pr, dict) and pr.get("round_name")
+    }
+    discrepancies_after = meta.get("_fact_discrepancies") or []
+    print(f"  entity.metadata.prior_rounds: {len(prior_rounds_after)}")
+    print(f"  entity.metadata._fact_discrepancies: {len(discrepancies_after)}")
+    if legacy_legal_reviews is not None:
+        print(
+            f"  FAIL: legacy metadata.legal_reviews STILL present "
+            f"({len(legacy_legal_reviews)} entries) — refactor incomplete"
+        )
 
-    # Evaluate ALL reviews produced by THIS run (use meta as source of truth)
+    # Pair each opinion block in the workspace file with its prior_rounds[]
+    # fact bag (keyed by round_name) for the full opinion + fact assessment.
+    opinions_list = opinions_from_file if isinstance(opinions_from_file, list) else []
     assessments = [
-        evaluate_review(r, expected_scenario_in, expected_instrument_in)
-        for r in reviews_in_meta
+        evaluate_opinion_block(
+            op,
+            prior_round_by_name.get(op.get("round_name")),
+            expected_scenario_in,
+            expected_instrument_in,
+        )
+        for op in opinions_list
     ]
 
     report["workspace"] = {
@@ -407,60 +460,71 @@ async def run_scenario(
         "review_path": review_node["path"],
         "review_version": review_node.get("version"),
         "review_size": review_node.get("size_bytes"),
-        "reviews_in_file": (
-            len(reviews_from_file) if isinstance(reviews_from_file, list) else None
-        ),
+        "opinions_in_file": len(opinions_list),
     }
     report["entity_after"] = {
-        "legal_reviews_count": len(reviews_in_meta),
+        "prior_rounds_count": len(prior_rounds_after),
+        "fact_discrepancies_count": len(discrepancies_after),
         "has_positions": bool(meta.get("_positions")),
+        "legacy_legal_reviews_leaked": legacy_legal_reviews is not None,
     }
     report["assessments"] = assessments
-    report["reviews"] = reviews_in_meta
-    report["file_reviews"] = (
-        reviews_from_file if isinstance(reviews_from_file, list) else None
-    )
+    report["opinions"] = opinions_list
+    report["prior_rounds_after"] = prior_rounds_after
+    report["discrepancies_after"] = discrepancies_after
 
-    # Consistency: file reviews should match meta reviews exactly (server
-    # re-persists the file after merge). Compare shallowly by round_name set.
-    if isinstance(reviews_from_file, list):
-        file_rounds = sorted([r.get("round_name") for r in reviews_from_file])
-        meta_rounds = sorted([r.get("round_name") for r in reviews_in_meta])
-        report["file_meta_round_sync"] = file_rounds == meta_rounds
+    # Consistency: every opinion entry should have a matching prior_rounds[]
+    # fact-bag entry (post-processing lifts proposed_facts into prior_rounds).
+    opinion_rounds = {op.get("round_name") for op in opinions_list}
+    prior_round_names = set(prior_round_by_name)
+    report["opinion_prior_round_match"] = opinion_rounds.issubset(prior_round_names)
 
     # Summary line per assessment
     for i, a in enumerate(assessments):
         flags = []
-        if not a["has_all_top_keys"]:
-            flags.append(f"missing={a['missing_top_keys']}")
+        if not a["has_all_opinion_keys"]:
+            flags.append(f"missing_opinion={a['missing_opinion_keys']}")
+        if a["opinion_has_fact_leakage"]:
+            flags.append(f"fact_leak_in_opinion={a['opinion_has_fact_leakage']}")
         if not a["scenario_valid"]:
-            flags.append(f"bad_scenario={a['scenario']}")
+            flags.append(f"bad_scenario={a['fact_bag_scenario']}")
         if not a["instrument_valid"]:
-            flags.append(f"bad_instrument={a['instrument_type']}")
+            flags.append(f"bad_instrument={a['fact_bag_instrument_type']}")
         if not a["scenario_as_expected"]:
             flags.append(
-                f"unexpected_scenario={a['scenario']} (want: {expected_scenario_in})"
+                f"unexpected_scenario={a['fact_bag_scenario']} (want: {expected_scenario_in})"
             )
         if not a["instrument_as_expected"]:
             flags.append(
-                f"unexpected_instrument={a['instrument_type']} (want: {expected_instrument_in})"
+                f"unexpected_instrument={a['fact_bag_instrument_type']} (want: {expected_instrument_in})"
             )
+        if not a["fact_bag_present"]:
+            flags.append("missing_prior_rounds_fact_bag")
         flag_str = "" if not flags else f"  WARN: {flags}"
         print(
-            f"  [{i}] round={a['round_name']!r}  scenario={a['scenario']}  "
-            f"instrument={a['instrument_type']}  docs_reviewed="
+            f"  [{i}] round={a['round_name']!r}  "
+            f"scenario={a['fact_bag_scenario']}  "
+            f"instrument={a['fact_bag_instrument_type']}  docs_reviewed="
             f"{a['documents_reviewed_count']}  unusual={a['unusual_terms_count']}  "
-            f"red_flags={a['red_flags_count']}  q={a['killer_questions_count']}{flag_str}"
+            f"red_flags={a['red_flags_count']}  q={a['killer_questions_count']}  "
+            f"fact_blocks={len(a['fact_bag_nested_blocks_present'])}{flag_str}"
         )
 
     # Pass/fail
-    ok = bool(assessments) and all(
-        a["has_all_top_keys"]
-        and a["scenario_valid"]
-        and a["instrument_valid"]
-        and a["scenario_as_expected"]
-        and a["instrument_as_expected"]
-        for a in assessments
+    ok = (
+        bool(assessments)
+        and legacy_legal_reviews is None
+        and report["opinion_prior_round_match"]
+        and all(
+            a["has_all_opinion_keys"]
+            and not a["opinion_has_fact_leakage"]
+            and a["scenario_valid"]
+            and a["instrument_valid"]
+            and a["scenario_as_expected"]
+            and a["instrument_as_expected"]
+            and a["fact_bag_present"]
+            for a in assessments
+        )
     )
     report["status"] = "pass" if ok else "fail"
     return report
@@ -528,28 +592,36 @@ def write_report(reports: list[dict]) -> None:
         lines.append(f"## {rep.get('label')}")
         lines.append("")
         lines.append("```json")
-        # Strip big narrative/full review content for compactness; keep snapshots
+        # Strip big narrative/full opinion content for compactness; keep snapshots
         trimmed = dict(rep)
-        if "reviews" in trimmed:
-            trimmed["reviews"] = [
+        if "opinions" in trimmed:
+            trimmed["opinions"] = [
                 {**r, "narrative_summary": f"({len(r.get('narrative_summary') or '')} chars)"}
-                for r in trimmed["reviews"]
+                for r in trimmed["opinions"]
             ]
-        if "file_reviews" in trimmed:
-            trimmed["file_reviews"] = (
-                f"<{len(trimmed['file_reviews'])} entries>"
-                if isinstance(trimmed["file_reviews"], list) else None
+        if "prior_rounds_after" in trimmed:
+            trimmed["prior_rounds_after"] = (
+                f"<{len(trimmed['prior_rounds_after'])} round(s)>"
+                if isinstance(trimmed["prior_rounds_after"], list) else None
             )
         lines.append(json.dumps(trimmed, indent=2, ensure_ascii=False, default=str))
         lines.append("```")
         lines.append("")
-        # Dump full reviews separately
-        reviews = rep.get("reviews") or []
-        if reviews:
-            lines.append("### Full reviews (from entity.metadata)")
+        # Dump full opinions + prior_rounds separately
+        opinions = rep.get("opinions") or []
+        if opinions:
+            lines.append("### Opinions (from Legal Review.json workspace file)")
             lines.append("")
             lines.append("```json")
-            lines.append(json.dumps(reviews, indent=2, ensure_ascii=False))
+            lines.append(json.dumps(opinions, indent=2, ensure_ascii=False))
+            lines.append("```")
+            lines.append("")
+        prior_rounds = rep.get("prior_rounds_after") or []
+        if prior_rounds:
+            lines.append("### prior_rounds[] (from entity.metadata_json — fact bags)")
+            lines.append("")
+            lines.append("```json")
+            lines.append(json.dumps(prior_rounds, indent=2, ensure_ascii=False))
             lines.append("```")
             lines.append("")
     REPORT_PATH.write_text("\n".join(lines), encoding="utf-8")
@@ -572,12 +644,16 @@ def main() -> int:
         label = rep.get("label", "(unknown)")
         status = rep.get("status")
         job_status = (rep.get("job") or {}).get("final_status")
-        n_reviews = (rep.get("entity_after") or {}).get("legal_reviews_count", 0)
-        sync = rep.get("file_meta_round_sync")
+        ea = rep.get("entity_after") or {}
+        n_pr = ea.get("prior_rounds_count", 0)
+        n_disc = ea.get("fact_discrepancies_count", 0)
+        legacy_leak = ea.get("legacy_legal_reviews_leaked")
+        pr_match = rep.get("opinion_prior_round_match")
         print(f"  {label}")
         print(
-            f"    status={status}  job={job_status}  reviews={n_reviews}  "
-            f"file_meta_sync={sync}"
+            f"    status={status}  job={job_status}  prior_rounds={n_pr}  "
+            f"discrepancies={n_disc}  opinion↔fact_match={pr_match}  "
+            f"legacy_leaked={legacy_leak}"
         )
         if status != "pass":
             exit_code = 2

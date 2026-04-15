@@ -243,11 +243,13 @@ def render_legal_review(
     entity_positions: Optional[list[dict]] = None,
     existing_legal_reviews: Optional[list[dict]] = None,
     existing_prior_rounds: Optional[list[dict]] = None,
+    existing_fact_discrepancies: Optional[list[dict]] = None,
 ) -> str:
     """Render the legal_review preset body with:
     - Tier R1 template catalog pointer (agent fetches raw text on demand)
     - Tier R2 full review checklist (primary rubric)
     - Prior-state context for scenario detection + incremental merge
+    - Pending/resolved fact discrepancies (avoid re-proposing known claims)
     """
     preset = PRESETS["legal_review"]
     body = load_preset_body(preset)
@@ -283,6 +285,7 @@ def render_legal_review(
         (existing_legal_reviews or [])
         or (entity_positions or [])
         or (existing_prior_rounds or [])
+        or (existing_fact_discrepancies or [])
     )
     if has_any_context:
         import json
@@ -290,15 +293,18 @@ def render_legal_review(
             "legal_reviews": existing_legal_reviews or [],
             "_positions": entity_positions or [],
             "prior_rounds": existing_prior_rounds or [],
+            "_fact_discrepancies": existing_fact_discrepancies or [],
         }
         result += (
             "\n\n---\n\n## Prior-state context\n\n"
-            "The system has the following knowledge about this company. Use it to "
-            "(a) detect the **scenario** for each round you review "
-            "(`new_investment` vs `follow_on` vs `retrospective`), "
-            "(b) produce the **complete updated `legal_reviews` array** "
-            "(preserve prior rounds' entries verbatim unless new docs contradict them), "
-            "(c) avoid re-reviewing rounds that haven't changed.\n\n"
+            "The system has the following knowledge about this company. Use it to:\n"
+            "- Detect the **scenario** per round "
+            "(`new_investment` / `follow_on` / `retrospective`).\n"
+            "- Produce opinion entries keyed by `round_name`. The server "
+            "preserves prior-round opinions verbatim; emit only the round(s) "
+            "you're reviewing this pass.\n"
+            "- Respect pending/resolved `_fact_discrepancies`: don't re-propose "
+            "a claim the user already accepted/rejected.\n\n"
             f"```json\n{json.dumps(ctx, indent=2, ensure_ascii=False)}\n```\n"
         )
     return result

@@ -33,17 +33,27 @@ JOB_TIMEOUT_S = 600
 
 REPORT_PATH = Path(__file__).parent / "e2e_extract_info_matrix_report.md"
 
-# Expected schema (Tier 1-3)
-EXPECTED_KEYS = {
+# Expected FACT schema (post Facts-vs-Opinions split; no signal keys here).
+EXPECTED_FACT_KEYS = {
     "company_name", "legal_name", "one_liner", "description",
     "industry_tags", "business_model", "hq_location", "website",
     "founded_date", "incorporation_jurisdiction", "incorporation_entity_type",
     "founders", "team_size", "key_team",
     "investment_stage", "raise_amount", "raise_currency", "raise_instrument",
-    "valuation_cap", "pre_money_valuation", "prior_rounds",
+    "valuation_cap", "pre_money_valuation", "prior_rounds", "current_round_name",
     "existing_investors", "referral_source",
-    "priority_indicators", "red_flags", "competitors",
+    "_positions", "_fact_discrepancies",
     "_extracted_at", "_extraction_version", "_files_examined",
+}
+
+FORBIDDEN_KEYS = {
+    "priority_indicators", "red_flags", "competitors", "legal_reviews",
+}
+
+# Lifecycle / meta keys excluded from fill_rate denominator (always scaffolded).
+_FILL_RATE_EXCLUDES = {
+    "_extracted_at", "_extraction_version", "_files_examined",
+    "_positions", "_fact_discrepancies",
 }
 
 
@@ -58,6 +68,7 @@ class ScenarioResult:
     elapsed_s: float = 0.0
     job_final_status: str = ""
     profile_written: bool = False
+    signals_written: bool = False
     metadata_synced: bool = False
     fill_rate: float = 0.0
     fields_populated: int = 0
@@ -68,6 +79,8 @@ class ScenarioResult:
     website_after: str = ""
     name_auto_updated: bool = False
     website_auto_updated: bool = False
+    forbidden_leaked: list[str] = field(default_factory=list)
+    signal_counts: dict[str, int] = field(default_factory=dict)
     error: str = ""
     warnings: list[str] = field(default_factory=list)
     notes: str = ""
@@ -248,6 +261,23 @@ async def run_scenario(
         tree_after = await get_tree(client, entity_id)
         profile_node = find_in_tree(tree_after, "Company Profile.json")
         result.profile_written = profile_node is not None
+        signals_node = find_in_tree(tree_after, "extract_info_signals.json")
+        result.signals_written = signals_node is not None
+
+        # Fetch signals counts when sidecar is present (for visibility).
+        if signals_node:
+            try:
+                r = await client.get(
+                    f"/entities/{entity_id}/workspace/file/{signals_node['id']}"
+                )
+                if r.status_code == 200:
+                    s = json.loads(r.content)
+                    result.signal_counts = {
+                        k: (len(s.get(k) or []) if isinstance(s.get(k), list) else 0)
+                        for k in ("priority_indicators", "red_flags", "competitors")
+                    }
+            except Exception:
+                pass
 
         # Verify entity metadata synced
         entity_after = await get_entity(client, entity_id)
@@ -263,18 +293,21 @@ async def run_scenario(
         # Evaluate quality
         if meta:
             result.files_examined = len(meta.get("_files_examined") or [])
-            non_meta_keys = EXPECTED_KEYS - {
-                "_extracted_at", "_extraction_version", "_files_examined",
-            }
+            result.forbidden_leaked = sorted(FORBIDDEN_KEYS & set(meta))
+            counted_keys = EXPECTED_FACT_KEYS - _FILL_RATE_EXCLUDES
             populated = 0
-            for k in non_meta_keys:
+            for k in counted_keys:
                 v = meta.get(k)
                 if v not in (None, [], ""):
                     populated += 1
             result.fields_populated = populated
-            result.fill_rate = round(populated / len(non_meta_keys), 2)
+            result.fill_rate = round(populated / len(counted_keys), 2)
 
-        if result.profile_written and result.metadata_synced:
+        if (
+            result.profile_written
+            and result.metadata_synced
+            and not result.forbidden_leaked
+        ):
             result.status = "PASS"
         else:
             result.status = "FAIL"
@@ -282,6 +315,11 @@ async def run_scenario(
                 result.warnings.append("Company Profile.json not written")
             if not result.metadata_synced:
                 result.warnings.append("Entity.metadata_json not populated")
+            if result.forbidden_leaked:
+                result.warnings.append(
+                    f"Forbidden (opinion/legacy) keys in metadata: "
+                    f"{result.forbidden_leaked}"
+                )
 
     except Exception as e:
         result.status = "ERROR"
@@ -384,13 +422,19 @@ async def main() -> int:
         "",
         "## Summary",
         "",
-        "| Scenario | Entity | Status | Time | Fill | Files | Name updated | Website updated |",
-        "|----------|--------|--------|------|------|-------|--------------|-----------------|",
+        "| Scenario | Entity | Status | Time | Fill | Files | Signals | Leaks | Name updated | Web updated |",
+        "|----------|--------|--------|------|------|-------|---------|-------|--------------|-------------|",
     ]
     for r in results:
+        leak_cell = ",".join(r.forbidden_leaked) if r.forbidden_leaked else "—"
+        signals_cell = (
+            "Y" if r.signals_written else
+            ("n/a" if all(v == 0 for v in (r.signal_counts or {}).values()) else "N")
+        )
         lines.append(
             f"| {r.scenario} | {r.entity_name} | {r.status} "
             f"| {r.elapsed_s:.0f}s | {r.fill_rate*100:.0f}% | {r.files_examined} "
+            f"| {signals_cell} | {leak_cell} "
             f"| {'✓' if r.name_auto_updated else '—'} "
             f"| {'✓' if r.website_auto_updated else '—'} |"
         )

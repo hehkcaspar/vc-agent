@@ -35,6 +35,7 @@ def create_portfolio_agent(
     model_profile_id: Optional[str] = None,
     run_id: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
+    preset_id: Optional[str] = None,
 ):
     """Create a Deep Agent (legacy) with SDK built-in tools + workspace tools."""
     model, tools, system_prompt = _build_agent_core(
@@ -44,6 +45,7 @@ def create_portfolio_agent(
         model_profile_id=model_profile_id,
         run_id=run_id,
         on_status=on_status,
+        preset_id=preset_id,
     )
     return create_deep_agent(
         model=model,

@@ -51,12 +51,24 @@ from app.services.direct_llm import (
     generate_with_kimi,
 )
 from app.services.json_loose import parse_json_loose
-from app.services.metadata_extraction import (
-    merge_entity_metadata,
-    merge_legal_reviews,
-    normalize_extraction_result,
-    validate_entity_metadata,
+from app.services.extract_info_signals import (
+    SIGNALS_WORKSPACE_PATH,
+    build_signals_document,
+    has_any_signal,
+    split_extract_info_payload,
+)
+from app.services.fact_discrepancies import append_discrepancy
+from app.services.legal_review_facts import (
+    merge_legal_review_opinions,
+    merge_prior_round_facts,
+    split_legal_review_entry,
+    validate_legal_review_opinions,
     validate_legal_reviews,
+)
+from app.services.metadata_extraction import (
+    _migrate_prior_round_entry,
+    merge_entity_metadata,
+    validate_entity_metadata,
 )
 from app.services.model_profiles import normalize_profile_id
 from app.services.preset_registry import (
@@ -124,6 +136,143 @@ async def _get_session(
     if not session:
         raise HTTPException(status_code=404, detail="Chat session not found")
     return session
+
+
+async def _load_legal_review_opinions(
+    db: AsyncSession, entity_id: str,
+) -> list[dict]:
+    """Load the opinions-only Legal Review.json from workspace root. Returns [] if missing."""
+    node = await workspace_service.get_node_by_path(
+        db, entity_id, "Legal Review.json",
+    )
+    if node is None or not node.storage_key:
+        return []
+    try:
+        raw = storage.read_file_sync(node.storage_key)
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        return []
+    if isinstance(payload, dict):
+        payload = payload.get("legal_reviews") or []
+    if not isinstance(payload, list):
+        return []
+    # Accept either new opinions-only shape or legacy combined shape — the
+    # validator tolerates both by only extracting opinion fields.
+    try:
+        validated, _ = validate_legal_review_opinions(payload)
+    except Exception:
+        return []
+    return validated
+
+
+async def _apply_fact_claims_from_payload(
+    db: AsyncSession,
+    entity_id: str,
+    raw_payload: Any,
+    preset_id: str,
+    run_id: str,
+) -> list[str]:
+    """Belt-and-suspenders recovery: convert `fact_claims[]` left in the agent's
+    final JSON into ``_fact_discrepancies[]`` entries for any claims the agent
+    didn't already surface via ``propose_fact_update``. Returns warning strings.
+    """
+    if not isinstance(raw_payload, dict):
+        return []
+    claims = raw_payload.get("fact_claims") or []
+    if not isinstance(claims, list) or not claims:
+        return []
+
+    entity = await _get_entity(db, entity_id)
+    metadata: dict = {}
+    if entity.metadata_json:
+        try:
+            metadata = json.loads(entity.metadata_json)
+            if not isinstance(metadata, dict):
+                metadata = {}
+        except json.JSONDecodeError:
+            metadata = {}
+
+    existing_keys: set = {
+        (
+            str(d.get("field_path")),
+            json.dumps(d.get("proposed_value"), sort_keys=True, default=str),
+        )
+        for d in (metadata.get("_fact_discrepancies") or [])
+        if isinstance(d, dict)
+    }
+
+    warnings: list[str] = []
+    appended = 0
+    for i, claim in enumerate(claims):
+        if not isinstance(claim, dict):
+            warnings.append(f"fact_claim[{i}] skipped: not a dict")
+            continue
+        # Explicitly validate required fields so an agent's partial payload
+        # doesn't silently vanish — the user needs to know something was
+        # surfaced-but-dropped, not just assume zero discrepancies.
+        missing = [
+            k for k in ("field_path", "source_doc_path", "rationale")
+            if not claim.get(k)
+        ]
+        if missing:
+            warnings.append(
+                f"fact_claim[{i}] skipped (missing required: {missing!r}); "
+                f"keys present: {sorted(claim)}"
+            )
+            continue
+
+        field_path = claim.get("field_path")
+        proposed_value = claim.get("proposed_value")
+        dedup_key = (
+            str(field_path),
+            json.dumps(proposed_value, sort_keys=True, default=str),
+        )
+        if dedup_key in existing_keys:
+            continue
+
+        source_path = claim.get("source_doc_path")
+        node = await workspace_service.get_node_by_path(
+            db, entity_id, source_path,
+        )
+        node_id = node.id if node else None
+        if not node_id:
+            warnings.append(
+                f"fact_claim[{i}] skipped (source_doc_path not resolvable): "
+                f"{source_path!r}"
+            )
+            continue
+
+        entry = {
+            "detected_by": preset_id,
+            "field_path": field_path,
+            "current_value": claim.get("current_value"),
+            "proposed_value": proposed_value,
+            "source_doc_node_id": node_id,
+            "source_doc_quote": claim.get("source_doc_quote"),
+            "confidence": claim.get("confidence") or "medium",
+            "rationale": claim.get("rationale") or "",
+            "round_name": claim.get("round_name"),
+            "source_run": {
+                "agent_run_id": run_id,
+                "preset_id": preset_id,
+                "channel": "fact_claims_fallback",
+            },
+        }
+        try:
+            append_discrepancy(metadata, entry)
+            existing_keys.add(dedup_key)
+            appended += 1
+        except ValueError as e:
+            warnings.append(f"fact_claim skipped ({e}): {field_path}")
+
+    if appended:
+        entity.metadata_json = json.dumps(metadata, ensure_ascii=False)
+        entity.updated_at = utc_now()
+        warnings.append(
+            f"Recovered {appended} fact_claim entries from agent output "
+            "(agent skipped propose_fact_update)"
+        )
+    return warnings
 
 
 async def _load_nodes(
@@ -452,12 +601,23 @@ async def run_preset_agent_job(job_id: str) -> None:
                     except json.JSONDecodeError:
                         pass
                 meta = existing_meta or {}
+                existing_opinions = await _load_legal_review_opinions(
+                    db, job.entity_id,
+                )
+                prior_rounds_migrated = [
+                    _migrate_prior_round_entry(e)
+                    for e in (meta.get("prior_rounds") or [])
+                    if isinstance(e, dict)
+                ]
                 task_body = render_legal_review(
                     entity.name,
                     entity.website,
                     entity_positions=meta.get("_positions") or [],
-                    existing_legal_reviews=meta.get("legal_reviews") or [],
-                    existing_prior_rounds=meta.get("prior_rounds") or [],
+                    existing_legal_reviews=existing_opinions,
+                    existing_prior_rounds=prior_rounds_migrated,
+                    existing_fact_discrepancies=(
+                        meta.get("_fact_discrepancies") or []
+                    ),
                 )
             else:
                 job.status = "failed"
@@ -534,6 +694,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                 model_profile_id=model_profile_id_snap,
                 run_id=agent_run_id_snap,
                 on_status=on_status,
+                preset_id=preset_id,
             )
             lc_messages = history_to_lc_messages(history, user_turn)
             if agent_mode_snap == "deep_agent" and DEEP_AGENT_AVAILABLE:
@@ -578,11 +739,18 @@ async def run_preset_agent_job(job_id: str) -> None:
 
                 # Read, validate, merge to entity
                 sync_warnings: List[str] = []
+                raw_payload_for_claims: Any = None
+                signals_payload: dict | None = None
+                signals_files_examined: list = []
                 if profile_node and profile_node.storage_key:
                     try:
                         raw_bytes = storage.read_file_sync(profile_node.storage_key)
                         profile_data = json.loads(raw_bytes.decode("utf-8"))
-                        validated, v_warnings = validate_entity_metadata(profile_data)
+                        raw_payload_for_claims = profile_data
+                        facts_payload, signals_payload = (
+                            split_extract_info_payload(profile_data)
+                        )
+                        validated, v_warnings = validate_entity_metadata(facts_payload)
                         sync_warnings.extend(v_warnings)
 
                         # Override agent-generated meta fields with trusted values.
@@ -600,6 +768,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                         validated["_extracted_at"] = utc_now().isoformat()
                         validated["_extraction_version"] = 1
                         validated["_files_examined"] = read_paths
+                        signals_files_examined = list(read_paths)
 
                         # Persist corrected meta back to workspace file so the
                         # user-visible Company Profile.json matches Entity.metadata.
@@ -685,8 +854,12 @@ async def run_preset_agent_job(job_id: str) -> None:
 
                     if isinstance(salvaged, dict) and salvaged:
                         try:
+                            raw_payload_for_claims = salvaged
+                            facts_payload, signals_payload = (
+                                split_extract_info_payload(salvaged)
+                            )
                             validated, v_warnings = validate_entity_metadata(
-                                salvaged,
+                                facts_payload,
                             )
                             sync_warnings.extend(v_warnings)
                             validated["_extracted_at"] = utc_now().isoformat()
@@ -701,6 +874,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                                     _seen.add(m.group(1))
                                     read_paths.append(m.group(1))
                             validated["_files_examined"] = read_paths
+                            signals_files_examined = list(read_paths)
 
                             # Write the file ourselves as a system recovery
                             corrected_body = json.dumps(
@@ -742,6 +916,53 @@ async def run_preset_agent_job(job_id: str) -> None:
                         sync_warnings.append(
                             "Agent did not write Company Profile.json and no "
                             "JSON was found in the reply — no metadata synced"
+                        )
+
+                # Split off: write signals file to Deliverables/Analysis/ so
+                # Company Profile.json stays pure facts. Runs once, covers both
+                # the happy path and the fallback recovery path.
+                if signals_payload and has_any_signal(signals_payload):
+                    signals_doc = build_signals_document(
+                        signals_payload,
+                        run_id=agent_run_id_snap,
+                        files_examined=signals_files_examined,
+                    )
+                    try:
+                        await workspace_service.write_file(
+                            db,
+                            job.entity_id,
+                            SIGNALS_WORKSPACE_PATH,
+                            json.dumps(
+                                signals_doc, indent=2, ensure_ascii=False,
+                            ).encode("utf-8"),
+                            "application/json",
+                            Actor(type="system", ref=f"preset:{preset_id}"),
+                        )
+                        await db.commit()
+                    except Exception:
+                        _log.warning(
+                            "Failed to write %s", SIGNALS_WORKSPACE_PATH,
+                            exc_info=True,
+                        )
+                        sync_warnings.append(
+                            f"Signals sidecar write failed — {SIGNALS_WORKSPACE_PATH}"
+                        )
+
+                # Recover any fact_claims[] the agent left in its final JSON
+                # that weren't already surfaced via propose_fact_update.
+                if raw_payload_for_claims is not None:
+                    try:
+                        claim_warnings = await _apply_fact_claims_from_payload(
+                            db, job.entity_id,
+                            raw_payload_for_claims,
+                            preset_id, agent_run_id_snap,
+                        )
+                        if claim_warnings:
+                            await db.commit()
+                            sync_warnings.extend(claim_warnings)
+                    except Exception:
+                        _log.warning(
+                            "fact_claims recovery failed", exc_info=True,
                         )
 
                 # Build chat message: artifact_card on success, plain-text on
@@ -1019,12 +1240,12 @@ async def run_preset_agent_job(job_id: str) -> None:
                             "and no JSON was found in the reply — no reviews synced"
                         )
 
-                # Stage 2 — merge + re-persist. Runs whenever parse_succeeded,
-                # even when incoming_reviews is empty: agent reporting zero
-                # applicable reviews should NOT destroy prior-round entries in
-                # metadata OR the workspace file. When incoming is empty, the
-                # file is re-persisted with the preserved prior reviews so the
-                # file and DB stay in sync (B2 fix).
+                # Stage 2 — split each entry into (fact_block, opinion_block),
+                # lift facts into prior_rounds[], and persist opinions to
+                # Legal Review.json. Runs whenever parse_succeeded, even when
+                # incoming is empty (the file is re-persisted with preserved
+                # prior opinions so file + DB stay in sync).
+                raw_payload_for_claims: Any = None
                 if parse_succeeded:
                     entity_row = await _get_entity(db, job.entity_id)
                     existing_meta: dict = {}
@@ -1035,25 +1256,58 @@ async def run_preset_agent_job(job_id: str) -> None:
                                 existing_meta = {}
                         except json.JSONDecodeError:
                             existing_meta = {}
-                    existing_reviews = existing_meta.get("legal_reviews") or []
-                    if not isinstance(existing_reviews, list):
-                        existing_reviews = []
-
-                    merged_reviews = merge_legal_reviews(
-                        existing_reviews, incoming_reviews,
+                    existing_prior_rounds = (
+                        existing_meta.get("prior_rounds") or []
                     )
-                    existing_meta["legal_reviews"] = merged_reviews
+                    if not isinstance(existing_prior_rounds, list):
+                        existing_prior_rounds = []
+
+                    # Split each annotated incoming entry into (fact, opinion).
+                    incoming_facts: List[dict] = []
+                    incoming_opinions: List[dict] = []
+                    for entry in incoming_reviews:
+                        fact_block, opinion_block = split_legal_review_entry(entry)
+                        # Opinions carry run-metadata (review_date, checklist_version,
+                        # documents_reviewed, reference_templates_consulted) —
+                        # _annotate already set them on the combined entry; copy
+                        # across since opinion_block keys are limited.
+                        opinion_block["review_date"] = entry.get("review_date")
+                        opinion_block["documents_reviewed"] = (
+                            entry.get("documents_reviewed") or []
+                        )
+                        opinion_block["reference_templates_consulted"] = (
+                            entry.get("reference_templates_consulted") or []
+                        )
+                        opinion_block["checklist_version"] = (
+                            entry.get("checklist_version") or checklist_version
+                        )
+                        incoming_facts.append(fact_block)
+                        incoming_opinions.append(opinion_block)
+
+                    merged_prior_rounds = merge_prior_round_facts(
+                        existing_prior_rounds, incoming_facts,
+                    )
+                    existing_meta["prior_rounds"] = merged_prior_rounds
+                    # Drop the legacy combined array — it's been superseded.
+                    existing_meta.pop("legal_reviews", None)
                     entity_row.metadata_json = json.dumps(
                         existing_meta, ensure_ascii=False,
                     )
                     entity_row.updated_at = utc_now()
 
-                    # Always persist the authoritative copy at workspace root
-                    # so (a) the UI has a stable path to show history and
-                    # (b) file and DB stay in sync even when agent wrote
-                    # elsewhere or wrote an empty array.
+                    # Merge opinions with any prior-round opinions from the
+                    # existing Legal Review.json (workspace is the source of
+                    # truth for opinions now, not metadata_json).
+                    existing_opinions = await _load_legal_review_opinions(
+                        db, job.entity_id,
+                    )
+                    merged_opinions = merge_legal_review_opinions(
+                        existing_opinions, incoming_opinions,
+                    )
+
+                    # Persist opinions-only at workspace root.
                     corrected_body = json.dumps(
-                        {"legal_reviews": merged_reviews},
+                        {"legal_reviews": merged_opinions},
                         indent=2, ensure_ascii=False,
                     )
                     try:
@@ -1067,7 +1321,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                         )
                     except Exception:
                         _log.warning(
-                            "Failed to rewrite Legal Review.json with merged reviews",
+                            "Failed to rewrite Legal Review.json with merged opinions",
                             exc_info=True,
                         )
 
@@ -1075,15 +1329,48 @@ async def run_preset_agent_job(job_id: str) -> None:
                     if review_node is not None:
                         await db.refresh(review_node)
                     _log.info(
-                        "Legal review sync: %d incoming, %d merged (entity=%s)",
-                        len(incoming_reviews), len(merged_reviews), job.entity_id,
+                        "Legal review sync: %d incoming, %d prior_rounds merged, "
+                        "%d opinions merged (entity=%s)",
+                        len(incoming_reviews), len(merged_prior_rounds),
+                        len(merged_opinions), job.entity_id,
                     )
+
+                    # Preserve the raw payload for fact_claims recovery below.
+                    # We re-parse the file since `review_payload` is local to
+                    # the stage-1 try block.
+                    try:
+                        if review_node and review_node.storage_key:
+                            raw_bytes = storage.read_file_sync(
+                                review_node.storage_key,
+                            )
+                            raw_payload_for_claims = json.loads(
+                                raw_bytes.decode("utf-8"),
+                            )
+                    except Exception:
+                        raw_payload_for_claims = None
                 else:
                     # Parse failed — leave metadata and the workspace file
                     # untouched. review_node may point at the unreadable agent
                     # write; drop it so the chat message renders plain-text
                     # failure rather than a broken artifact_card.
                     review_node = None
+
+                # Recover fact_claims[] left in the agent's JSON (belt-and-
+                # suspenders; primary path is propose_fact_update during the run).
+                if raw_payload_for_claims is not None:
+                    try:
+                        claim_warnings = await _apply_fact_claims_from_payload(
+                            db, job.entity_id,
+                            raw_payload_for_claims,
+                            preset_id, agent_run_id_snap,
+                        )
+                        if claim_warnings:
+                            await db.commit()
+                            sync_warnings.extend(claim_warnings)
+                    except Exception:
+                        _log.warning(
+                            "fact_claims recovery failed", exc_info=True,
+                        )
 
                 summary = deliverable_body.strip() or "Legal review complete."
                 if sync_warnings:
@@ -1191,14 +1478,15 @@ async def run_preset_agent_job(job_id: str) -> None:
                         except Exception:
                             pass
 
-        # Post-process JSON presets
+        # Post-process JSON presets — pretty-print the agent's JSON output.
+        # extract_info / legal_review never reach here: they return earlier
+        # from their dedicated post-processing blocks above.
         if output_kind_snap == "json":
             try:
                 parsed = parse_json_loose(deliverable_body)
             except json.JSONDecodeError as e:
                 raise RuntimeError(f"Model returned invalid JSON: {e}") from e
-            normalized = normalize_extraction_result(parsed)
-            deliverable_body = json.dumps(normalized, indent=2, ensure_ascii=False)
+            deliverable_body = json.dumps(parsed, indent=2, ensure_ascii=False)
 
         # Write deliverable to workspace + append card message
         file_suffix = ".json" if output_kind_snap == "json" else ".md"
@@ -1831,12 +2119,21 @@ async def run_chat_preset(
                 except json.JSONDecodeError:
                     pass
             meta = existing_meta or {}
+            existing_opinions = await _load_legal_review_opinions(db, entity_id)
+            prior_rounds_migrated = [
+                _migrate_prior_round_entry(e)
+                for e in (meta.get("prior_rounds") or [])
+                if isinstance(e, dict)
+            ]
             task_body = render_legal_review(
                 entity.name,
                 entity.website,
                 entity_positions=meta.get("_positions") or [],
-                existing_legal_reviews=meta.get("legal_reviews") or [],
-                existing_prior_rounds=meta.get("prior_rounds") or [],
+                existing_legal_reviews=existing_opinions,
+                existing_prior_rounds=prior_rounds_migrated,
+                existing_fact_discrepancies=(
+                    meta.get("_fact_discrepancies") or []
+                ),
             )
         else:
             raise HTTPException(status_code=400, detail="Preset not implemented")
@@ -1981,8 +2278,10 @@ async def run_chat_preset(
                     status_code=502,
                     detail=f"Model returned invalid JSON: {e}",
                 ) from e
-            normalized = normalize_extraction_result(parsed)
-            deliverable_body = json.dumps(normalized, indent=2, ensure_ascii=False)
+            # Generic JSON preset path — pass the agent's output through
+            # unchanged. extract_info / legal_review have dedicated post-
+            # processing that routes through the async agent job, not here.
+            deliverable_body = json.dumps(parsed, indent=2, ensure_ascii=False)
         else:
             preset_user_text = "Execute the instructions above and output the full markdown report now."
             if profile_id == "kimi_moonshot":

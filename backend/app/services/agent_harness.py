@@ -95,6 +95,7 @@ def _build_agent_core(
     model_profile_id: Optional[str] = None,
     run_id: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
+    preset_id: Optional[str] = None,
 ):
     """Build the shared components (model, tools, prompt) for any agent mode."""
     model = build_agent_chat_model(profile_id=model_profile_id)
@@ -106,6 +107,7 @@ def _build_agent_core(
         ws,
         on_status=on_status,
         model_profile_id=model_profile_id,
+        preset_id=preset_id,
     )
     # Add the entity-agnostic legal-template reader (Tier R1 reference corpus).
     # Read-only and harmless for presets that don't use it.
@@ -125,6 +127,7 @@ def create_react_portfolio_agent(
     model_profile_id: Optional[str] = None,
     run_id: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
+    preset_id: Optional[str] = None,
 ):
     """Create a ReAct agent with only workspace tools (no SDK built-ins).
 
@@ -186,6 +189,7 @@ def create_react_portfolio_agent(
         model_profile_id=model_profile_id,
         run_id=run_id,
         on_status=on_status,
+        preset_id=preset_id,
     )
     # Use absolute token trigger instead of fraction — ChatGoogleGenerativeAI
     # doesn't expose model metadata, so fraction-based triggers never fire.

@@ -1,7 +1,12 @@
-"""Normalize Gemini JSON extraction output to a stable VC metadata shape (extract_info).
+"""Normalize extract_info JSON output + validate/merge Entity.metadata_json.
 
-Also provides validate/merge helpers for the Tier 1-3 entity metadata schema
-written by the extract_info agent and synced to Entity.metadata_json.
+Facts only — per the Facts vs Opinions split. Signals (priority_indicators,
+red_flags, competitors) split out to Deliverables/Analysis/extract_info_signals.json
+via ``services.extract_info_signals``. Legal-review round-term facts lift to
+``prior_rounds[]`` via ``services.legal_review_facts``; opinions stay in
+``Legal Review.json``.
+
+See docs/design/FACTS_VS_OPINIONS.md.
 """
 
 from __future__ import annotations
@@ -13,55 +18,11 @@ from typing import Any, Dict, List, Tuple
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Legacy one-shot normalization (kept for backward compat, dead code path now)
-# ---------------------------------------------------------------------------
-
-
-def normalize_extraction_result(result: Any) -> Dict[str, Any]:
-    if isinstance(result, list) and result and isinstance(result[0], dict):
-        result = result[0]
-    if not isinstance(result, dict):
-        return _default_extraction_result()
-
-    return {
-        "company_name": result.get("company_name")
-        or {"value": None, "confidence": "low"},
-        "founders": result.get("founders") or [],
-        "industry_tags": result.get("industry_tags") or [],
-        "investment_stage": result.get("investment_stage")
-        or {"value": "unknown", "confidence": "low"},
-        "company_description": result.get("company_description")
-        or {"value": None, "confidence": "low"},
-        "company_website": result.get("company_website"),
-        "funding_ask": result.get("funding_ask"),
-        "referral_source": result.get("referral_source"),
-        "priority_indicators": result.get("priority_indicators") or [],
-        "red_flags": result.get("red_flags") or [],
-        "competitors_mentioned": result.get("competitors_mentioned") or [],
-    }
-
-
-def _default_extraction_result() -> Dict[str, Any]:
-    return {
-        "company_name": {"value": None, "confidence": "low"},
-        "founders": [],
-        "industry_tags": [],
-        "investment_stage": {"value": "unknown", "confidence": "low"},
-        "company_description": {"value": None, "confidence": "low"},
-        "company_website": None,
-        "funding_ask": None,
-        "referral_source": None,
-        "priority_indicators": [],
-        "red_flags": [],
-        "competitors_mentioned": [],
-    }
-
-
-# ---------------------------------------------------------------------------
 # Tier 1-3 entity metadata: validate + merge
 # ---------------------------------------------------------------------------
 
-# All known top-level keys and their default values.
+# All known top-level keys and their default values. FACTS ONLY.
+# Signals/opinions moved to workspace artifacts; see module docstring.
 _ENTITY_METADATA_DEFAULTS: Dict[str, Any] = {
     # Tier 1 — Identity
     "company_name": None,
@@ -86,24 +47,67 @@ _ENTITY_METADATA_DEFAULTS: Dict[str, Any] = {
     "raise_instrument": None,
     "valuation_cap": None,
     "pre_money_valuation": None,
+    # prior_rounds[] is a per-round fact bag. Each entry carries round-level
+    # facts (terms, governance, rights). extract_info writes shallow rows
+    # (round_name, amount, date, lead_investor); legal_review deep-merges the
+    # detailed term blocks by round_name. See legal_review_facts.py.
     "prior_rounds": [],
+    "current_round_name": None,
     "existing_investors": [],
     "referral_source": None,
-    # Signals
-    "priority_indicators": [],
-    "red_flags": [],
-    "competitors": [],
-    # Legal reviews (agent-populated by the legal_review preset, one entry per round)
-    "legal_reviews": [],
     # Positions (user-edited via EntityEditModal — never agent-populated, but
-    # listed here so validate_entity_metadata doesn't strip it on extract_info
-    # runs that happen to echo the field back).
+    # listed here so validate_entity_metadata doesn't strip it).
     "_positions": [],
-    # Meta (set by agent)
+    # Fact discrepancies — agent-surfaced, user-adjudicated. Never written by
+    # validate/merge; mutated only via services.fact_discrepancies.
+    "_fact_discrepancies": [],
+    # Meta (server-set each run)
     "_extracted_at": None,
     "_extraction_version": None,
     "_files_examined": [],
 }
+
+# Keys that are "user-managed" or "system-managed" — preserved verbatim from
+# existing on merge, never clobbered by agent output even when non-empty.
+_PRESERVED_ON_MERGE: set = {"_positions", "_fact_discrepancies"}
+
+
+def _migrate_prior_round_entry(entry: Any) -> Dict[str, Any]:
+    """Normalise a single prior_rounds[] entry to the per-round fact-bag shape.
+
+    Accepts legacy short shape ``{round, amount, date, lead_investor}`` and
+    returns the full fact bag with empty term blocks. New entries are
+    returned as-is (with missing keys defaulted).
+    """
+    if not isinstance(entry, dict):
+        return {"round_name": str(entry) if entry else None}
+
+    # Legacy short shape has `round` rather than `round_name`.
+    round_name = entry.get("round_name")
+    if round_name is None and entry.get("round"):
+        round_name = entry.get("round")
+
+    # Legacy short shape has `date` rather than `effective_date`.
+    effective_date = entry.get("effective_date") or entry.get("date")
+
+    out: Dict[str, Any] = {
+        "round_name": round_name,
+        "instrument_type": entry.get("instrument_type"),
+        "scenario": entry.get("scenario"),
+        "effective_date": effective_date,
+        "amount": entry.get("amount"),
+        "currency": entry.get("currency"),
+        "lead_investor": entry.get("lead_investor"),
+        "company_terms": entry.get("company_terms") or {},
+        "safe_terms": entry.get("safe_terms"),
+        "priced_round_terms": entry.get("priced_round_terms"),
+        "governance": entry.get("governance") or {},
+        "investor_rights": entry.get("investor_rights") or {},
+        "transfer_restrictions": entry.get("transfer_restrictions") or {},
+        "regulatory": entry.get("regulatory") or {},
+        "our_position": entry.get("our_position"),
+    }
+    return out
 
 
 def validate_entity_metadata(data: Any) -> Tuple[Dict[str, Any], List[str]]:
@@ -151,6 +155,19 @@ def validate_entity_metadata(data: Any) -> Tuple[Dict[str, Any], List[str]]:
     else:
         result["_files_examined"] = []
 
+    # Migrate prior_rounds[] legacy short shape → per-round fact bag.
+    pr = result.get("prior_rounds") or []
+    if isinstance(pr, list):
+        result["prior_rounds"] = [_migrate_prior_round_entry(e) for e in pr]
+    else:
+        result["prior_rounds"] = []
+
+    # _fact_discrepancies is agent-hostile territory — agents must never write
+    # here. If the incoming payload carries entries (old format, hallucinated),
+    # drop them silently. The lifecycle API in services.fact_discrepancies is
+    # the only sanctioned writer.
+    result["_fact_discrepancies"] = []
+
     return result, warnings
 
 
@@ -161,152 +178,42 @@ def merge_entity_metadata(
     """Top-level merge: incoming values win. Null/empty incoming does NOT
     overwrite existing non-null/non-empty values (allows partial updates).
 
-    Arrays are replaced entirely when incoming is non-empty.
-    Meta keys (_extracted_at, _extraction_version, _files_examined) always
-    overwrite since they reflect the latest run.
+    Special cases:
+    - ``_extracted_at`` / ``_extraction_version`` / ``_files_examined`` always
+      overwrite (latest run wins)
+    - ``_positions`` / ``_fact_discrepancies`` are preserved from existing
+      (user-managed / lifecycle-managed — agent output must not clobber)
+    - ``prior_rounds[]`` deep-merges by ``round_name`` via
+      ``legal_review_facts.merge_prior_round_facts`` so extract_info's shallow
+      rows don't erase legal_review's deep term blocks
     """
     if not existing:
-        return dict(incoming)
+        # Honour preservation semantics even on first-write: preserved keys
+        # stay empty (they'd have no existing to preserve from anyway).
+        merged = dict(incoming)
+        for key in _PRESERVED_ON_MERGE:
+            merged.setdefault(key, [])
+        return merged
 
     merged = dict(existing)
     meta_keys = {"_extracted_at", "_extraction_version", "_files_examined"}
 
     for key, new_val in incoming.items():
+        if key in _PRESERVED_ON_MERGE:
+            # Never let agent output touch user/lifecycle-managed keys
+            continue
         if key in meta_keys:
-            # Meta keys always overwrite
             merged[key] = new_val
+        elif key == "prior_rounds" and isinstance(new_val, list):
+            # Deep-merge by round_name
+            from app.services.legal_review_facts import merge_prior_round_facts
+            existing_pr = existing.get("prior_rounds") or []
+            merged["prior_rounds"] = merge_prior_round_facts(existing_pr, new_val)
         elif new_val is None:
-            # Null incoming doesn't clobber existing
             pass
         elif isinstance(new_val, list) and len(new_val) == 0:
-            # Empty list doesn't clobber existing non-empty
             pass
         else:
             merged[key] = new_val
 
     return merged
-
-
-# ---------------------------------------------------------------------------
-# Legal review: per-round validate + merge
-# ---------------------------------------------------------------------------
-
-_LEGAL_REVIEW_SCENARIOS = {"new_investment", "follow_on", "retrospective"}
-_LEGAL_REVIEW_INSTRUMENTS = {"safe", "convertible_note", "priced_round"}
-_LEGAL_REVIEW_SEVERITIES = {"low", "medium", "high", "critical"}
-
-
-def validate_legal_reviews(data: Any) -> Tuple[List[Dict[str, Any]], List[str]]:
-    """Validate a list of legal-review entries produced by the legal_review preset.
-
-    Drops malformed entries (missing required keys, bad scenario/instrument values)
-    and returns them as warnings instead of raising. An entry needs at minimum
-    a ``round_name`` (non-empty string) to survive — everything else is
-    leniently defaulted, since the agent may legitimately produce null blocks
-    for non-applicable sections (e.g. ``priced_round_terms`` on a SAFE).
-    """
-    if isinstance(data, str):
-        data = json.loads(data)
-    if not isinstance(data, list):
-        raise ValueError(f"Expected list of reviews, got {type(data).__name__}")
-
-    warnings: List[str] = []
-    out: List[Dict[str, Any]] = []
-
-    for idx, entry in enumerate(data):
-        if not isinstance(entry, dict):
-            warnings.append(f"review[{idx}]: not a dict, dropped")
-            continue
-        round_name = entry.get("round_name")
-        if not isinstance(round_name, str) or not round_name.strip():
-            warnings.append(f"review[{idx}]: missing/empty round_name, dropped")
-            continue
-
-        # Normalise enum-ish fields without dropping the entry on a soft mismatch.
-        scenario = entry.get("scenario")
-        if scenario not in _LEGAL_REVIEW_SCENARIOS:
-            warnings.append(
-                f"review[{round_name!r}]: unknown scenario {scenario!r} — set to null"
-            )
-            scenario = None
-
-        instrument = entry.get("instrument_type")
-        if instrument not in _LEGAL_REVIEW_INSTRUMENTS and instrument is not None:
-            warnings.append(
-                f"review[{round_name!r}]: unknown instrument_type {instrument!r} — set to null"
-            )
-            instrument = None
-
-        normalised = dict(entry)
-        normalised["round_name"] = round_name.strip()
-        normalised["scenario"] = scenario
-        normalised["instrument_type"] = instrument
-
-        # documents_reviewed is rebuilt server-side from status_trace; start clean.
-        normalised.setdefault("documents_reviewed", [])
-        # review_date is always overwritten server-side; leave whatever the agent
-        # produced (or empty string) in place — the post-processor clobbers it.
-        normalised.setdefault("review_date", "")
-        normalised.setdefault("reference_templates_consulted", [])
-        normalised.setdefault("unusual_terms", [])
-        normalised.setdefault("red_flags", [])
-        normalised.setdefault("priority_indicators", [])
-        normalised.setdefault("killer_questions", [])
-        normalised.setdefault("narrative_summary", None)
-        normalised.setdefault("our_position", None)
-
-        # Red-flag severities: normalise to the known set (drop unknowns with warning).
-        rfs = normalised.get("red_flags") or []
-        cleaned_rfs: List[Dict[str, Any]] = []
-        for rf in rfs:
-            if not isinstance(rf, dict):
-                continue
-            sev = rf.get("severity")
-            if sev not in _LEGAL_REVIEW_SEVERITIES:
-                warnings.append(
-                    f"review[{round_name!r}]: red_flag severity {sev!r} unknown — set to 'medium'"
-                )
-                rf = dict(rf)
-                rf["severity"] = "medium"
-            cleaned_rfs.append(rf)
-        normalised["red_flags"] = cleaned_rfs
-
-        out.append(normalised)
-
-    return out, warnings
-
-
-def merge_legal_reviews(
-    existing: List[Dict[str, Any]] | None,
-    incoming: List[Dict[str, Any]],
-) -> List[Dict[str, Any]]:
-    """Merge a new batch of legal_reviews into the existing array, keyed by round_name.
-
-    Entries in *incoming* replace entries in *existing* with the same round_name.
-    Other existing entries are preserved verbatim. Order: incoming entries appear
-    first (matching agent output order), then any unaffected prior rounds.
-
-    When *incoming* itself contains duplicates for the same round_name (agent
-    emitted the same round twice), the LAST occurrence wins — consistent with
-    standard merge semantics where later writes overwrite earlier ones.
-    """
-    # Dedupe within incoming first (last-wins).
-    deduped: List[Dict[str, Any]] = []
-    seen_rounds: set[str] = set()
-    for entry in reversed(list(incoming)):
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("round_name")
-        if not name or name in seen_rounds:
-            continue
-        seen_rounds.add(name)
-        deduped.append(entry)
-    deduped.reverse()  # restore original order
-
-    if not existing:
-        return deduped
-    preserved = [
-        r for r in existing
-        if isinstance(r, dict) and r.get("round_name") not in seen_rounds
-    ]
-    return deduped + preserved

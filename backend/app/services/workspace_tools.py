@@ -1,13 +1,21 @@
-"""Workspace agent tools — 13 tools for the unified workspace file system."""
+"""Workspace agent tools — 14 tools for the unified workspace file system.
+
+The 14th tool, ``propose_fact_update``, is the agent's only way to surface a
+fact correction to the user. It appends a row to
+``Entity.metadata_json._fact_discrepancies[]`` for adjudication. See
+``services/fact_discrepancies.py`` and docs/design/FACTS_VS_OPINIONS.md.
+"""
 
 from __future__ import annotations
 
 import json
+import logging
 import mimetypes
 from typing import Any, Callable, Optional
 
 from app.config import settings
 from app.database import SyncSessionLocal
+from app.models import Entity
 from app.services.workspace import (
     Actor,
     ConflictError,
@@ -18,6 +26,8 @@ from app.services.workspace import (
     WorkspaceService,
     _parse_metadata,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _json(obj: Any) -> str:
@@ -39,10 +49,12 @@ def build_workspace_tools(
     workspace_service: WorkspaceService,
     on_status: Optional[Callable[[str], None]] = None,
     model_profile_id: Optional[str] = None,
+    preset_id: Optional[str] = None,
 ) -> list:
     from langchain_core.tools import tool
 
     actor = Actor(type="agent", ref=run_id)
+    detected_by = preset_id or "agent"
 
     @tool
     def workspace_get_tree(path: str = "", max_depth: int = 3) -> str:
@@ -331,6 +343,105 @@ def build_workspace_tools(
             return _json({"ok": False, "error": str(e)})
 
     @tool
+    def propose_fact_update(
+        field_path: str,
+        current_value: str,
+        proposed_value: str,
+        source_doc_path: str,
+        confidence: str,
+        rationale: str,
+        round_name: str = "",
+        source_doc_quote: str = "",
+    ) -> str:
+        """Surface a fact discrepancy for user review. NEVER silently mutate canonical facts.
+
+        Call this when you read source material that disagrees with the canonical
+        state shown in your prior-state context (e.g. _positions[], prior_rounds[],
+        top-level facts like raise_amount). The user adjudicates — the proposed
+        value is only applied on Accept.
+
+        Args:
+            field_path: dotted path, e.g. "raise_amount",
+              "prior_rounds[Series A].safe_terms.valuation_cap",
+              "_positions[fund_id=taihill_iii].invested_amount".
+              Shorthand [X] matches round_name / fund_id / name per array.
+              Use [key=value] for explicit match.
+            current_value: JSON-stringified current value (what the metadata says today).
+            proposed_value: JSON-stringified proposed value (what the source doc suggests).
+            source_doc_path: workspace path of the doc that evidences the correction
+              (e.g. "Data Room/Legal/SAFE - Series A-5.pdf").
+            confidence: "low" | "medium" | "high".
+            rationale: 1-3 sentences explaining why you think the proposed value is correct.
+            round_name: optional — required when field_path enters prior_rounds[...].
+            source_doc_quote: optional short excerpt from the doc (≤200 chars).
+        """
+        _notify(on_status, f"Proposing fact update: {field_path}")
+        # Parse JSON values; fall back to literal string when not JSON.
+        def _parse(raw: str) -> Any:
+            raw_stripped = (raw or "").strip()
+            if not raw_stripped:
+                return None
+            try:
+                return json.loads(raw_stripped)
+            except (json.JSONDecodeError, ValueError):
+                return raw_stripped
+
+        try:
+            with SyncSessionLocal() as db:
+                node = workspace_service.get_node_by_path_sync(
+                    db, entity_id, source_doc_path,
+                )
+                if not node:
+                    return _json({
+                        "ok": False,
+                        "error": f"source_doc_path not found: {source_doc_path!r}",
+                    })
+
+                entity = db.query(Entity).filter(Entity.id == entity_id).first()
+                if entity is None:
+                    return _json({"ok": False, "error": "entity not found"})
+
+                metadata: dict
+                if entity.metadata_json:
+                    try:
+                        metadata = json.loads(entity.metadata_json)
+                        if not isinstance(metadata, dict):
+                            metadata = {}
+                    except json.JSONDecodeError:
+                        metadata = {}
+                else:
+                    metadata = {}
+
+                from app.services.fact_discrepancies import append_discrepancy
+                committed = append_discrepancy(
+                    metadata,
+                    {
+                        "detected_by": detected_by,
+                        "field_path": field_path,
+                        "current_value": _parse(current_value),
+                        "proposed_value": _parse(proposed_value),
+                        "source_doc_node_id": node.id,
+                        "source_doc_quote": (source_doc_quote or None) or None,
+                        "confidence": confidence,
+                        "rationale": rationale,
+                        "round_name": (round_name or None) or None,
+                        "source_run": {
+                            "agent_run_id": run_id,
+                            "preset_id": preset_id,
+                        },
+                    },
+                )
+
+                entity.metadata_json = json.dumps(metadata, ensure_ascii=False)
+                db.commit()
+                return _json({"ok": True, "discrepancy_id": committed["id"]})
+        except ValueError as e:
+            return _json({"ok": False, "error": str(e)})
+        except Exception as e:
+            logger.warning("propose_fact_update failed", exc_info=True)
+            return _json({"ok": False, "error": f"internal error: {e}"})
+
+    @tool
     def workspace_history(limit: int = 20) -> str:
         """View recent workspace operations (create, edit, move, delete, etc.).
         - limit: max entries to return"""
@@ -362,4 +473,5 @@ def build_workspace_tools(
         workspace_file_versions,
         workspace_restore_version,
         workspace_history,
+        propose_fact_update,
     ]

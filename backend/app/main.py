@@ -12,6 +12,7 @@ from app.database import init_db
 from app.routers import (
     academic,
     chat,
+    discrepancies,
     entities,
     ingest,
     parkinglot,
@@ -231,6 +232,7 @@ app.include_router(ingest.router)
 app.include_router(workspace.router)
 app.include_router(academic.router)
 app.include_router(settings_router.router)
+app.include_router(discrepancies.router)
 
 
 @app.get("/")

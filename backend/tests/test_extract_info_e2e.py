@@ -6,8 +6,15 @@ Mimics the frontend flow:
   1. POST /entities/{id}/chat/sessions     (create session)
   2. POST /entities/{id}/chat/presets/extract_info/run  (trigger preset, expect 202)
   3. GET  .../jobs/{job_id}                (poll until terminal)
-  4. GET  /entities/{id}/workspace/tree    (verify Company Profile.json)
-  5. GET  /entities/{id}                   (verify metadata synced)
+  4. GET  /entities/{id}/workspace/tree    (verify Company Profile.json — facts only)
+  5. GET  .../workspace/tree               (verify Deliverables/Analysis/extract_info_signals.json — opinions)
+  6. GET  /entities/{id}                   (verify metadata synced; no signals/legacy keys)
+
+Post-Facts-vs-Opinions refactor (docs/design/FACTS_VS_OPINIONS.md):
+- Company Profile.json is facts only (no priority_indicators / red_flags / competitors)
+- extract_info_signals.json holds those signals at Deliverables/Analysis/
+- Entity.metadata_json excludes legacy `legal_reviews` and signal keys; includes
+  `current_round_name` + `_fact_discrepancies[]`
 
 Usage:
     cd backend && python tests/test_extract_info_e2e.py [entity_id]
@@ -163,8 +170,8 @@ async def _read_workspace_file_json(
 # Evaluation
 # ---------------------------------------------------------------------------
 
-# Tier 1-3 expected keys
-EXPECTED_KEYS = {
+# Tier 1-3 FACT keys (post Facts-vs-Opinions split — no signal keys here).
+EXPECTED_FACT_KEYS = {
     # Tier 1
     "company_name", "legal_name", "one_liner", "description",
     "industry_tags", "business_model", "hq_location", "website",
@@ -173,40 +180,73 @@ EXPECTED_KEYS = {
     "founders", "team_size", "key_team",
     # Tier 3
     "investment_stage", "raise_amount", "raise_currency", "raise_instrument",
-    "valuation_cap", "pre_money_valuation", "prior_rounds",
+    "valuation_cap", "pre_money_valuation", "prior_rounds", "current_round_name",
     "existing_investors", "referral_source",
-    # Signals
-    "priority_indicators", "red_flags", "competitors",
+    # User-owned / lifecycle
+    "_positions", "_fact_discrepancies",
     # Meta
     "_extracted_at", "_extraction_version", "_files_examined",
 }
 
+# Keys that must NOT leak into metadata_json or Company Profile.json after the
+# refactor — regression canaries.
+FORBIDDEN_KEYS = {
+    "priority_indicators", "red_flags", "competitors", "legal_reviews",
+}
+
+SIGNAL_KEYS = ("priority_indicators", "red_flags", "competitors")
+
+# Keys we don't count in fill_rate (always-present scaffolding or lifecycle).
+_FILL_RATE_EXCLUDES = {
+    "_extracted_at", "_extraction_version", "_files_examined",
+    "_positions", "_fact_discrepancies",
+}
+
 
 def evaluate_metadata(meta: dict) -> dict[str, Any]:
-    """Score the extracted metadata."""
+    """Score the extracted metadata (facts only)."""
+    meta_keys = set(meta)
     assessment = {
-        "has_all_keys": EXPECTED_KEYS.issubset(set(meta)),
-        "missing_keys": sorted(EXPECTED_KEYS - set(meta)),
-        "extra_keys": sorted(set(meta) - EXPECTED_KEYS),
+        "has_all_keys": EXPECTED_FACT_KEYS.issubset(meta_keys),
+        "missing_keys": sorted(EXPECTED_FACT_KEYS - meta_keys),
+        "extra_keys": sorted(meta_keys - EXPECTED_FACT_KEYS),
+        "forbidden_keys_present": sorted(FORBIDDEN_KEYS & meta_keys),
         "populated_fields": [],
         "empty_fields": [],
         "files_examined_count": len(meta.get("_files_examined") or []),
         "has_extracted_at": bool(meta.get("_extracted_at")),
         "has_version": bool(meta.get("_extraction_version")),
     }
-    for k in EXPECTED_KEYS:
-        if k.startswith("_"):
-            continue
+    counted_keys = EXPECTED_FACT_KEYS - _FILL_RATE_EXCLUDES
+    for k in counted_keys:
         v = meta.get(k)
         if v is None or v == [] or v == "":
             assessment["empty_fields"].append(k)
         else:
             assessment["populated_fields"].append(k)
     assessment["fill_rate"] = (
-        len(assessment["populated_fields"])
-        / max(1, len(EXPECTED_KEYS) - 3)  # minus the 3 meta keys
+        len(assessment["populated_fields"]) / max(1, len(counted_keys))
     )
     return assessment
+
+
+def evaluate_signals_doc(signals: dict | None) -> dict[str, Any]:
+    """Validate the Deliverables/Analysis/extract_info_signals.json payload."""
+    if signals is None:
+        return {"present": False}
+    present_keys = set(signals)
+    counts = {
+        k: len(signals.get(k) or []) if isinstance(signals.get(k), list) else 0
+        for k in SIGNAL_KEYS
+    }
+    return {
+        "present": True,
+        "has_all_signal_keys": set(SIGNAL_KEYS).issubset(present_keys),
+        "counts": counts,
+        "has_generated_at": bool(signals.get("_generated_at")),
+        "has_run_id": bool(signals.get("_generated_by_run_id")),
+        "files_examined": signals.get("_files_examined") or [],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +363,37 @@ async def run_test(entity_id: str) -> dict[str, Any]:
             client, entity_id, profile_node["id"]
         )
         print(f"  Top-level keys: {len(profile_data)}")
+        # Regression: facts-only — no signal/legacy keys in Company Profile.json
+        leaked = FORBIDDEN_KEYS & set(profile_data)
+        if leaked:
+            print(f"  WARN: signal/legacy keys leaked into facts file: {sorted(leaked)}")
+
+        # ---- Phase 5b: signals sidecar ----
+        _banner("Phase 5b: Verify Deliverables/Analysis/extract_info_signals.json")
+        signals_node = _find_in_tree(tree_after, "extract_info_signals.json")
+        signals_data = None
+        if signals_node:
+            print(f"  Path: {signals_node['path']}")
+            print(f"  Node id: {signals_node['id']}")
+            print(f"  Version: {signals_node.get('version')}")
+            try:
+                signals_data = await _read_workspace_file_json(
+                    client, entity_id, signals_node["id"]
+                )
+                print(f"  priority_indicators: {len(signals_data.get('priority_indicators') or [])}")
+                print(f"  red_flags:           {len(signals_data.get('red_flags') or [])}")
+                print(f"  competitors:         {len(signals_data.get('competitors') or [])}")
+            except Exception as e:
+                print(f"  WARN: could not read signals file: {e}")
+        else:
+            # May legitimately be absent if all three signal arrays were empty.
+            print("  (not present — agent may have emitted no signals)")
+        signals_eval = evaluate_signals_doc(signals_data)
+        report["phases"]["signals"] = {
+            "node_found": bool(signals_node),
+            "path": (signals_node or {}).get("path"),
+            **signals_eval,
+        }
 
         # ---- Phase 6: verify Entity.metadata_json synced ----
         _banner("Phase 6: Verify Entity.metadata_json synced")
@@ -360,9 +431,12 @@ async def run_test(entity_id: str) -> dict[str, Any]:
             print(f"    missing: {assessment['missing_keys']}")
         if assessment["extra_keys"]:
             print(f"    extra (warn): {assessment['extra_keys']}")
+        if assessment["forbidden_keys_present"]:
+            print(f"    FORBIDDEN KEYS LEAKED: {assessment['forbidden_keys_present']}")
+        populated_ratio_den = len(EXPECTED_FACT_KEYS - _FILL_RATE_EXCLUDES)
         print(
             f"  Fill rate: {assessment['fill_rate']*100:.0f}%  "
-            f"({len(assessment['populated_fields'])}/{len(EXPECTED_KEYS)-3} fields)"
+            f"({len(assessment['populated_fields'])}/{populated_ratio_den} fields)"
         )
         print(f"  Files examined: {assessment['files_examined_count']}")
         print(f"  Populated:  {assessment['populated_fields']}")
@@ -421,12 +495,15 @@ def main() -> int:
     job_phase = report.get("phases", {}).get("job", {})
     ws_phase = report.get("phases", {}).get("workspace", {})
     sync_phase = report.get("phases", {}).get("entity_sync", {})
+    signals_phase = report.get("phases", {}).get("signals", {})
 
+    forbidden_leaked = bool(eval_phase.get("forbidden_keys_present"))
     ok = (
         job_phase.get("final_status") == "succeeded"
         and ws_phase.get("profile_found") is True
         and sync_phase.get("metadata_synced") is True
         and eval_phase.get("has_all_keys") is True
+        and not forbidden_leaked
     )
 
     _banner("SUMMARY", char="#")
@@ -434,6 +511,8 @@ def main() -> int:
     print(f"  Profile.json written:   {ws_phase.get('profile_found')}")
     print(f"  Entity.metadata synced: {sync_phase.get('metadata_synced')}")
     print(f"  Schema coverage:        {eval_phase.get('has_all_keys')}")
+    print(f"  No forbidden leaks:     {not forbidden_leaked}")
+    print(f"  Signals sidecar:        {signals_phase.get('node_found', 'n/a')}")
     print(f"  Fill rate:              {eval_phase.get('fill_rate', 0)*100:.0f}%")
     print(f"  Overall: {'PASS' if ok else 'FAIL'}")
     return 0 if ok else 2
