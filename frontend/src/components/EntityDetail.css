@@ -3131,6 +3131,16 @@
 .facts-round-detail-row td {
   padding: 0;
   background: var(--color-bg-tertiary);
+  /* The outer .facts-table td rule sets white-space:nowrap + overflow:hidden
+     for the compact rounds row. In the expanded detail row those inherit
+     into the term-block KV values and clip long strings — re-enable normal
+     wrapping here. */
+  white-space: normal;
+  overflow: visible;
+}
+
+.facts-round-detail-row td * {
+  white-space: normal;
 }
 
 .facts-round-terms {
