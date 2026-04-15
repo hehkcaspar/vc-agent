@@ -3168,21 +3168,23 @@
 
 /* Structured term-block rendering (replaces raw JSON dump) */
 .facts-term-kv {
-  grid-template-columns: minmax(150px, 42%) 1fr;
-  gap: 8px var(--space-3);
+  grid-template-columns: minmax(170px, 44%) 1fr;
+  gap: 6px var(--space-3);
   font-size: var(--text-xs);
   margin: 0;
-  align-items: baseline;
+  /* Top-align so a wrapped value doesn't drag a short label down. */
+  align-items: start;
 }
 
 .facts-term-kv dt {
   color: var(--color-text-tertiary);
   font-weight: 500;
   line-height: 1.45;
-  /* Prevent labels from wrapping across many lines; let them truncate if
-     truly too long — the full key is in the DOM as source-of-truth. */
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* Wrap labels naturally instead of truncating — keeps long property
+     names like "Liquidation preference multiple" fully visible. */
+  white-space: normal;
+  word-break: break-word;
+  hyphens: auto;
 }
 
 .facts-term-kv dd {
