@@ -45,3 +45,8 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# E2E test run outputs (regenerated on every run)
+backend/tests/e2e_*_report.md
+backend/tests/e2e_findings_report.md
+backend/tests/e2e_report.md

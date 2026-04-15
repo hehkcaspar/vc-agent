@@ -1,6 +1,8 @@
 import {
   Entity,
   EntityUpdateData,
+  FactDiscrepancy,
+  FactDiscrepancyStatus,
   Fund,
   FundsConfig,
   LegalReviewChecklist,
@@ -372,5 +374,31 @@ export const api = {
       }
       return { kind: 'completed', result: data as unknown as PresetRunSyncResult };
     },
+  },
+
+  // Fact discrepancies — agent-surfaced, user-adjudicated
+  discrepancies: {
+    list: (entityId: string, status: FactDiscrepancyStatus | 'all' = 'pending') =>
+      fetchJson<FactDiscrepancy[]>(
+        `/entities/${entityId}/fact-discrepancies?status=${status}`,
+      ),
+    accept: (entityId: string, discrepancyId: string) =>
+      fetchJson<Entity>(
+        `/entities/${entityId}/fact-discrepancies/${discrepancyId}/accept`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        },
+      ),
+    reject: (entityId: string, discrepancyId: string, reason?: string) =>
+      fetchJson<Entity>(
+        `/entities/${entityId}/fact-discrepancies/${discrepancyId}/reject`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: reason ?? null }),
+        },
+      ),
   },
 };

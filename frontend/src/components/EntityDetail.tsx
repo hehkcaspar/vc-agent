@@ -8,6 +8,8 @@ import { useEntity, useFunds, useWorkspaceTree } from '../hooks/useEntities';
 import { api } from '../services/api';
 import { EntityHeader } from './EntityHeader';
 import { EntityEditModal } from './EntityEditModal';
+import { EntityFactsTab } from './EntityFactsTab';
+import { FactDiscrepancyPanel } from './FactDiscrepancyPanel';
 import {
   resolveEffectiveMime,
   isImageType,
@@ -133,6 +135,8 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [previewNode, setPreviewNode] = useState<WorkspaceTreeNode | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
+  const [discrepancyPanelOpen, setDiscrepancyPanelOpen] = useState(false);
+  const [contentTab, setContentTab] = useState<'workroom' | 'facts'>('workroom');
   const [agentMode, setAgentMode] = useState<AgentMode>('react'); // default unlimited until child reports
 
   const handleDealStageChange = useCallback(async (stage: DealStage) => {
@@ -250,7 +254,23 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
         onBack={onBack}
         onEdit={() => setEditModalOpen(true)}
         onDealStageChange={handleDealStageChange}
+        onToggleDiscrepancies={() => setDiscrepancyPanelOpen((v) => !v)}
+        discrepancyPanelOpen={discrepancyPanelOpen}
       />
+      {discrepancyPanelOpen && (
+        <FactDiscrepancyPanel
+          entity={liveEntity}
+          onEntityChanged={() => { void mutateEntity(); }}
+          onOpenPreview={(nodeId) => {
+            const hit = tree ? findNodeById(tree, nodeId) : null;
+            if (hit) {
+              setPreviewNode(hit);
+              setDiscrepancyPanelOpen(false);
+            }
+          }}
+          onClose={() => setDiscrepancyPanelOpen(false)}
+        />
+      )}
       {editModalOpen && (
         <EntityEditModal
           entity={liveEntity}
@@ -261,7 +281,50 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
         />
       )}
 
-      <div className="entity-zones entity-zones--notebook">
+      <div
+        className="content-tabs entity-content-tabs"
+        role="tablist"
+        aria-label="Entity detail views"
+      >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={contentTab === 'workroom'}
+          aria-controls="entity-tab-workroom"
+          className={`content-tab ${contentTab === 'workroom' ? 'active' : ''}`}
+          onClick={() => setContentTab('workroom')}
+        >
+          Workroom
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={contentTab === 'facts'}
+          aria-controls="entity-tab-facts"
+          className={`content-tab ${contentTab === 'facts' ? 'active' : ''}`}
+          onClick={() => setContentTab('facts')}
+        >
+          Facts
+        </button>
+      </div>
+
+      {contentTab === 'facts' && (
+        <div role="tabpanel" id="entity-tab-facts" aria-labelledby="entity-tab-facts-btn">
+          <EntityFactsTab
+            entity={liveEntity}
+            funds={funds}
+            onOpenEdit={() => setEditModalOpen(true)}
+            onOpenDiscrepancyPanel={() => setDiscrepancyPanelOpen(true)}
+          />
+        </div>
+      )}
+
+      {contentTab === 'workroom' && (
+      <div
+        className="entity-zones entity-zones--notebook"
+        role="tabpanel"
+        id="entity-tab-workroom"
+      >
         {/* Left: Workspace tree */}
         <div className="zone zone--sidebar">
           <div className="zone-header">
@@ -354,10 +417,12 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
                 if (found) setPreviewNode(found);
               }}
               onAgentModeChange={handleAgentModeChange}
+              onEntityChanged={() => { void mutateEntity(); }}
             />
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

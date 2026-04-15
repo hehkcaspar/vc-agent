@@ -13,6 +13,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { api } from '../services/api';
 import { showToast } from '../lib/appToast';
+import { readFounders, readPositions } from '../lib/entityFormat';
 import type {
   DealStage,
   Entity,
@@ -22,33 +23,10 @@ import type {
 } from '../types';
 
 // ---------------------------------------------------------------------------
-// Helpers — read/write typed collections from metadata
+// Local helpers
+// (readPositions / readFounders are in lib/entityFormat so EntityHeader +
+// EntityFactsTab + this modal share one shape definition.)
 // ---------------------------------------------------------------------------
-
-function readPositions(meta: Record<string, unknown> | null | undefined): EntityPosition[] {
-  if (!meta || !Array.isArray(meta._positions)) return [];
-  return (meta._positions as Record<string, unknown>[]).map((p) => ({
-    fund_id: typeof p.fund_id === 'string' ? p.fund_id : '',
-    invested_amount: typeof p.invested_amount === 'number' ? p.invested_amount : null,
-    currency: typeof p.currency === 'string' ? p.currency : 'USD',
-    current_value: typeof p.current_value === 'number' ? p.current_value : null,
-    round_at_entry: typeof p.round_at_entry === 'string' ? p.round_at_entry : null,
-    instrument: typeof p.instrument === 'string' ? p.instrument : null,
-    entry_date: typeof p.entry_date === 'string' ? p.entry_date : null,
-    notes: typeof p.notes === 'string' ? p.notes : null,
-  }));
-}
-
-function readFounders(meta: Record<string, unknown> | null | undefined): FounderEntry[] {
-  if (!meta || !Array.isArray(meta.founders)) return [];
-  return (meta.founders as Record<string, unknown>[]).map((f) => ({
-    name: typeof f.name === 'string' ? f.name : '',
-    title: typeof f.title === 'string' ? f.title : null,
-    background: typeof f.background === 'string' ? f.background : null,
-    linkedin_url: typeof f.linkedin_url === 'string' ? f.linkedin_url : null,
-    status: f.status === 'departed' ? 'departed' : 'active',
-  }));
-}
 
 function slugify(label: string): string {
   return label
@@ -88,7 +66,14 @@ export function EntityEditModal({
 }: EntityEditModalProps) {
   const initialMeta = (entity.metadata ?? {}) as Record<string, unknown>;
   const [stage, setStage] = useState<DealStage>(entity.deal_stage);
-  const [positions, setPositions] = useState<EntityPosition[]>(() => readPositions(initialMeta));
+  // Reuse the shared reader but default a blank currency to 'USD' so the
+  // form shows a sensible initial value instead of empty.
+  const [positions, setPositions] = useState<EntityPosition[]>(() =>
+    readPositions(initialMeta).map((p) => ({
+      ...p,
+      currency: p.currency ?? 'USD',
+    })),
+  );
   const [founders, setFounders] = useState<FounderEntry[]>(() => readFounders(initialMeta));
   const [saving, setSaving] = useState(false);
   const [fundList, setFundList] = useState<Fund[]>(funds);

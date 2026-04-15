@@ -122,6 +122,33 @@ export interface EntityPosition {
 }
 
 // ---------------------------------------------------------------------------
+// Fact discrepancies — agent-surfaced, user-adjudicated
+// See docs/design/FACTS_VS_OPINIONS.md
+// ---------------------------------------------------------------------------
+
+export type FactDiscrepancyConfidence = 'low' | 'medium' | 'high';
+export type FactDiscrepancyStatus = 'pending' | 'accepted' | 'rejected';
+
+export interface FactDiscrepancy {
+  id: string;
+  detected_at: string;
+  detected_by: string;
+  field_path: string;
+  round_name?: string | null;
+  current_value: unknown;
+  proposed_value: unknown;
+  source_doc_node_id: string;
+  source_doc_quote?: string | null;
+  confidence: FactDiscrepancyConfidence;
+  rationale: string;
+  status: FactDiscrepancyStatus;
+  resolved_at?: string | null;
+  resolved_by?: string | null;
+  dismiss_reason?: string | null;
+  source_run?: Record<string, unknown>;
+}
+
+// ---------------------------------------------------------------------------
 // Workspace (replaces Resource + Artifact)
 // ---------------------------------------------------------------------------
 

@@ -129,6 +129,58 @@ Delete entity and all associated workspace nodes.
 
 ---
 
+### Fact discrepancies
+
+Agent-surfaced contradictions between canonical `Entity.metadata_json` and the documents an opinion-producing preset (`legal_review`, `extract_info`) just read. The agent calls `propose_fact_update` during the run → server appends a row to `metadata._fact_discrepancies[]` with `status="pending"`. The user adjudicates via these endpoints. Accept applies the `proposed_value` to the canonical path; reject dismisses with an optional reason. See `docs/design/FACTS_VS_OPINIONS.md`.
+
+#### GET /entities/{entity_id}/fact-discrepancies
+
+Query param: `status` ∈ `pending | accepted | rejected | all` (default `pending`).
+
+Response: `FactDiscrepancy[]`. Each row:
+
+```json
+{
+  "id": "uuid",
+  "detected_at": "2026-04-15T04:29:55Z",
+  "detected_by": "legal_review",
+  "source_run": { "agent_run_id": "…", "preset_id": "legal_review" },
+  "field_path": "_positions[fund_id=taihill_venture_seed_iii_lp].invested_amount",
+  "round_name": "Series Angel-1",
+  "current_value": 500000,
+  "proposed_value": 300000,
+  "source_doc_node_id": "workspace_node_id",
+  "source_doc_quote": "173,571 × US$1.7284 = US$300,000",
+  "confidence": "high",
+  "rationale": "SPA Schedule II lists Taihill with 173,571 Angel-1 shares …",
+  "status": "pending",
+  "resolved_at": null,
+  "resolved_by": null,
+  "dismiss_reason": null
+}
+```
+
+`field_path` grammar: dotted. Array selectors `[fund_id=X]` / `[round_name=X]` / `[name=X]`, or shorthand `[X]` when the array has a default selector key (`_positions → fund_id`, `prior_rounds → round_name`, `founders → name`).
+
+#### POST /entities/{entity_id}/fact-discrepancies/{discrepancy_id}/accept
+
+Applies the discrepancy's `proposed_value` to `field_path` in `metadata_json`, flips status to `accepted`, stamps `resolved_at` + `resolved_by: "user"`. Returns the updated `EntityResponse`.
+
+**Cascade on selector-key accept**: when the accepted leaf IS the selector key of its array row (e.g. `_positions[fund_id=X].fund_id` changing X → Y), pending sibling discrepancies that pointed at `_positions[fund_id=X]` get rewritten to `_positions[fund_id=Y]` so their next accept targets the same (renamed) row instead of creating a new stub. Handles both `[key=value]` and shorthand `[value]` forms.
+
+Idempotent on already-accepted rows. `400` when the discrepancy is already rejected (undo is out of scope). `404` on unknown id.
+
+#### POST /entities/{entity_id}/fact-discrepancies/{discrepancy_id}/reject
+
+Body:
+```json
+{ "reason": "optional short string" }
+```
+
+Flips status to `rejected`, stamps `dismiss_reason`, leaves canonical facts untouched. Returns updated `EntityResponse`. Idempotent on already-rejected rows. `400` when the discrepancy is already accepted.
+
+---
+
 ### Portfolio settings
 
 File-backed configuration under `data/config/`. Validated via Pydantic on read and write; atomic `tmp → os.replace` on write.

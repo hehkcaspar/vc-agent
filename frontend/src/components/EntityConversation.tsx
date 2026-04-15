@@ -63,6 +63,9 @@ interface EntityConversationProps {
   onArtifactsChanged: () => void;
   onViewDeliverable: (card: DeliverableCardPayload) => void;
   onAgentModeChange: (mode: AgentMode) => void;
+  /** Optional — invoked while an agent job is running so the parent can
+   * refetch entity data (surfaces discrepancy badge mid-run + final state). */
+  onEntityChanged?: () => void;
 }
 
 export function EntityConversation({
@@ -71,12 +74,15 @@ export function EntityConversation({
   onArtifactsChanged,
   onViewDeliverable,
   onAgentModeChange,
+  onEntityChanged,
 }: EntityConversationProps) {
   const { profileId, setProfileId } = useChatModelProfile();
   const sessionIdRef = useRef<string | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const onArtifactsChangedRef = useRef(onArtifactsChanged);
   onArtifactsChangedRef.current = onArtifactsChanged;
+  const onEntityChangedRef = useRef(onEntityChanged);
+  onEntityChangedRef.current = onEntityChanged;
 
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -195,6 +201,21 @@ export function EntityConversation({
     let cancelled = false;
     const startedAt = Date.now();
     const POLL_TIMEOUT_MS = 3 * 60 * 1000;
+    // Throttle entity refetches: poll runs every 450ms, but entity refetch
+    // every ~2s is enough to surface newly-appended discrepancies without
+    // hammering SWR. Always fire once on terminal status.
+    const ENTITY_REFETCH_THROTTLE_MS = 2000;
+    let lastEntityRefetchAt = 0;
+    const maybeRefetchEntity = () => {
+      const now = Date.now();
+      if (now - lastEntityRefetchAt < ENTITY_REFETCH_THROTTLE_MS) return;
+      lastEntityRefetchAt = now;
+      try {
+        onEntityChangedRef.current?.();
+      } catch {
+        /* non-fatal */
+      }
+    };
     const poll = async () => {
       try {
         const st = await api.chat.getMessageJob(
@@ -209,6 +230,11 @@ export function EntityConversation({
             st.step_detail?.trim() ||
               (st.status === 'pending' ? 'Queued…' : st.status)
           );
+        }
+        // Mid-run: throttled refetch so badge appears as soon as
+        // propose_fact_update lands in metadata.
+        if (st.status === 'pending' || st.status === 'running') {
+          maybeRefetchEntity();
         }
         if (
           (st.status === 'pending' || st.status === 'running') &&
@@ -253,12 +279,24 @@ export function EntityConversation({
           } catch {
             /* non-fatal: parent refresh */
           }
+          // Final refetch — post-processing may have written prior_rounds,
+          // _files_examined, etc. after the last in-run propose_fact_update.
+          try {
+            onEntityChangedRef.current?.();
+          } catch {
+            /* non-fatal */
+          }
           setAgentJob((curr) =>
             curr && curr.jobId === agentJob.jobId ? null : curr
           );
           setAgentStatus('');
         } else if (st.status === 'failed') {
           setWarnings(st.warnings);
+          try {
+            onEntityChangedRef.current?.();
+          } catch {
+            /* non-fatal */
+          }
           setAgentJob((curr) =>
             curr && curr.jobId === agentJob.jobId ? null : curr
           );

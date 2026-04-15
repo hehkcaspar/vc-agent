@@ -10,15 +10,21 @@
  */
 
 import { useMemo } from 'react';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Pencil } from 'lucide-react';
 import { TagMenu } from './academic/TagMenu';
 import { formatRelativeTime } from '../lib/relativeTime';
 import { getMoicColor, formatMoic } from '../lib/moicColor';
+import {
+  asString,
+  formatMoney,
+  fundLabel,
+  readFounders,
+  readPositions,
+} from '../lib/entityFormat';
 import type {
   DealStage,
   Entity,
-  EntityPosition,
-  FounderEntry,
+  FactDiscrepancy,
   Fund,
 } from '../types';
 
@@ -52,74 +58,6 @@ const DEAL_STAGE_OPTIONS: { label: string; value: DealStage }[] = [
 ];
 
 // ---------------------------------------------------------------------------
-// Helpers — read metadata safely
-// ---------------------------------------------------------------------------
-
-function asString(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() ? v.trim() : null;
-}
-
-function asArray<T>(v: unknown): T[] {
-  return Array.isArray(v) ? (v as T[]) : [];
-}
-
-function readFounders(meta: Record<string, unknown> | null | undefined): FounderEntry[] {
-  if (!meta) return [];
-  const arr = asArray<Record<string, unknown>>(meta.founders);
-  return arr
-    .map((f) => ({
-      name: asString(f.name) ?? '',
-      title: asString(f.title),
-      background: asString(f.background),
-      linkedin_url: asString(f.linkedin_url),
-      status: (f.status === 'departed' ? 'departed' : 'active') as 'active' | 'departed',
-    }))
-    .filter((f) => f.name);
-}
-
-function readPositions(meta: Record<string, unknown> | null | undefined): EntityPosition[] {
-  if (!meta) return [];
-  const raw = asArray<Record<string, unknown>>(meta._positions);
-  return raw.map((p) => ({
-    fund_id: asString(p.fund_id) ?? '',
-    invested_amount: typeof p.invested_amount === 'number' ? p.invested_amount : null,
-    currency: asString(p.currency),
-    current_value: typeof p.current_value === 'number' ? p.current_value : null,
-    round_at_entry: asString(p.round_at_entry),
-    instrument: asString(p.instrument),
-    entry_date: asString(p.entry_date),
-    notes: asString(p.notes),
-  }));
-}
-
-function formatMoney(amount: number | null, currency?: string | null): string {
-  if (amount == null || !Number.isFinite(amount)) return '—';
-  const ccy = (currency || 'USD').toUpperCase();
-  const sign = ccy === 'USD' ? '$' : ccy === 'EUR' ? '€' : ccy === 'GBP' ? '£' : '';
-  // Compact formatting for K/M/B
-  if (Math.abs(amount) >= 1e9) return `${sign}${(amount / 1e9).toFixed(1)}B`;
-  if (Math.abs(amount) >= 1e6) return `${sign}${(amount / 1e6).toFixed(1)}M`;
-  if (Math.abs(amount) >= 1e3) return `${sign}${(amount / 1e3).toFixed(0)}K`;
-  return `${sign}${amount}${sign ? '' : ` ${ccy}`}`;
-}
-
-function fundLabel(fundId: string, funds: Fund[]): string {
-  const hit = funds.find((f) => f.id === fundId);
-  if (!hit) return fundId;
-  // Display a terse label: "Taihill Venture Series III LP" → "Taihill III"
-  // only when the full name is long; otherwise use the raw name.
-  return hit.name.length > 28 ? shortenFundName(hit.name) : hit.name;
-}
-
-function shortenFundName(name: string): string {
-  // Try to collapse "Taihill Venture Series III LP" → "Taihill III"
-  const romanOrNum = /\b(I{1,3}|IV|V|VI{0,3}|VIII|IX|X|\d+)\b/;
-  const first = name.split(/\s+/)[0];
-  const roman = name.match(romanOrNum)?.[0];
-  return roman ? `${first} ${roman}` : first;
-}
-
-// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -129,6 +67,15 @@ export interface EntityHeaderProps {
   onBack: () => void;
   onEdit: () => void;
   onDealStageChange: (stage: DealStage) => void;
+  onToggleDiscrepancies?: () => void;
+  discrepancyPanelOpen?: boolean;
+}
+
+function countPendingDiscrepancies(meta: Record<string, unknown> | null | undefined): number {
+  if (!meta) return 0;
+  const arr = meta._fact_discrepancies;
+  if (!Array.isArray(arr)) return 0;
+  return (arr as FactDiscrepancy[]).filter((d) => d && d.status === 'pending').length;
 }
 
 export function EntityHeader({
@@ -137,6 +84,8 @@ export function EntityHeader({
   onBack,
   onEdit,
   onDealStageChange,
+  onToggleDiscrepancies,
+  discrepancyPanelOpen,
 }: EntityHeaderProps) {
   const meta = entity.metadata ?? null;
   const oneLiner = asString(meta?.one_liner) ?? asString(meta?.description);
@@ -202,6 +151,10 @@ export function EntityHeader({
   }, [investmentStage, raiseAmount]);
 
   const lastUpdate = formatRelativeTime(entity.last_content_at);
+  const pendingDiscrepancies = useMemo(
+    () => countPendingDiscrepancies(meta),
+    [meta],
+  );
 
   return (
     <div className="entity-detail-header entity-detail-header--rich">
@@ -230,6 +183,22 @@ export function EntityHeader({
             </a>
           )}
           <div className="entity-header-actions">
+            {pendingDiscrepancies > 0 && onToggleDiscrepancies && (
+              <button
+                type="button"
+                className={
+                  'entity-header-discrepancy-btn' +
+                  (discrepancyPanelOpen ? ' entity-header-discrepancy-btn--open' : '')
+                }
+                onClick={onToggleDiscrepancies}
+                title={`${pendingDiscrepancies} pending fact ${pendingDiscrepancies === 1 ? 'discrepancy' : 'discrepancies'}`}
+                aria-label={`${pendingDiscrepancies} pending fact ${pendingDiscrepancies === 1 ? 'discrepancy' : 'discrepancies'}`}
+                aria-expanded={discrepancyPanelOpen ?? false}
+              >
+                <AlertTriangle size={12} />
+                <span aria-hidden="true">{pendingDiscrepancies}</span>
+              </button>
+            )}
             <button
               type="button"
               className="entity-header-edit-btn"
