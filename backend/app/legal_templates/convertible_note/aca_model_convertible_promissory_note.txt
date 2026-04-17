@@ -1,0 +1,1000 @@
+version
+ 1.
+2
+ Dated 
+NOVEMBER
+ 2024 - angel capital association 
+model 
+convertible note
+THIS CONVERTIBLE PROMISSORY NOTE HAS NOT BEEN REGISTERED UNDER THE SECURITIES ACT OF 1933, AS AMENDED
+ (THE “ACT”), OR UNDER THE SECURITIES LAWS OF ANY STATES IN THE UNITED STATES. 
+THIS CONVERTIBLE PROMISSORY NOTE IS SUBJECT TO RESTRICTIONS ON TRANSFERABILITY AND RESALE AND MAY NOT BE TRANSFERRED OR RESOLD EXCEPT AS PERMITTED UNDER THE ACT AND THE APPLICABLE STATE SECURITIES LAWS, PURSUANT TO REGISTRATION OR EXEMPTION THEREFROM. THE ISSUER OF THESE SECURITIES MAY REQUIRE AN OPINION OF COUNSEL IN FORM AND SUBSTANCE SATISFACTORY TO THE ISSUER TO THE EFFECT THAT ANY PROPOSED TRANSFER OR RESALE IS IN COMPLIANCE WITH THE ACT AND ANY APPLICABLE STATE SECURITIES LAWS.
+CONVERTIBLE PROMISSORY NOTE
+Note Series:
+Date of Note:
+Principal Amount of Note:
+For value received [
+Company Inc.
+],
+ a Delaware 
+corporation
+ (the “
+Company
+”)
+, promises to pay to the undersigned holder (“
+Holder
+”) the principal amount set forth above with all accrued and unpaid interest thereon, each due
+,
+ payable
+,
+ or convertible
+ in the manner set forth below
+ 
+on 
+the Maturity Date
+ or as otherwise specified herein
+.
+  Capitalized terms shall have the definition assigned to them in Section 2 hereof or as otherwise assigned in this Note.
+ 
+Basic Terms
+.
+Series of Notes
+.
+  
+This convertible promissory note (th
+is
+ “
+Note
+”) is issued as part of a series of notes designated by the Note Series above (
+the “
+Note Series
+” and 
+all such notes 
+collectively, the “
+Notes
+”) and issued in a series of multiple closings to certain persons and entities (collectively, the “
+Holders
+”)
+ at any time until the Offering Termination Date, which may be extended 
+*
+[at the discretion of the Company
+ 
+upon notice to the Holders][upon the approval of the Requisite Holders
+]
+.
+ 
+The Company agrees not to issue Notes as part of this Note Series in an aggregate principal amount above the Maximum Subscription Amount, which amount may be increased 
+*
+[at the discretion of the Company upon notice to 
+the 
+Holders][
+upon the approval of the Requisite Holders].  
+Upon 
+written 
+request
+ by the Holder
+, the Company will provide the 
+Holder
+ the regi
+ster of the H
+olders 
+in 
+the 
+Note Series 
+with the names of all 
+H
+olders
+ and
+ the amount of their investment. 
+Payments
+.  All payments of interest and principal shall be in lawful money of the United States of America and shall be made pro rata among all Holders
+ based on the total amount due at 
+the time of payment under each Note in the Note Series
+. All payments shall be applied first to accrued interest and thereafter to principal.
+Interest Rate
+.  The Company promises to pay interest on the outstanding principal amount hereof from the date 
+of this Note
+ until payment in full
+ or conversion of the Note in accordance with the terms hereof
+, which interest shall be 
+calculated
+ at the Interest 
+R
+ate per annum or the maximum rate permissible by law, whichever is less.  Interest shall be due and payable on the 
+Maturity
+ Date
+ or shall be converted in accordance with the terms hereof. Interest
+ shall 
+accrue and 
+be calculated on the basis of a 365-day
+ year 
+for the actual number of days elapsed and shall 
+*
+[
+be 
+cumulative
+][
+compound
+]
+ annually
+.
+No Prepayment
+. The Company may not prepay this Note prior to the Maturity Date without the consent of the 
+Requisite
+ Holders.
+Definitions
+. The following capitalized terms have the following meanings:
+“
+Affiliate
+” means any other individual, corporation, partnership, trust, limited liability company, association or other entity who, directly or indirectly, controls, is controlled by, or is under common control with 
+another entity
+, including without limitation any general partner, managing member of 
+such entity
+ or any venture capital fund now or hereafter existing that is controlled by one or more general partners or managing members of, or shares the same management company with, 
+such entity
+; 
+provided
+ that such individual or entity is an “accredited investor” as such term is defined in Rule 501 under the Securities Act of 1933, as amended (the “
+Securities Act
+”).
+“
+Discount Rate
+” means 100% less a 
+[
+__
+_
+]
+%
+ discount on the price paid 
+for
+ the shares 
+of Equity Securities issued to
+ 
+I
+nvestors in 
+a Qualified Financing or 
+a 
+Non-Qualified F
+inancing.
+“
+Equity Securities
+” means the Company’s preferred stock issued in the Company’s next fixed-price financing, except that such defined term shall not include any security granted, 
+issued
+ or sold by the Company to any employee, director or consultant in such capacity
+ or issued upon conversion or exercise of any option or warrant outstanding as of the date of this Note
+. The Equity Securities may be sold in one or more closings.
+“
+Fully-Diluted Capitalization
+” means the aggregate number of outstanding shares of the Company’s common stock as of immediately prior to the initial closing of the Qualified Financing or Non-Qualified Financing
+ or any other date specifically specified
+, as the case may be, calculated on a fully-diluted basis (assuming conversion of all convertible securities and exercise of all outstanding options, warrants, phantom stock, stock appreciation right, and other rights to acquire capital stock of the Company, including any shares reserved and available for future grant under any equity incentive or similar plan of the Company, and/or any equity incentive or similar plan to be created or increased in connection with the Qualified Financing or Non-Qualified Financing, as the case may be, 
+*the Notes and any other convertible 
+indebtedness, S
+imple 
+A
+greements for Future Equity (“
+SAFEs
+”)
+ or similar securities 
+on a p
+ost
+-money basis).
+“
+Interest Rate
+”
+ 
+means
+ [
+__
+_
+]%
+ per annum.
+“
+Maturity Date
+” means a date on or after the Maturity Trigger Date when the Requisite Holders demand in writing repayment of the outstanding principal and accrued and unpaid interest on the Notes
+ in accordance with Section 3(c) hereof
+.
+“
+Maturity 
+Trigger 
+Date
+” means the date that is 
+__________________ from 
+the issuance of the first Note of the Note Series set forth above, which date is [____________].
+“
+Maximum Subscription Amount
+” means $
+[
+_____________
+]
+.
+“
+New Securities
+” means any common stock or preferred stock of the Company, whether now authorized or not, and rights, options or warrants to purchase common stock or preferred stock, and securities of any type whatsoever that are, or may become, convertible or exchangeable into common stock or preferred stock; provided, however, that “New Securities” does not include: (a) shares of common stock issued or issuable upon conversion of any outstanding convertible securities of the Company, including all of the Company’s issued and outstanding convertible securities as of the date here
+of
+ (including this Note and the other Notes); (b) shares of common stock or preferred stock issuable upon exercise of any options, warrants, or rights to purchase any securities of the Company outstanding as of the date hereof and any securities issuable upon the conversion thereof; (c) shares of common stock or preferred stock issued in connection with any stock split or stock dividend or recapitalization; (d) shares of common stock (or options, warrants or rights therefor) granted or issued to employees, officers, directors, contractors, consultants or advisers to, the Company or any subsidiary of the Company pursuant to incentive agreements, stock purchase or stock option plans, stock bonuses or awards, warrants, contracts or other arrangements that are approved by the Company’s Board of Directors (the “
+Board
+”); (e) convertible notes sold in the offering of 
+this Note Series
+; (f) any other shares of common stock or preferred stock (or options or warrants therefor) issued or issuable primarily for other than equity financing purposes and approved by the Board; and (g) shares of common stock issued or issuable by the Company to the public pursuant to a registration statement filed under the Securities Act.
+“
+Offering Termination Date
+” means 
+[
+DATE
+]
+.
+“
+Qualified Financing
+” means 
+an arms-length equity financing resulting in gross proceeds to the Company, 
+in one or more closings,
+ of at least $
+[
+__________________
+]
+ 
+(excluding the conversion of this Note, any other current or future convertible debt, or convertible instruments issued for capital raising purposes (
+e.g.
+, 
+SAFEs
+))
+.
+ 
+“
+Requisite Holders
+” means the Holders holding Notes that represent 
+[a 
+majority][
+at least 
+[
+__
+]
+%
+]
+ of the outstanding unpaid principal amount of all Notes in the Note Series
+.
+“
+Sale of the Company
+” means (i) any consolidation or merger of the Company with or into any other corporation or other entity or person, or any other corporate reorganization, other than any such consolidation, merger or reorganization in which the stockholders of the Company immediately prior to such consolidation, merger or reorganization, continue to hold at least a majority of the voting power of the surviving entity in substantially the same proportions (or, if the surviving entity is a wholly owned subsidiary, its parent) immediately after such consolidation, merger or reorganization; (ii) any transaction or series of related transactions to which the Company is a party in which in excess of 50% of the Company’s voting power is transferred; or (iii) the sale or transfer of all or substantially all of the Company’s assets, or the exclusive license of all or substantially all of the Company’s material intellectual property; 
+provided
+,
+ however
+, that a Sale of the Company shall not include any transaction or series of transactions principally for bona fide equity financing purposes in which cash is received by the Company or any successor, indebtedness of the Company is canceled or converted, or a combination thereof.
+“
+Sale Multiplier
+”
+ means [____
+_]x.
+ 
+“
+Valuation Cap
+”
+ 
+is
+ $[________].
+ 
+Conversion; Repayment Upon Sale of the Company.
+Conversion upon a Qualified Financing
+.  In the event that the Company issues and sells shares of its Equity Securities to investors
+ (the “
+Investors
+”)
+ for 
+the purpose of raising capital 
+on or before the date of the repayment in full of this Note in 
+a Qualified Financing
+, then the outstanding principal balance of this Note and any unpaid accrued interest shall automatically convert in whole without any further action by the Holder into such Equity Securities sold in the Qualified Financing at a conversion price equal to the lesser of (i) the 
+Discount Rate multiplied by the 
+lowest 
+price per share 
+of the 
+Equity Securities paid by the Investors in the Qualified Financing
+ 
+(excluding 
+the 
+price applicable to the conversion of this Note, any other current or future convertible debt, or convertible instruments issued for capital raising purposes (
+e.g.
+, 
+SAFEs
+))
+ 
+ or (ii) the price equal to the quotient of the 
+V
+aluation 
+C
+ap divided by the Fully-Diluted Capitalization.
+ The issuance of Equity Securities pursuant to the conversion of this Note under this paragraph shall be upon and subject to the same terms and conditions applicable to the Equity Securities sold in such Qualified Financing, except as otherwise set forth herein (
+e.g.
+, the conversion price); 
+provided, however
+, that such documents have customary exceptions to any drag-along applicable to the Holder, including, without limitation, limited representations and warranties and limited liability and indemnification obligations on the part of the Holder. 
+T
+he initial closing of the Qualified Financing 
+shall be deemed to have occurred on
+ the first closing in which 
+aggregate funds accepted by 
+the Company meet or exceed the 
+amount of gross proceeds required to qualify as a Qualified Financing
+. 
+I
+f the conversion price of the Notes as determined pursuant to this paragraph (the “
+Conversion Price
+”) is less than the price per share at which Equity Securities are issued in the Qualified Financing, the Company may, solely at its option, elect to convert this Note into shares of a newly created series of preferred stock having the identical rights, privileges, preferences
+,
+ and restrictions as the Equity Securities issued in the Qualified Financing, and otherwise on the same terms and conditions, other than with respect to (if applicable): (i) the per share liquidation preference and the conversion price for purposes of price-based anti-dilution protection, which will equal the Conversion Price; and (ii) the per share dividend, which will be the same percentage of the Conversion Price as applied to determine the per share dividends of the Equity Securities issued to Investors 
+in the Qualified Financing relative to the purchase price paid by the Investors.
+Conversion Upon Non-Qualified Financing
+.  
+In the event that the Company issues and sells shares of its 
+e
+quity 
+s
+ecurities to 
+I
+nvestors 
+for the purpose of raising capital 
+on or before the date of the repayment in full of this Note in an arms-length equity financing 
+which does not qualify as a Qualified Financing 
+(a “
+Non-Qualified Financing
+”), then, at the written election of the 
+Requisite 
+Holder
+s
+ at any time on or after the initial closing of the Non-Qualified Financing, the outstanding principal balance of 
+all
+ Note
+s
+ and any unpaid accrued interest shall be converted into such equity securities sold in the Non-Qualified Financing at a conversion price equal to the lesser of (i) the Discount Rate multiplied by the 
+lowest 
+price per share of the 
+e
+quity 
+s
+ecurities paid by the 
+I
+nvestors in the Non-Qualified Financing or (ii) the price equal to the quotient of the Valuation Cap divided by the Fully-Diluted Capitalization. The issuance of 
+e
+quity 
+s
+ecurities pursuant to the conversion of this Note under this paragraph shall be upon and subject to the same terms and conditions applicable to the 
+e
+quity 
+s
+ecurities sold in such Non-Qualified Financing, except as otherwise set forth herein (
+e.g.
+, the conversion price); 
+provided, however
+, that such documents have customary exceptions to any drag-along (if applicable) to the Holder
+s
+, including, without limitation, limited representations and warranties and limited liability and indemnification obligations on the part of the Holder
+s
+. Notwithstanding this paragraph, if the conversion price of the Notes as determined pursuant to this paragraph is less than the price per share at which equity securities, if such equity securities are preferred stock, are issued in the Non-Qualified Financing, the Company may, solely at its option, elect to convert th
+e
+ Note
+s
+ into shares of a newly created series of preferred stock having the identical rights, privileges, preferences and restrictions as the equity securities issued in the Non-Qualified Financing, and otherwise on the same terms and conditions, other than with respect to (if applicable): (i) the per share liquidation preference and the conversion price for purposes of price-based anti-dilution protection, which will equal such conversion price of the Notes; and (ii) the per share dividend, which will be the same percentage of such conversion price of the Notes as applied to determine the per share dividends of the equity securities issued to investors in the Non-Qualified Financing relative to the purchase price paid by the investors.
+Conversion
+ or Payment after Maturity Trigger Date
+.  In the event that a Qualified Financing or Non-
+Qualified Financing
+ is not consummated prior to the Maturity 
+Trigger 
+Date
+,
+ 
+the Holder’s conversion right shall continue and
+, at the written election of the 
+Requisite
+ Holders 
+at any time
+, 
+(i) all Notes shall be paid in full in accordance with Section 1(b) on the Maturity Date identified by the Requisite Holders, which shall be at least ten (10) days after the date of the
+ notice containing the
+ demand for repayment stated in such written election, or (ii) 
+the outstanding principal balance and any unpaid accrued interest under this Note shall be converted into shares of the 
+most senior class of stock previously issued by the Company 
+at a conversion price equal to the quotient of the Valuation Cap divided by the 
+Fully-Diluted Capitalization
+, which conversion shall occur on or after the date of the notice of such election to convert
+.
+Sale of the Company.
+  Notwithstanding any provision of this Note to the contrary, if the Company consummates a Sale of the Company prior to the conversion or repayment in full of this Note, then the Company will give the Holder at least 
+ten
+ days
+’
+ prior written notice of the anticipated closing date of such Sale of the Company
+, 
+which notice shall include a summary of the transaction and the calculation of the amount due to 
+Holder
+s 
+in accordance with this section 
+upon the Sale of the Company. 
+A
+t the closing of such Sale of the Company, in full satisfaction of the Company’s obligations under this Note, the Company will pay 
+or issue to 
+the Holder
+ consideration
+ equal to the greater of (
+i
+) 
+cash equal to 
+the Sale Multiplier multiplied by 
+the aggregate amount of principal and unpaid accrued interest then outstanding under this Note or (
+ii
+) the 
+consideration (whether in cash or securities)
+ the Holder would have been entitled to receive in connection with such Sale of the Company if the aggregate amount of principal and unpaid accrued interest then outstanding under this Note had been converted into shares of the Company’s 
+most senior class of equity securities immediately prior to such Sale of the Company
+ at a conversion price equal 
+to the quotient of the Valuation Cap divided by 
+the Fully-Diluted Capitalization. 
+Notwithstanding the prior sentence, if one of the options for consideration is securities of the acquiring person or entity, the Holder shall have the choice of whether to receive 
+the consideration set forth in clause (i) or (ii) of the previous sentence.  The Company shall provide to the Holder reasonably detailed information about the valuation of any such securities comprising such consideration including without limitation any financial information necessary for tax filings of Holder. 
+Upon payment or conversion, each Note shall be deemed satisfied in full and the Note
+s
+ shall be canceled.
+Procedure for Conversion
+.  In connection with any conversion of this Note into capital stock, 
+if Holder has an originally executed Note, 
+the Holder shall surrender th
+e
+ Note to the Company
+.  In addition, the Holder shall
+ execute and
+ deliver to the Company a
+ll
+ documentation reasonably required by the Company (including, in the case
+ 
+of a Qualified Financing or Non-
+Qualified Financing
+, all financing documents executed by other investors in connection with such financing).  The Company shall not be required to issue or deliver the capital stock into which this Note may convert until the Holder has surrendered this Note
+, if applicable,
+ to the Company and delivered to the Company any such documentation. 
+ 
+Upon the conversion of this Note into capital stock pursuant to the terms hereof, in lieu of any fractional shares to which the Holder would otherwise be entitled, the Company shall pay the Holder cash equal to such fraction multiplied by the price at which this Note converts; 
+provided, however
+, if such amount is less than $100.00, no such payment shall be required, and no fractional shares shall be issued. To secure the Holder’s obligations to execute and deliver the documentation required by this Note, the Holder hereby appoints the Chief Executive Officer of the Company as the Holder’s true and lawful attorney, with the power to act alone and with full power of substitution, 
+(i) 
+to execute and deliver all such documentation required by this Note if, and only if, the Holder fails execute or deliver such documentation as required by this Note
+ and (ii)  to cancel this Note if it has been delivered through electronic means
+.  The power granted by the Holder pursuant to this paragraph is coupled with an interest and is given to secure the performance of the Holder’s duties under this Note, is irrevocable and will survive the death, incompetency, disability, 
+merger
+ or reorganization of the Holder.
+Interest Accrual
+.  If a Sale of the Company
+, 
+Qualified Financing
+ or Non-Qualified Financing (
+if 
+conversion is
+ elected by the Requisite Holders
+ in accordance with the terms of the Notes
+)
+ 
+is consummated, all interest on this Note shall be deemed to have stopped accruing as of the 
+closing
+ of the definitive agreement for the Sale of the Company or 
+initial closing of the 
+Qualified Financing 
+or Non-Qualified Financing 
+or an earlier date, determined by the Company, which may be as many as ten days prior to the signing of such definitive agreement. 
+Representations and Warranties
+.
+Representations and Warranties of the Company
+.  The Company hereby represents and warrants to the Holder, as of the date 
+of 
+the first issuance of a 
+N
+ote in this Note Series, as follows:
+Organization, Good Standing and Qualification
+.  The Company is a corporation duly organized, validly existing and in good standing under the laws of the state of its incorporation or organization.  The Company has the requisite corporate power to own and operate its properties and assets and to carry on its business as now conducted and as proposed to be conducted.  The Company is duly qualified and is authorized to do business and is in good standing as a foreign corporation in all jurisdictions in which the nature of its activities and of its properties (both owned and leased) makes 
+such qualification necessary, except for those jurisdictions in which failure to do so would not have a material adverse effect on the Company or its business.
+Corporate
+ 
+Power
+.  The Company has all requisite corporate power to issue this Note and to carry out and perform its obligations under this Note.  
+The s
+tock
+holders have authorized enough shares of stock to provide for the conversion of the Notes and all convertible securities of the Company. 
+The 
+Board
+ has approved the issuance of this Note 
+and has authorized enough shares of stock to provide for the conversion of 
+the
+ Notes and all convertible securities of the Company, all 
+based upon a reasonable belief that the issuance of this Note is appropriate for the Company after reasonable inquiry concerning the Company’s financing objectives and financial situation.
+Authorization
+.  All corporate action on the part of the Company, the 
+Board
+ and the Company’s stockholders necessary for the issuance and delivery of this Note has been taken.  
+Enforceability
+.  This Note constitutes a valid and binding obligation of the Company enforceable in accordance with its terms, subject to laws of general application relating to bankruptcy, insolvency, the relief of debtors and, with respect to rights to indemnity, subject to federal and state securities laws.  Any securities issued upon conversion of this Note (the “
+Conversion Securities
+”), when issued in compliance with the provisions of this Note, will be validly issued, fully paid, nonassessable, free of any liens or encumbrances and issued in compliance with all applicable federal and securities laws.
+Financial Statements
+. 
+ 
+The financial statements of the Company
+ as of the end of the last fiscal year of the Company and as of the end of the last fiscal quarter
+ have been provided to the Holder and are accurate and reflect all of the outstanding debts and other obligations of the Company, including 
+without limitation 
+amounts owed on convertible promissory notes. 
+Litigation
+. 
+ 
+Except as otherwise disclosed by the Company or its legal counsel, no actions (including, without limitation, derivative actions), suits, proceedings or investigations are pending or, to the knowledge of the Company, threatened in writing against the Company at law or in equity in any court or before any other governmental authority.
+Capitalization
+. 
+ 
+The Company has provided a capitalization table showing the 
+Fully-Diluted
+ Capitalization as of the date that the first Note was issued in the Note Series
+ and all convertible securities including without limitation all convertible notes, warrants, 
+SAFEs
+ and options as well as the reserved option pool
+.  Such capitalization table is true and correct in all respects.
+Compliance with Laws
+.  To its knowledge, the Company is not in violation of any applicable statute, rule, regulation, 
+order
+ or restriction of any domestic or foreign government or any instrumentality or agency thereof in respect of the conduct of its business or the ownership of its properties, which violation of which would materially and adversely affect the business, assets, liabilities, financial condition, operations or prospects of the Company.  
+Compliance with Other Instruments
+.  The Company is not in violation or default of any term of its certificate of incorporation or bylaws, or of any provision of any mortgage, indenture or contract to which it is a party and by which it is bound or of any judgment, decree, order or writ, other than such violation(s) that would not individually or in the aggregate have a
+ material
+ adverse effect on the Company. 
+Intellectual Property
+. 
+ 
+The Company owns or possesses sufficient legal rights to all patents, trademarks, service marks, trade names, copyrights, trade secrets, licenses (software or otherwise), information, 
+processes
+ and similar proprietary rights (“
+Intellectual Property
+”) necessary to the business of the Company as currently conducted without any known conflict with or infringement of the rights of others. Except as otherwise disclosed by the Company to the Holder as of the date of this Note, the Company has not received any written communication alleging that the Company has violated any of the Intellectual Property rights of any other individual or entity, nor is the Company aware of any basis therefor. 
+ 
+All founder
+s and all 
+employees
+ and independent contractors whose services are related to the Intellectual Property of the Company
+ have entered into confidentiality and proprietary information and inventions assignment agreement
+s, in a form previously disclosed to the Holder, 
+and the Company will covenant to have every future employee
+ and independent contractor 
+enter 
+into
+ a
+ substantially similar 
+agreemen
+t
+ upon joining the Company.
+ *
+[
+The Company has not embedded any open source, copyleft or community source code in any of its products generally available or in development, including, but not limited to, any libraries or code licensed under any “general public license”, “lesser general public license” or similar license arrangement, in any manner that would require the disclosure, license or distribution of any Company software in source code form.
+]
+No “Bad Actor” Disqualification
+.  The Company has exercised reasonable care to determine whether any Company Covered Person (as defined below) is subject to any of the “bad actor” disqualifications described in Rule 506(d)(1)(i) through (viii), as modified by Rules 506(d)(2) and (d)(3), under the Securities Act (“
+Disqualification Events
+”).  To the Company’s knowledge, no Company Covered Person is subject to a Disqualification Event.  The Company has complied, to the extent required, with any disclosure obligations under Rule 506(e) under the Securities Act.  For purposes of this Note, “
+Company Covered Persons
+” are those persons specified in Rule 506(d)(1) under the Securities Act; 
+provided, however
+, that Company Covered Persons do not include (
+A
+) any Holder or (
+B
+) any person or entity that is deemed to be an affiliated issuer of the Company solely as a result of the relationship between the Company and any Holder.
+Interested Transaction
+.
+ 
+ 
+The Company is not indebted, directly or indirectly, to any of its directors, 
+officers
+ or employees or to their respective spouses or children or to any Affiliate of any of the foregoing, other than in connection with expenses or advances of expenses incurred in the ordinary course of business or employee relocation expenses and for other customary employee benefits made generally available to all employees. None of the Company’s directors, officers or employees [or consultants], or any members of their immediate families, or any Affiliate of the foregoing are, directly or indirectly, indebted to the Company or, to the Company’s knowledge, have any (i) material commercial, industrial, banking, consulting, legal, accounting, charitable or familial relationship with the Company or any of the Company’s customers, suppliers, service providers, joint venture partners, licensees and competitors, (ii) direct or indirect ownership interest in any firm or corporation with which the Company is affiliated or with which the Company has a business relationship, or any firm or corporation which competes with the Company except that directors, officers, employees or stockholders of the Company may own stock in (but not exceeding 2% of the outstanding capital stock of) publicly traded companies that may compete with the Company; or (iii) financial interest in any material contract with the Company.
+Offering
+.  Assuming the accuracy of the representations and warranties of the Holder contained in subsection (b) below, the offer, issue, and sale of this Note and any Conversion Securities are and will be exempt from the registration and prospectus delivery requirements of the 
+Securities Act and have been registered or qualified (or are exempt from registration and qualification) under the registration, permit or qualification requirements of all applicable state securities laws.
+Use of Proceeds
+.
+  
+The Company shall use the proceeds of this Note solely for the operations of its business, and
+ not for
+ any personal, family or household purpose
+ and not for
+ 
+repayment of founder loans or deferred compensation
+.
+ 
+Representations and Warranties of the Holder
+.
+  
+The Holder hereby represents and warrants to the Company as of the date hereof as follows:
+Purchase for Own Account
+.  The Holder is acquiring this Note and the Conversion Securities (collectively, the “
+Securities
+”) solely for the Holder’s own account and beneficial interest for investment and not for sale or with a view to distribution of the Securities or any part thereof, has no present intention of selling (in connection with a distribution or otherwise), granting any participation in, or otherwise distributing the same, and does not presently have reason to anticipate a change in such intention.
+Information and Sophistication
+.  Without lessening or obviating the representations and warranties of the Company set forth in subsection (a) above, the Holder hereby: (A) acknowledges that the Holder has received all the information the Holder has requested from the Company and the Holder considers necessary or appropriate for deciding whether to acquire the Securities, (B) represents that the Holder has had an opportunity to ask questions and receive answers from the Company regarding the terms and conditions of the offering of the Securities and to obtain any additional information necessary to verify the accuracy of the information given the Holder and (C) further represents that the Holder has such knowledge and experience in financial and business matters that the Holder is capable of evaluating the merits and risk of this investment.
+Ability to Bear Economic Risk
+.  The Holder acknowledges that investment in the Securities involves a high degree of risk, and represents that the Holder is able, without materially impairing the Holder’s financial condition, to hold the Securities for an indefinite period of time and to suffer a complete loss of the Holder’s investment.
+Further Limitations on Disposition
+.  Without in any way limiting the representations set forth above, the Holder further agrees not to make any disposition of all or any portion of the Securities unless and until:
+There is then in effect a registration statement under the Securities Act covering such proposed disposition and such disposition is made in accordance with such registration statement; or
+The Holder shall have notified the Company of the proposed disposition and furnished the Company with a detailed statement of the circumstances surrounding the proposed disposition, and if reasonably requested by the Company, the Holder shall have furnished the Company with an opinion of counsel, reasonably satisfactory to the Company, that such disposition will not require registration under the 
+Securities 
+Act or any applicable state securities laws, provided that no such opinion shall be required for dispositions in compliance with Rule 144 under the 
+Securities 
+Act except in unusual circumstances.
+Notwithstanding the provisions of paragraphs (1) and (2) above, no such registration statement or opinion of counsel shall be necessary for a transfer by the Holder to a partner (or retired partner) or member (or retired member) of the Holder in accordance with partnership or limited liability company interests, or transfers by gift, will or intestate succession to any spouse or lineal descendants or ancestors, if all transferees agree in writing to be subject to the terms hereof to the same extent as if they were the Holders hereunder.
+Accredited Investor Status
+.  The Holder is an accredited investor as defined in Rule 501(a) of Regulation D promulgated under the 
+Securities 
+Act.  The Holder is an investor in securities of companies in the development stage and acknowledges that Holder is able to fend for itself, can bear the economic risk of its investment, and has such knowledge and experience in financial or business matters that it is capable of evaluating the merits and risks of the investment in this 
+N
+ote.  If other than an individual, Holder also represents it has not been organized for the purpose of acquiring this 
+N
+ote.
+No “Bad Actor” Disqualification
+.  The Holder represents and warrants that neither (A) the Holder nor (B) any entity that controls the Holder or is under the control of, or under common control with, the Holder, is subject to any Disqualification Event, except for Disqualification Events covered by Rule 506(d)(2)(ii) or (iii) or (d)(3) under the 
+Securities 
+Act and disclosed in writing in reasonable detail to the Company.  The Holder represents that the Holder has exercised reasonable care to determine the accuracy of the representation made by the Holder in this paragraph and agrees to notify the Company if the Holder becomes aware of any fact that makes the representation given by the Holder hereunder inaccurate.
+Foreign Investors
+.  If the Holder is not a United States person (as defined by Section 7701(a)(30) of the Internal Revenue Code of 1986, as amended), the Holder hereby represents that he, she or it has satisfied itself as to the full observance of the laws of the Holder’s jurisdiction in connection with any invitation to subscribe for the Securities or any use of this Note, including (A) the legal requirements within the Holder’s jurisdiction for the purchase of the Securities, (B) any foreign exchange restrictions applicable to such purchase, (C) any governmental or other consents that may need to be obtained, and (D) the income tax and other tax consequences, if any, that may be relevant to the purchase, holding, redemption, sale, or transfer of the Securities.  The Holder’s subscription, payment for and continued beneficial ownership of the Securities will not violate any applicable securities or other laws of the Holder’s jurisdiction.  
+No General Solicitation
+.  
+The 
+Holder
+ acknowledges that it is not acquiring the 
+Note
+ pursuant to any general solicitation and that the 
+Holder
+ did not (i) receive or review any advertisement, article, notice or other communication published in a newspaper or magazine or similar media or broadcast over television or radio, whether closed circuit, or generally available, with respect to the 
+Note
+; or (ii) attend any seminar, meeting or industry investor conference whose attendees were invited by any general solicitation or general advertising regarding the 
+Note
+.
+Forward-Looking Statements
+.  With respect to any forecasts, projections of results and other forward-looking statements and information provided to the Holder, the Holder acknowledges that such statements were prepared based upon assumptions deemed reasonable by the Company at the time of preparation.  There is no assurance that such statements will prove accurate, and the Company has no obligation to update such statements.
+Events of Default
+.
+Upon the occurrence and continuance of any Event of Default (as defined below), at the option and upon the declaration of the 
+Requisite
+ Holders and upon written notice to the Company 
+(which election and notice shall not be required in the case of an Event of Default under subsection (ii) or (iii) below), this Note shall accelerate
+,
+ and all principal and unpaid accrued interest shall become due and payable. The occurrence of any one or more of the following shall constitute an “
+Event of Default
+”:
+The Company 
+violates any provisions of the Notes and fails to cure such violation within 
+f
+ifteen
+ 
+(
+15
+)
+ 
+days of notice thereof from the 
+Requisite
+ Holders;
+The Company files any petition or action for relief under any bankruptcy, reorganization, insolvency or moratorium law or any other law for the relief of, or relating to, debtors, now or hereafter in effect, or makes any assignment for the benefit of creditors or takes any corporate action in furtherance of any of the foregoing; or
+An involuntary petition is filed against the Company (unless such petition is dismissed or discharged within 
+sixty (
+60
+)
+ days under any bankruptcy statute now or hereafter in effect, or a custodian, receiver, trustee, assignee for the benefit of creditors (or other similar official) is appointed to take possession, 
+custody
+ or control of any property of the Company).
+In any action to enforce the terms of this Note, the prevailing party will be entitled to an award of its reasonable attorneys’ fees and other related costs.
+Tax Withholding.  
+If the Company is required to remit to any governmental authority an amount of money which represents a withholding from amounts paid or considered paid to the Holder, then the Holder agrees to provide the Company with the funds, in immediately available U.S. dollars, so that the Company has the funds to remit to such governmental authority.  In all events, any amounts will be considered paid for the benefit of the Holder. The Holder hereby authorizes the Company to make any withholding required by law. The Holder agrees to provide to the Company a Form W-9 or comparable form as requested by the Compan
+y or, if the Holder is not a United States person, the appropriate version of Form W-8.
+Covenants. 
+Participation Right
+.  
+Until the conversion or repayment in full of the Note, i
+f the Company proposes to offer any New Securities at any time after the date hereof (other than the Notes), including in a Qualified Financing or a Non-Qualified Financing, the Company shall provide the Holder with at least 
+fifteen
+ (1
+5
+) days’ prior written notice of such offering, including the price and the terms thereof. The Holder shall have the right to participate in such offering(s) (the “
+Participation Right
+”), by purchasing an 
+amount
+ of New Securities proposed to be sold in such offering 
+up to its Pro Rata Allocation
+ (as defined below)
+. The Holder’s right to participate will expire within twenty (20) days after receipt of the notice from the Company of the terms of the offering. The Holder shall be entitled to apportion the Participation Right among itself and its Affiliates in such proportions as it deems appropriate.
+  The Holder’s “
+Pro Rata
+ Allocation
+” shall be, with respect to the issuance of New Securities, such Holder’s percentage 
+ownership of shares of the Company of the 
+Fully-Diluted
+ C
+apitalization of the Company immediately prior to the applicable offering of New Securities.  
+Information Rights
+.  The Company will furnish to the Holder, when available, (i) 
+within ninety (90) days of the end of each fiscal year, 
+annual unaudited financial statements for each fiscal year of the Company, including an unaudited balance sheet as of the end of such fiscal year, an unaudited income statement, and an unaudited statement of cash flows, all prepared in accordance with generally 
+accepted accounting principles and practices; (ii) 
+on or prior to the fifteenth (15
+th
+) day of the calendar month following the end of each fiscal quarter, 
+quarterly unaudited financial statements for each fiscal quarter of the Company (except the last quarter of the Company’s fiscal year), including an unaudited
+ 
+balance sheet as of the end of such fiscal quarter, an unaudited income statement, and an unaudited statement of cash flows, all prepared in accordance with generally accepted accounting principles and practices, subject to changes resulting from normal year-end audit adjustments. If the Company has audited records of any of the foregoing, it will provide those in lieu of the unaudited versions.
+ In addition, upon the request of any Holder, the Company will furnish to such Holder an updated capitalization table of the Company and 
+information required by Section 4(a)(7) of the Securities Act
+.  The Company agrees that each Holder has 
+inspection rights
+ as provided under 
+Delaware Code Title 8. Corporations § 220
+.
+ For the Note Series, the Company shall maintain a ledger containing the names of each holder of a Note in the Note Series, contact information of each holder, principal amount of each Note and date of each Note which the Company will provide to Holder upon written request.
+Protective Provisions
+.
+  
+So long as at least 50% of the original principal amount of the Notes is outstanding, the Company will not, without the consent of the Requisite Holders, either directly or indirectly by amendment, merger, consolidation, or otherwise:
+make any substantial change to the business of the Company;
+sell, assign, license, pledge or encumber material assets, 
+technology
+ or intellectual property, other than licenses granted in the ordinary course of business;
+purchase or redeem or pay any dividend on any capital stock, other than stock repurchased at cost from former employees and consultants in connection with the cessation of their service;
+enter into or amend any related-party transaction (including material increases to the compensation of any founder); or
+create or authorize the creation of any debt security, if the aggregate indebtedness of the Corporation and its subsidiaries for borrowed money following such action would exceed $[____] other than equipment leases, bank lines of credit or trade payables incurred in the ordinary course
+ of business.
+Most Favored Nations Clause
+. 
+ 
+If after the date this Note is issued and while it remains outstanding, the Company issues any other convertible promissory notes or convertible equity instruments (
+e.g.
+, a SAFE) with more favorable economic terms, including, without limitation, with respect to the valuation cap, interest rate or discount rate on conversion, the Company shall promptly notify the Holder of such issuance including the form of security being offered and related agreements.  Within 
+twenty
+ (
+20
+) days of such notice, 
+the 
+Holder 
+may elect to exchange all of its Notes then held by it for the securities issued in such subsequent financing based on the then outstanding principal amount of the Note, plus any accrued but unpaid interest thereon, and the effective price at which such securities are sold in such subsequent financing
+.  
+Board Observer
+. 
+ 
+The Requisite Holders shall be entitled to designate, by written notice to the Company, one individual to attend all meetings of members of the Board or any committee 
+thereof as a non-voting observer, who shall receive all the materials members of the Board receive in connection with such meetings as if he or she was a member of the Board. Such individual shall agree to execute the Company’s standard form of confidentiality agreement and may be excluded from portions of meetings if the Company’s counsel advises it is advisable to protect the attorney-client privilege. 
+Corporate Transparency Act
+.  Upon request of the Company, the
+ 
+Holder
+ agrees to 
+promptly 
+provid
+e 
+the Company with any information reasonably necessary to enable the Company to timely comply with its reporting and disclosure obligations under the C
+orporate 
+T
+ransparency Act (“
+CTA
+”)
+, including any updates thereto. To the extent permitted under the CTA, a
+ Holder 
+may satisfy the requirements in the previous sentence by providing a “FinCEN identifier” (as defined in the CTA).
+Termination of Covenants
+.  The rights set forth in Sections 7(a) and 7(b) shall terminate and be of no further force or effect upon the earliest occurrence of (i) the consummation of the sale of the Company’s securities pursuant to a registration statement filed by the Company under the Securities Act in connection with the firm commitment underwritten offering of its securities to the general public; (ii) the consummation of a merger or consolidation of the Company that is effected (1) for independent business reasons unrelated to extinguishing such rights and (2) for purposes other than (A) the reincorporation of the Company in a different state or (B) the formation of a holding company that will be owned exclusively by the Company’s stockholders and will hold all of the outstanding shares of capital stock of the Company’s successor; or (iii) the liquidation and dissolution of the Company. 
+[Other than Section
+s
+ 7
+(b)
+,
+ [
+(e)
+]
+ 
+and (f) 
+upon the conversion of the Notes, which right
+s
+ 
+and obligations 
+shall survive such conversion,] t
+he rights 
+and obligations 
+set forth in 
+this 
+Section 7
+ 
+shall terminate upon the repayment in full, conversion, or termination of the Notes.
+Miscellaneous Provisions
+.
+Waivers.
+  The Company hereby waives demand, notice, presentment, protest and notice of dishonor.
+Further Assurances
+.  The Holder agrees and covenants that at any time and from time to time the Holder will promptly execute and deliver to the Company such further instruments and documents and take such further action as the Company may reasonably require in order to carry out the full intent and purpose of this Note and to comply with state or federal securities laws or other regulatory approvals.
+Transfers of Notes
+.  This Note may be transferred only (i) in compliance with this instrument and (ii) upon its surrender to the Company for registration of transfer, duly endorsed, or accompanied by a duly executed written instrument of transfer in form satisfactory to the Company. Thereupon, this Note shall be reissued to, and registered in the name of, the transferee, or a new Note for like principal amount and interest shall be issued to, and registered in the name of, the transferee. Interest and principal shall be paid solely to the registered holder of this Note. Such payment shall constitute full discharge of the Company’s obligation to pay such interest and principal.
+Market Standoff
+.  The Holder hereby agrees that the Holder shall not
+, without the prior written consent of the managing underwriter,
+ sell, dispose of, transfer, make any short sale of, grant any option for the purchase of, or enter into any hedging or similar transaction with the same economic 
+effect as a sale of, any shares of common stock (or other securities) of the Company held by the Holder (other than those included in the registration) 
+and ending on the date specified by the Company and the managing underwriter (such period not to exceed
+ 180-day period following the effective date of the initial public offering of the Company).  The Holder agrees to execute and deliver such other agreements as may be reasonably requested by the Company or the managing underwriters that are consistent with the foregoing or that are necessary to give further effect thereto.  In addition, if requested by the Company or the 
+managing
+ underwriter of common stock (or other securities of the Company), the Holder shall provide, within ten days of such request, such information as may be required by the Company or such representative in connection with the completion of any public offering of the Company’s securities pursuant to a registration statement filed under the 
+Securities 
+Act.  The obligations described in this paragraph shall not apply to a registration relating solely to employee benefit plans on Form S-1 or Form S-8 or similar forms that may be promulgated in the future, or a registration relating solely to a transaction on Form S-4 or similar forms that may be promulgated in the future.  In order to enforce the foregoing covenant, the Company may impose stop-transfer instructions with respect to such common stock (or other securities of the Company) until the end of such period.  The Holder agrees that any transferee of any of the Securities (or other securities of the Company) held by the Holder shall be bound by this paragraph. The underwriters of the Company’s stock are intended third-party beneficiaries of this paragraph and shall have the right, 
+power
+ and authority to enforce the provisions hereof as though they were a party hereto.
+ 
+Notwithstanding the foregoing, this paragraph shall be applicable to the Holder only if all officers and directors of the Company are subject to the same restrictions and the Company uses commercially reasonable efforts to obtain a similar agreement from all 
+stockholders
+ individually owning more than [1-3]% of the Company’s outstanding common stock (after giving effect to the conversion into common stock of all outstanding preferred stock).  This Section 8(d) shall survive the termination or expiration of this Note.
+Amendment and Waiver
+.  
+Any term of this Note may be amended or waived with the written consent of the Company and the 
+Requisite
+ Holders; 
+provided, however
+, that
+ such amendment or waiver must apply to all outstanding Notes
+. 
+Any modification, 
+amendment
+ or waiver that (a) reduces the principal amount
+ of this Note
+, or (b) affects 
+the Holder
+ in a materially disproportionate manner relative to its effect on any other 
+holder of the Notes
+ shall also require the consent of 
+the Holder
+. 
+Upon the effectuation of such amendment or waiver in conformance with this paragraph, the Company shall promptly give written notice thereof to the Holder if the Holder has not previously consented to such amendment or waiver in writing. 
+Governing Law; Venue
+.  This Note shall be governed by and construed under the laws of the 
+State of Delaware
+, as applied to agreements among
+ 
+residents
+ of the State
+ of Delaware
+, made and to be performed entirely within the state of the 
+State of Delaware
+, without giving effect to conflicts of laws principles. The venue for any dispute arising out of or related to this Note will lie exclusively 
+either 
+in the state or federal courts located in 
+New Castle County, Delaware
+ or the jurisdiction in which the principal office of the Company is located
+, and the parties to this Note irrevocably waive any right to raise forum non 
+conveniens
+ or any other argument that 
+New Castle County, Delaware
+ 
+or the jurisdiction in which the principal office of the Company is located 
+is not the proper venue. The parties to this Note irrevocably consent to personal jurisdiction in the state and federal courts of the 
+S
+tate of 
+Delaware
+ and the jurisdiction of the principal office of the Company
+.
+Waiver of Jury Trial
+.  THE HOLDER HEREBY IRREVOCABLY WAIVES, TO THE FULLEST EXTENT PERMITTED BY APPLICABLE LAW, ANY RIGHT IT MAY HAVE TO A TRIAL BY JURY IN ANY LEGAL PROCEEDING DIRECTLY OR INDIRECTLY RELATING TO 
+THIS NOTE OR THE TRANSACTIONS CONTEMPLATED HEREBY, WHETHER BASED ON CONTRACT, TORT, OR ANY OTHER THEORY. 
+Binding Agreement
+.  The terms and conditions of this Note shall inure to the benefit of and be binding upon the respective successors and assigns of the parties.  Nothing in this Note, expressed or implied, is intended to confer upon any third party any rights, remedies, obligations, or liabilities under or by reason of this Note, except as expressly provided in this Note.
+Counterparts
+.  This Note may be executed in two or more counterparts, each of which shall be deemed an original, but all of which together shall constitute one and the same instrument.  
+Any signed counterpart 
+of this Note 
+may be delivered by electronic transmission (including pdf or any electronic signature complying with the U.S. federal 
+ESIGN
+ Act of 2000, e.g., www.docusign.com) with the same legal force and effect for all purposes as delivery of an originally signed agreement
+.
+ 
+Titles and Subtitles
+. The titles and subtitles used in this Note are used for convenience only and are not to be considered in construing or interpreting this Note.
+Notices
+.  All notices, requests, or other communications required or permitted to be delivered hereunder shall be delivered in writing, in each case to the address specified below or to such other address as such party may from time to time specify 
+by written notice
+ in compliance with this section. Notices (i) if mailed by certified or registered mail or sent by hand or overnight courier service shall be deemed to have been given when receive
+d
+ or (ii) if sent by email or other electronic means shall be deemed received upon receipt by the sender of an acknowledgment from the intended recipient. 
+Expenses
+. 
+ 
+The Company and the Holder shall each bear its respective expenses and legal fees incurred with respect to the negotiation, execution and delivery of this Note and the transactions contemplated herein.
+Delays or Omissions
+.  It is agreed that no delay or omission to exercise any right, power or remedy accruing to the Holder, upon any breach or default of the Company under this Note shall impair any such right, power or remedy, nor shall it be construed to be a waiver of any such breach or default, or any acquiescence therein, or of or in any similar breach or default thereafter occurring; nor shall any waiver of any single breach or default be deemed a waiver of any other breach or default theretofore or thereafter occurring.  It is further agreed that any waiver, permit, consent or approval of any kind or character by the Holder of any breach or default under this Note, or any waiver by the Holder of any provisions or conditions of this Note, must be in writing and shall be effective only to the extent specifically set forth in writing and that all remedies, either under this Note, or by law or otherwise afforded to the Holder, shall be cumulative and not alternative. 
+Entire Agreement
+.  This Note constitutes the full and entire understanding and agreement between the parties with regard to the subjects hereof and no party shall be liable or bound to any other party in any manner by any representations, warranties, 
+covenants
+ and agreements except as specifically set forth herein.
+Exculpation among Holders
+.  The Holder acknowledges that the Holder is not relying on any person, 
+firm
+ or corporation, other than the Company and its officers and Board members, in making its investment or decision to invest in the Company.
+Senior Indebtedness
+.  The indebtedness evidenced by this Note is subordinated in right of payment to the prior payment in full of any Senior Indebtedness in existence on the date of this Note or hereafter incurred. “
+Senior Indebtedness
+” shall mean, unless expressly subordinated to or made on a parity with the amounts due under this Note, all amounts due in connection with (i) indebtedness of the Company to banks or other lending institutions
+ (including equipment lessors a
+n
+d commercial finance lenders)
+ regularly engaged in the business of lending money (excluding venture capital, investment banking or similar institutions and their affiliates, which sometimes engage in lending activities but which are primarily engaged in investments in equity securities), and (ii) any such indebtedness or any debentures, notes or other evidence of indebtedness issued in exchange for such Senior Indebtedness, or any indebtedness arising from the satisfaction of such Senior Indebtedness by a guarantor.
+Broker’s Fees
+. Each party hereto represents and warrants that no agent, broker, investment banker, person or firm acting on behalf of or under the authority of such party hereto is or will be entitled to any broker’s or finder’s fee or any other commission directly or indirectly in connection with the transactions contemplated herein. Each party hereto further agrees to indemnify each other party for any claims, losses or expenses incurred by such other party as a result of the representation in this 
+paragraph
+ being untrue.
+Confidentiality
+.  The Holder shall not in any way disclose any Confidential Information of the Company that the Holder may receive from time to time to any third party and shall not use the Confidential Information of the Company for any purpose other than to monitor its investment in the Company. The Holder will treat all Confidential Information with the same degree of care as it accords its own Confidential Information, but in no case less than reasonable care. Notwithstanding the foregoing, the Holder may disclose the Company’s Confidential Information to its attorneys, accountants or other professionals who are bound by confidentiality to the extent necessary to obtain their services in connection with monitoring the Holder’s investment in the Company. “
+Confidential Information
+” means information concerning a party’s business, finances, 
+property
+ or technology not generally known to the public which is either identified as “Confidential” at the time of disclosure or which under the circumstances surrounding the disclosure should reasonably be considered to be Confidential Information
+.
+California Corporate Securities Law
+.  THE SALE OF THE SECURITIES WHICH ARE THE SUBJECT OF THIS AGREEMENT HAS NOT BEEN QUALIFIED WITH THE COMMISSIONER OF CORPORATIONS OF THE STATE OF CALIFORNIA AND THE ISSUANCE OF SUCH SECURITIES OR THE PAYMENT OR RECEIPT OF ANY PART OF THE CONSIDERATION THEREFOR PRIOR TO SUCH QUALIFICATION OR IN THE ABSENCE OF AN EXEMPTION FROM SUCH QUALIFICATION IS UNLAWFUL. PRIOR TO ACCEPTANCE OF SUCH CONSIDERATION BY THE COMPANY, THE RIGHTS OF ALL PARTIES TO THIS AGREEMENT ARE EXPRESSLY CONDITIONED UPON SUCH QUALIFICATION BEING OBTAINED OR AN EXEMPTION FROM SUCH QUALIFICATION BEING AVAILABLE.
+[Signature pages follow]
+The parties have executed this 
+Convertible Promissory Note 
+as of the date first noted above.
+[
+COMPANY INC
+.]
+By:
+[
+sig|req|signer0
+                                     
+  ]
+Name:
+Title:
+Address:
+The parties have executed this 
+Convertible Promissory Note 
+as of the date first noted above.
+ACCREDITED INVESTOR. 
+ The investor is familiar with the definition of “accredited investor” as defined in Rule 501 of Regulation D promulgated under the Securities Act of 1933, as amended, and hereby represents and warrants to the Company that he/she/it comes within one of the following categories of “accredited investor
+:”  Initial
+ where applicable.
+_____
+Initials
+(a)
+An organization described in Section 501(c)(3) of the Internal Revenue Code, corporation, Massachusetts or similar business trust, or partnership, not formed for the specific purpose of acquiring the securities offered, with total assets in excess of $5,000,000.
+_____
+Initials
+(b)
+A natural person whose individual net worth, or joint net worth with that person’s spouse
+ or spousal equivalent
+, at the time of this purchase exceeds $1,000,000,
+ 
+excluding the value of the Lender’s primary residence, calculated in accordance with the below 
+rules.*
+_____
+Initials
+(c)
+A natural person whose had individual income in excess of $200,000 in each of the two most recent years or joint income with that person’s spouse 
+or spousal equivalent 
+in excess of $300,000 in each of those years and has a reasonable expectation of reaching the same income level in the current year.
+_____
+Initials
+(d)
+A trust with total assets in excess of $5,000,000, not formed for the specific purpose of acquiring the securities offered, whose purchase is directed by a sophisticated person as described in Rule 506(b)(2)(ii)
+ of Regulation D.
+_____
+Initials
+(e)
+An entity in which all of the equity owners are “accredited investors.”
+_____
+Initials
+(f)  Other, please explain: _____________________________________________
+*Rules regarding primary residences: In calculating my net worth, I have (i) excluded my primary residence as an asset, (ii) excluded debt secured by such residence, up to the estimated fair market value of the residence; (iii) included the amount of any increase on the debt secured by the primary residence incurred within 60 days prior to the purchase of the securities (unless related to the acquisition of the primary residence); and (iv) included debt in excess of the fair market value of the primary residence.
+HOLDER:
+Name of Holder:
+By:
+[
+sig|req|signer1
+                                        
+  ]
+Name:
+Title:
+Email:
+Address:

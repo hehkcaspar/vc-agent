@@ -33,6 +33,7 @@ export interface FundsConfig {
 
 export type LegalTemplateCategory =
   | 'safe'
+  | 'convertible_note'
   | 'priced_round'
   | 'side_letter'
   | 'guidance';

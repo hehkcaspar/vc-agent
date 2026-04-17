@@ -32,7 +32,7 @@ class _Strict(BaseModel):
 class LegalTemplate(_Strict):
     id: str = Field(min_length=1, max_length=64)
     label: str = Field(min_length=1, max_length=200)
-    category: Literal["safe", "priced_round", "side_letter", "guidance"]
+    category: Literal["safe", "convertible_note", "priced_round", "side_letter", "guidance"]
     round_type: Literal["seed", "series_a_plus", "any"] = "any"
     instrument_types: list[Literal["safe", "convertible_note", "priced_round"]] = Field(
         default_factory=list,
@@ -130,6 +130,23 @@ def _default_config() -> dict[str, Any]:
                 ),
                 "source_file": "yc_safe/safe_user_guide.pdf",
                 "text_file": "yc_safe/safe_user_guide.txt",
+            },
+            # ── Convertible note (seed-stage debt that converts) ──
+            {
+                "id": "aca_convertible_promissory_note",
+                "label": "ACA Model Convertible Promissory Note",
+                "category": "convertible_note",
+                "round_type": "seed",
+                "instrument_types": ["convertible_note"],
+                "description": (
+                    "Angel Capital Association model convertible promissory note "
+                    "(v1.2). Seed-stage debt instrument with interest + maturity "
+                    "date that converts to equity at a qualified financing, with "
+                    "valuation cap and discount mechanics. Use as the industry-"
+                    "standard reference when reviewing any convertible-note deal."
+                ),
+                "source_file": "convertible_note/aca_model_convertible_promissory_note.docx",
+                "text_file": "convertible_note/aca_model_convertible_promissory_note.txt",
             },
             # ── NVCA priced-round suite ──
             {

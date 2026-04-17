@@ -396,8 +396,8 @@ def _default_checklist() -> dict[str, Any]:
             },
             {
                 "id": "safe_specific",
-                "label": "SAFE-specific terms",
-                "description": "Terms unique to SAFE / convertible-note instruments.",
+                "label": "SAFE & convertible-note terms",
+                "description": "Terms shared by or unique to SAFE and convertible-note instruments.",
                 "items": [
                     {
                         "id": "valuation_cap",
@@ -450,6 +450,99 @@ def _default_checklist() -> dict[str, Any]:
                             {"pattern": "threshold > $5M", "severity": "medium",
                              "note": "SAFE may not convert in small rounds — stranded"},
                         ],
+                    },
+                    {
+                        "id": "interest_rate",
+                        "label": "Interest rate (convertible note)",
+                        "applies_to_instruments": ["convertible_note"],
+                        "standard_value": "5-8% simple interest (ACA default)",
+                        "red_flag_patterns": [
+                            {"pattern": "rate > 10%", "severity": "medium",
+                             "note": "Above market for seed-stage notes"},
+                            {"pattern": "compound interest", "severity": "high",
+                             "note": "Unusual at seed; accrues faster than simple interest"},
+                        ],
+                        "why_matters": (
+                            "Interest accrues on the principal and typically converts "
+                            "into equity alongside the principal. Higher rate = more shares for investor."
+                        ),
+                    },
+                    {
+                        "id": "maturity_date_term",
+                        "label": "Maturity date / term (convertible note)",
+                        "applies_to_instruments": ["convertible_note"],
+                        "standard_value": "18-24 months",
+                        "red_flag_patterns": [
+                            {"pattern": "maturity < 12 months", "severity": "high",
+                             "note": "Pressures a quick priced round; short runway for conversion"},
+                            {"pattern": "maturity > 36 months", "severity": "medium",
+                             "note": "Unusually long; investor capital locked with no conversion forcing function"},
+                        ],
+                        "why_matters": (
+                            "If no qualified financing occurs before maturity, default provisions kick in. "
+                            "Too short = forced crisis; too long = zombie note."
+                        ),
+                    },
+                    {
+                        "id": "default_provisions",
+                        "label": "Default / maturity provisions (convertible note)",
+                        "applies_to_instruments": ["convertible_note"],
+                        "standard_value": "Auto-convert at cap or repayment at holder majority election (ACA default)",
+                        "red_flag_patterns": [
+                            {"pattern": "immediate repayment on demand at maturity", "severity": "high",
+                             "note": "Company may lack cash — forced insolvency risk"},
+                            {"pattern": "no conversion option at maturity", "severity": "high",
+                             "note": "Investor loses upside; company forced to repay debt"},
+                            {"pattern": "penalty interest on default", "severity": "medium",
+                             "note": "Accrues rapidly and can compound the problem"},
+                        ],
+                        "why_matters": (
+                            "Defines what happens when the note matures without a qualified "
+                            "financing. The most contentious clause in convertible-note "
+                            "negotiations — bad defaults can kill early-stage companies."
+                        ),
+                    },
+                    {
+                        "id": "amendment_majority",
+                        "label": "Amendment / waiver majority (convertible note)",
+                        "applies_to_instruments": ["convertible_note"],
+                        "standard_value": "majority in principal amount of outstanding notes",
+                        "red_flag_patterns": [
+                            {"pattern": "unanimous consent required", "severity": "medium",
+                             "note": "Single holdout can block amendments — deadlock risk"},
+                            {"pattern": "company can amend unilaterally", "severity": "critical",
+                             "note": "Investor protections are illusory"},
+                        ],
+                    },
+                    {
+                        "id": "subordination",
+                        "label": "Subordination (convertible note)",
+                        "applies_to_instruments": ["convertible_note"],
+                        "standard_value": "subordinated to bank/institutional debt",
+                        "red_flag_patterns": [
+                            {"pattern": "pari passu with bank debt", "severity": "medium",
+                             "note": "May trigger cross-default with existing credit facilities"},
+                            {"pattern": "senior to all other obligations", "severity": "high",
+                             "note": "Can block future bank lending"},
+                        ],
+                        "why_matters": (
+                            "If the company takes on bank debt later, the bank will want "
+                            "to be senior. A non-subordinated note can block future borrowing."
+                        ),
+                    },
+                    {
+                        "id": "prepayment",
+                        "label": "Prepayment rights (convertible note)",
+                        "applies_to_instruments": ["convertible_note"],
+                        "standard_value": "no prepayment without holder consent (ACA default)",
+                        "red_flag_patterns": [
+                            {"pattern": "company can prepay at will", "severity": "medium",
+                             "note": "Company can extinguish conversion rights before a priced round"},
+                        ],
+                        "why_matters": (
+                            "If the company can prepay, the investor loses the conversion "
+                            "upside that makes the note attractive."
+                        ),
                     },
                 ],
             },

@@ -44,6 +44,7 @@ _OPINION_FIELDS = (
 _FACT_NESTED = (
     "company_terms",
     "safe_terms",
+    "convertible_note_terms",
     "priced_round_terms",
     "governance",
     "investor_rights",
@@ -181,6 +182,7 @@ def split_legal_review_entry(
         "lead_investor": None,
         "company_terms": company_terms,
         "safe_terms": entry.get("safe_terms"),
+        "convertible_note_terms": entry.get("convertible_note_terms"),
         "priced_round_terms": entry.get("priced_round_terms"),
         "governance": entry.get("governance") or {},
         "investor_rights": entry.get("investor_rights") or {},
