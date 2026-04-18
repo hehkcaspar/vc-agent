@@ -21,8 +21,18 @@ TriageDecision = Literal["material", "not_material"]
 
 
 class EvidenceItem(BaseModel):
-    claim: str
-    source: str
+    claim: str = Field(
+        description="A concrete, factual claim supporting or qualifying the score."
+    )
+    source: str = Field(
+        description=(
+            "A citable URL from the structured facts (paper URL, startup "
+            "URL, patent URL, news article URL, profile URL, etc.). If no "
+            "URL is available for this claim, return an empty string — do "
+            "NOT return a field name, label, tag, or placeholder like "
+            "'discovery_excerpt' or 'paper'."
+        )
+    )
     weight: EvidenceWeight
 
 

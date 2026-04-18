@@ -181,14 +181,17 @@ export function EvaluationTab({ data }: EvaluationTabProps) {
               <>
                 <h5 style={{ marginTop: 8 }}>Evidence</h5>
                 <ul>
-                  {dim.evidence.map((e, i) => (
-                    <li key={i}>
-                      <strong>{e.weight}</strong>: {e.claim}
-                      {e.source && (
-                        <> — <a href={e.source} target="_blank" rel="noopener noreferrer">source</a></>
-                      )}
-                    </li>
-                  ))}
+                  {dim.evidence.map((e, i) => {
+                    const sourceIsUrl = !!e.source && /^https?:\/\//i.test(e.source);
+                    return (
+                      <li key={i}>
+                        <strong>{e.weight}</strong>: {e.claim}
+                        {sourceIsUrl && (
+                          <> — <a href={e.source} target="_blank" rel="noopener noreferrer">source</a></>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </>
             )}
