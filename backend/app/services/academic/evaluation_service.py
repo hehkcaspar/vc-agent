@@ -32,7 +32,6 @@ from app.academic_models import Scholar
 from .continuous_config import load_continuous_tasks
 from .dim_runner import run_dim_eval
 from .eval_log import log_eval, log_step
-from .events_sync import log_event
 from .fact_store import active_red_flags
 from .file_utils import latest_record, read_records
 from .identity_resolver import resolve_identity
@@ -279,29 +278,6 @@ async def bootstrap_scholar(
             duration_s=time.monotonic() - t0,
             scholar_name=scholar_name,
         )
-        # Timeline milestone. Source fetchers skip `log_event` on the
-        # bootstrap path to avoid flooding the feed with "every paper is
-        # new" — without this explicit marker the Timeline tab stays
-        # empty after the first evaluation even though the report and
-        # dimensions are fully populated.
-        try:
-            await log_event(
-                scholar_id,
-                event_type="tracking_started" if mode == "bootstrap" else "tracking_refreshed",
-                title=(
-                    f"Tracking started for {scholar_name}"
-                    if mode == "bootstrap"
-                    else f"Scholar refreshed: {scholar_name}"
-                ) if scholar_name else (
-                    "Tracking started" if mode == "bootstrap" else "Scholar refreshed"
-                ),
-                significance="medium",
-            )
-        except Exception:
-            logger.warning(
-                "bootstrap: log_event milestone failed for %s", scholar_id,
-                exc_info=True,
-            )
     finally:
         await release_evaluating(scholar_id)
 
