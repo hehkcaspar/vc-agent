@@ -157,7 +157,7 @@ vc-agent/
 │   │   ├── App.tsx                  # Root shell; mounts ToastHost for global toasts
 │   │   ├── components/
 │   │   │   ├── Layout.tsx           # App layout; sidebar with Portfolio + Academic + Settings tabs, theme toggle
-│   │   │   ├── PortfolioTab.tsx     # Main portfolio view (list/grid segmented toggle)
+│   │   │   ├── PortfolioTab.tsx     # Portfolio list/grid view; dual-dim filter (Stage + Status) in toolbar
 │   │   │   ├── EntityDetail.tsx     # Entity workspace: workspace tree, chat, file viewer
 │   │   │   ├── EntityConversation.tsx  # Chat UI: presets, Agent toggle, async job polling, composer shell
 │   │   │   ├── EntityEditModal.tsx   # Edit entity (deal stage, positions, founders) — inline +Add fund redirects to registry

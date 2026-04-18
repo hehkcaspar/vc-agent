@@ -3,6 +3,7 @@ import {
   EntityUpdateData,
   FactDiscrepancy,
   FactDiscrepancyStatus,
+  FactProvenance,
   Fund,
   FundsConfig,
   LegalReviewChecklist,
@@ -374,6 +375,13 @@ export const api = {
       }
       return { kind: 'completed', result: data as unknown as PresetRunSyncResult };
     },
+  },
+
+  // Fact ledger — read-only provenance (source + confidence + history per
+  // fact_path). Written by fact_manager on the backend.
+  factLedger: {
+    getProvenance: (entityId: string) =>
+      fetchJson<FactProvenance>(`/entities/${entityId}/facts/provenance`),
   },
 
   // Fact discrepancies — agent-surfaced, user-adjudicated

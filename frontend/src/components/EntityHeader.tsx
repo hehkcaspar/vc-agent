@@ -27,6 +27,7 @@ import type {
   FactDiscrepancy,
   Fund,
 } from '../types';
+import { FactProvenanceBadge } from './FactProvenance';
 
 // ---------------------------------------------------------------------------
 // Display config
@@ -233,11 +234,9 @@ export function EntityHeader({
                 }
               >
                 {f.status === 'departed' ? <s>{f.name}</s> : f.name}
+                <FactProvenanceBadge factPath={`founders[name=${f.name}].title`} />
               </span>
             ))}
-            {teamSize && (
-              <span className="entity-header-teamsize">Team: {teamSize}</span>
-            )}
           </div>
         )}
 
@@ -275,8 +274,17 @@ export function EntityHeader({
               </span>
             </span>
           )}
-          <span className="metric-badge">
-            <span className="metric-badge-label">Last update:</span>
+          {teamSize != null && (
+            <span className="metric-badge">
+              <span className="metric-badge-label">Team:</span>
+              <strong>{teamSize}</strong>
+            </span>
+          )}
+          <span
+            className="metric-badge"
+            title="Most recent change to this entity's data in our system (uploads, extractions, edits) — not necessarily a founder update."
+          >
+            <span className="metric-badge-label">Last data change:</span>
             <strong>{lastUpdate}</strong>
           </span>
         </div>

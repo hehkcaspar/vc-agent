@@ -4,17 +4,19 @@ interface EntityMetadataFormProps {
   data: Partial<EntityUpdateData>;
   onChange: (data: Partial<EntityUpdateData>) => void;
   disabled?: boolean;
+  /** Skip rendering these fields; useful when the surrounding modal handles them itself. */
+  hiddenFields?: (keyof EntityUpdateData)[];
 }
 
 /**
  * Reusable form for entity metadata fields.
  * This component automatically renders all fields defined in ENTITY_METADATA_FIELDS.
- * 
+ *
  * When backend EntityUpdate schema changes:
  * 1. Update ENTITY_METADATA_FIELDS in types/index.ts
  * 2. This form will automatically reflect the changes
  */
-export function EntityMetadataForm({ data, onChange, disabled }: EntityMetadataFormProps) {
+export function EntityMetadataForm({ data, onChange, disabled, hiddenFields }: EntityMetadataFormProps) {
   const handleChange = (fieldName: keyof EntityUpdateData, value: string) => {
     // Auto-prepend https:// to website if no protocol is present
     if (fieldName === 'website' && value && !value.match(/^https?:\/\//)) {
@@ -37,10 +39,14 @@ export function EntityMetadataForm({ data, onChange, disabled }: EntityMetadataF
     }
   };
 
+  const hidden = new Set(hiddenFields ?? []);
+
   return (
     <>
       {/* Import the field config from types - we inline it here to avoid circular deps */}
-      {getEntityMetadataFields().map((field) => (
+      {getEntityMetadataFields()
+        .filter((field) => !hidden.has(field.name))
+        .map((field) => (
         <div className="form-group" key={field.name}>
           <label htmlFor={field.name}>
             {field.label}

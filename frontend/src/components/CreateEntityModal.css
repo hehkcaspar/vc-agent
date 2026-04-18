@@ -82,6 +82,15 @@
   margin: var(--space-6) 0;
 }
 
+/* Inline helper text under a form input */
+.form-hint {
+  margin-top: var(--space-2);
+  font-family: var(--font-body);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+  line-height: 1.4;
+}
+
 /* Form Section */
 .form-section-title {
   margin: 0 0 var(--space-4) 0;

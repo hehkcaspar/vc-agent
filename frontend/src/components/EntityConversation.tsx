@@ -11,6 +11,7 @@ import {
 } from '../lib/cliSpinnerDots';
 import { api } from '../services/api';
 import { ONE_SHOT_MAX_FILES } from '../lib/chatLimits';
+import { formatMessageTime } from '../lib/relativeTime';
 import type { ChatMessage, ChatSession, ChatModelProfileId, DeliverableCardPayload, PresetInfo, AgentMode } from '../types';
 
 const MODEL_OPTIONS: { value: ChatModelProfileId; label: string }[] = [
@@ -637,7 +638,15 @@ export function EntityConversation({
               key={m.id}
               className={`entity-conversation-msg entity-conversation-msg--${side}`}
             >
-              <span className="entity-conversation-msg-role">{roleLabel(m.role)}</span>
+              <div className="entity-conversation-msg-header">
+                <span className="entity-conversation-msg-role">{roleLabel(m.role)}</span>
+                <span
+                  className="entity-conversation-msg-time"
+                  title={new Date(m.created_at).toLocaleString()}
+                >
+                  {formatMessageTime(m.created_at)}
+                </span>
+              </div>
               <div className={`entity-conversation-msg-bubble entity-conversation-msg-bubble--${side}`}>
                 {artifactCard ? (
                   <button

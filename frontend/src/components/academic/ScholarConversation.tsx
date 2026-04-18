@@ -8,6 +8,7 @@ import { ChevronDown } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { academicApi } from '../../services/academicApi';
+import { formatMessageTime } from '../../lib/relativeTime';
 import type {
   AcademicChatMessage,
   AcademicChatSession,
@@ -317,8 +318,16 @@ export function ScholarConversation({ scholarId }: ScholarConversationProps) {
         )}
         {messages.map((m) => (
           <div key={m.id} className={`entity-conversation-msg entity-conversation-msg-${m.role}`}>
-            <div className="entity-conversation-msg-role">
-              {m.role === 'user' ? 'You' : 'Agent'}
+            <div className="entity-conversation-msg-header">
+              <div className="entity-conversation-msg-role">
+                {m.role === 'user' ? 'You' : 'Agent'}
+              </div>
+              <div
+                className="entity-conversation-msg-time"
+                title={new Date(m.created_at).toLocaleString()}
+              >
+                {formatMessageTime(m.created_at)}
+              </div>
             </div>
             <div className="entity-conversation-msg-content">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>

@@ -1,7 +1,7 @@
 import { useState, useRef, FormEvent, DragEvent } from 'react';
 import { FolderPlus, X } from 'lucide-react';
 import { api } from '../services/api';
-import { Entity, EntityUpdateData } from '../types';
+import { DealStage, Entity, EntityUpdateData } from '../types';
 import { EntityMetadataForm } from './EntityMetadataForm';
 import { Modal } from './ui/Modal';
 import './CreateEntityModal.css';
@@ -11,26 +11,52 @@ interface CreateEntityModalProps {
   onSuccess: (entity: Entity) => void;
 }
 
-/**
- * Create Entity Modal
- * 
- * This modal uses EntityMetadataForm for the metadata section,
- * which automatically renders all fields defined in ENTITY_METADATA_FIELDS.
- * 
- * When you modify the backend EntityUpdate schema:
- * 1. Update ENTITY_METADATA_FIELDS in types/index.ts
- * 2. Update getEntityMetadataFields() in EntityMetadataForm.tsx
- * 3. Both Create and Edit modals will automatically sync
- */
+// Same palette + hints as EntityEditModal so the two flows read identically.
+const DEAL_STAGES: { value: DealStage; label: string; hint: string }[] = [
+  { value: 'prospect', label: 'Prospect', hint: 'Top of funnel, not yet in diligence' },
+  { value: 'diligence', label: 'Diligence', hint: 'Actively evaluating' },
+  { value: 'portfolio', label: 'Portfolio', hint: 'Invested and held' },
+  { value: 'passed', label: 'Passed', hint: 'Decided not to invest' },
+  { value: 'exited', label: 'Exited', hint: 'Position closed' },
+];
+
+/** Normalise a single user-entered URL: trim, prepend https:// when missing. */
+function normaliseUrl(raw: string): string {
+  const t = raw.trim();
+  if (!t) return '';
+  if (/^https?:\/\//i.test(t)) return t;
+  return `https://${t}`;
+}
+
+/** Extract the first bare domain from the first URL for use as entity_hint_domain. */
+function firstUrlDomainHint(lines: string[]): string | null {
+  for (const line of lines) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const url = new URL(normaliseUrl(t));
+      return url.hostname.replace(/^www\./, '');
+    } catch {
+      // Fallback: treat as a bare host.
+      return t.replace(/^www\./, '');
+    }
+  }
+  return null;
+}
+
 export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps) {
-  // Metadata form state - uses the same structure as EditEntityModal
+  // Metadata form state - uses the same structure as EditEntityModal, minus
+  // the fields this modal handles itself (website/urls → combined `urls`
+  // textarea; status → fixed to "active" for new entities).
   const [metadata, setMetadata] = useState<Partial<EntityUpdateData>>({
     name: '',
-    website: '',
   });
-  
-  // Additional content (files, text, URLs) - only for creation
+  const [stage, setStage] = useState<DealStage>('prospect');
+
+  // Additional content (files, text) - only for creation.
   const [text, setText] = useState('');
+  // Combined "Website / URLs" field. First line seeds entity_hint_domain; all
+  // non-empty lines are sent for ingestion.
   const [urls, setUrls] = useState('');
   const [files, setFiles] = useState<File[]>([]);
   
@@ -107,22 +133,21 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
       // Build form data for ingestion
       const formData = new FormData();
       formData.append('entity_hint_name', metadata.name.trim());
-      
-      if (metadata.website) {
-        formData.append('entity_hint_domain', metadata.website);
+
+      const urlLines = urls.split('\n').map((u) => u.trim()).filter(Boolean);
+      const domainHint = firstUrlDomainHint(urlLines);
+      if (domainHint) {
+        formData.append('entity_hint_domain', domainHint);
       }
-      
+
       if (text) {
         formData.append('text', text);
       }
-      
-      if (urls) {
-        const urlList = urls.split('\n').map(u => u.trim()).filter(Boolean);
-        if (urlList.length > 0) {
-          formData.append('urls', JSON.stringify(urlList));
-        }
+
+      if (urlLines.length > 0) {
+        formData.append('urls', JSON.stringify(urlLines.map(normaliseUrl)));
       }
-      
+
       files.forEach(file => {
         formData.append('files', file);
       });
@@ -130,19 +155,27 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
       const result = await api.ingest.resources(formData);
 
       if (result.status === 'resolved') {
-        // Close modal first, then navigate
+        // Matched an existing entity — don't overwrite its stage; the user is
+        // being routed to a record with its own history.
         onClose();
-        // Find the entity that was created/used
         const entity = await api.entities.get(result.entity_id);
         onSuccess(entity);
       } else if (result.status === 'resolution_required') {
-        // Close modal first, then navigate
+        // No match — create the new entity, then set the chosen stage.
         onClose();
-        // No match found - create new entity from the parking lot item
-        const resolvedEntity = await api.parkingLot.resolve(
+        let resolvedEntity = await api.parkingLot.resolve(
           result.ingest_id,
           { create_entity: { name: metadata.name.trim() } }
         );
+        if (stage !== resolvedEntity.deal_stage) {
+          try {
+            resolvedEntity = await api.entities.update(resolvedEntity.id, {
+              deal_stage: stage,
+            });
+          } catch {
+            // Non-fatal — entity exists; user can change stage from the header.
+          }
+        }
         onSuccess(resolvedEntity);
       } else {
         setError(result.error || 'Failed to create entity');
@@ -158,14 +191,60 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
     <Modal isOpen onClose={onClose} title="Create New Entity">
         <form onSubmit={handleSubmit}>
           <div className="modal-body">
-            {/* Metadata Section - Automatically synced with EditEntityModal */}
+            {/* Metadata Section - Name only; website is handled below as a
+                combined URL field, status is fixed to "active" on create. */}
             <div className="form-section">
               <h4 className="form-section-title">Entity Information</h4>
-              <EntityMetadataForm 
+              <EntityMetadataForm
                 data={metadata}
                 onChange={(newData) => setMetadata(prev => ({ ...prev, ...newData }))}
                 disabled={isSubmitting}
+                hiddenFields={['website', 'status']}
               />
+              <div className="form-group">
+                <label htmlFor="urls">Website / URLs</label>
+                <textarea
+                  id="urls"
+                  value={urls}
+                  onChange={(e) => setUrls(e.target.value)}
+                  placeholder={'example.com\nhttps://deck-link.com'}
+                  rows={3}
+                  disabled={isSubmitting}
+                />
+                <div className="form-hint">
+                  One per line. First URL is used as the entity's website;
+                  all URLs are queued for ingestion.
+                </div>
+              </div>
+            </div>
+
+            <hr className="form-divider" />
+
+            {/* Deal stage — VC lifecycle bucket. Mirrors EntityEditModal styling. */}
+            <div className="form-section">
+              <h4 className="form-section-title">Deal Stage</h4>
+              <div className="radio-group entity-edit-stage-group">
+                {DEAL_STAGES.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={
+                      'entity-edit-stage-opt' +
+                      (stage === opt.value ? ' entity-edit-stage-opt--active' : '')
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="create-deal-stage"
+                      value={opt.value}
+                      checked={stage === opt.value}
+                      onChange={() => setStage(opt.value)}
+                      disabled={isSubmitting}
+                    />
+                    <span className="entity-edit-stage-label">{opt.label}</span>
+                    <span className="entity-edit-stage-hint">{opt.hint}</span>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <hr className="form-divider" />
@@ -223,17 +302,6 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
                   onChange={(e) => setText(e.target.value)}
                   placeholder="Enter any notes or text content..."
                   rows={3}
-                />
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="urls">URLs (one per line)</label>
-                <textarea
-                  id="urls"
-                  value={urls}
-                  onChange={(e) => setUrls(e.target.value)}
-                  placeholder="https://example.com&#10;https://another-link.com"
-                  rows={2}
                 />
               </div>
             </div>

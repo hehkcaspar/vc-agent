@@ -9,7 +9,12 @@ import { api } from '../services/api';
 import { EntityHeader } from './EntityHeader';
 import { EntityEditModal } from './EntityEditModal';
 import { EntityFactsTab } from './EntityFactsTab';
+import {
+  EntityInitialScreeningTab,
+  hasScreeningMemo,
+} from './EntityInitialScreeningTab';
 import { FactDiscrepancyPanel } from './FactDiscrepancyPanel';
+import { FactProvenanceProvider } from './FactProvenance';
 import {
   resolveEffectiveMime,
   isImageType,
@@ -136,7 +141,9 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const [previewNode, setPreviewNode] = useState<WorkspaceTreeNode | null>(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [discrepancyPanelOpen, setDiscrepancyPanelOpen] = useState(false);
-  const [contentTab, setContentTab] = useState<'workroom' | 'facts'>('workroom');
+  const [contentTab, setContentTab] = useState<
+    'workroom' | 'facts' | 'screening_v1' | 'screening_v2'
+  >('workroom');
   const [agentMode, setAgentMode] = useState<AgentMode>('react'); // default unlimited until child reports
 
   const handleDealStageChange = useCallback(async (stage: DealStage) => {
@@ -207,6 +214,15 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const allFileIds = tree ? collectFileIds(tree) : [];
   const allSelected = allFileIds.length > 0 && allFileIds.every(id => selectedNodeIds.has(id));
   const someSelected = allFileIds.some(id => selectedNodeIds.has(id));
+  const showScreeningV1 = hasScreeningMemo(tree, 'Deliverables/Memos/initial_screening.md');
+  const showScreeningV2 = hasScreeningMemo(tree, 'Deliverables/Memos/initial_screening_v2.md');
+
+  // If the active screening tab's underlying memo disappears (deleted, tree
+  // refresh), fall back to workroom so the tablist stays coherent.
+  useEffect(() => {
+    if (contentTab === 'screening_v1' && !showScreeningV1) setContentTab('workroom');
+    if (contentTab === 'screening_v2' && !showScreeningV2) setContentTab('workroom');
+  }, [contentTab, showScreeningV1, showScreeningV2]);
 
   // Reconcile `selectedNodeIds` against the live tree on every refresh: drop
   // any ids no longer present so a stale selection (e.g. after Process Inbox
@@ -246,7 +262,18 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
 
   const handleRefresh = useCallback(() => { void mutateTree(); }, [mutateTree]);
 
+  const handleOpenSourceFromProvenance = useCallback((pathOrNodeId: string) => {
+    if (!tree) return;
+    const hit =
+      findNodeByPath(tree, pathOrNodeId) ?? findNodeById(tree, pathOrNodeId);
+    if (hit) setPreviewNode(hit);
+  }, [tree]);
+
   return (
+    <FactProvenanceProvider
+      entityId={liveEntity.id}
+      onOpenSource={handleOpenSourceFromProvenance}
+    >
     <div className="entity-detail">
       <EntityHeader
         entity={liveEntity}
@@ -306,6 +333,30 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
         >
           Facts
         </button>
+        {showScreeningV1 && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={contentTab === 'screening_v1'}
+            aria-controls="entity-tab-screening-v1"
+            className={`content-tab ${contentTab === 'screening_v1' ? 'active' : ''}`}
+            onClick={() => setContentTab('screening_v1')}
+          >
+            {showScreeningV2 ? 'Screening v1' : 'Initial Screening'}
+          </button>
+        )}
+        {showScreeningV2 && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={contentTab === 'screening_v2'}
+            aria-controls="entity-tab-screening-v2"
+            className={`content-tab ${contentTab === 'screening_v2' ? 'active' : ''}`}
+            onClick={() => setContentTab('screening_v2')}
+          >
+            {showScreeningV1 ? 'Screening v2' : 'Initial Screening'}
+          </button>
+        )}
       </div>
 
       {contentTab === 'facts' && (
@@ -315,6 +366,37 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             funds={funds}
             onOpenEdit={() => setEditModalOpen(true)}
             onOpenDiscrepancyPanel={() => setDiscrepancyPanelOpen(true)}
+          />
+        </div>
+      )}
+
+      {contentTab === 'screening_v1' && showScreeningV1 && (
+        <div role="tabpanel" id="entity-tab-screening-v1" aria-labelledby="entity-tab-screening-v1-btn">
+          <EntityInitialScreeningTab
+            entityId={entity.id}
+            tree={tree ?? null}
+            memoPath="Deliverables/Memos/initial_screening.md"
+            reviewPath="Deliverables/Memos/initial_screening_review_notes.md"
+            onOpenPreview={(node) => {
+              // Switch back to Workroom so the preview panel is visible.
+              setPreviewNode(node);
+              setContentTab('workroom');
+            }}
+          />
+        </div>
+      )}
+
+      {contentTab === 'screening_v2' && showScreeningV2 && (
+        <div role="tabpanel" id="entity-tab-screening-v2" aria-labelledby="entity-tab-screening-v2-btn">
+          <EntityInitialScreeningTab
+            entityId={entity.id}
+            tree={tree ?? null}
+            memoPath="Deliverables/Memos/initial_screening_v2.md"
+            reviewPath="Deliverables/Memos/initial_screening_v2_review_notes.md"
+            onOpenPreview={(node) => {
+              setPreviewNode(node);
+              setContentTab('workroom');
+            }}
           />
         </div>
       )}
@@ -424,6 +506,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
       </div>
       )}
     </div>
+    </FactProvenanceProvider>
   );
 }
 
@@ -432,6 +515,19 @@ function findNodeById(nodes: WorkspaceTreeNode[], id: string): WorkspaceTreeNode
     if (n.id === id) return n;
     if (n.children.length) {
       const found = findNodeById(n.children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findNodeByPath(nodes: WorkspaceTreeNode[], path: string): WorkspaceTreeNode | null {
+  // Tree node paths don't include a leading slash; strip for comparison.
+  const target = path.replace(/^\/+/, '');
+  for (const n of nodes) {
+    if (n.path === target) return n;
+    if (n.children.length) {
+      const found = findNodeByPath(n.children, target);
       if (found) return found;
     }
   }

@@ -55,6 +55,39 @@ PRESETS: dict[str, PresetDefinition] = {
         artifact_title="Legal Review",
         output_kind="json",
     ),
+    "initial_screening": PresetDefinition(
+        id="initial_screening",
+        label="Initial Screening",
+        description=(
+            "Three-stage one-pager: research (ReAct + web search) → "
+            "compose → fact-check. Writes section JSONs, a memo, and "
+            "review notes to the workspace."
+        ),
+        # Phase 1 prompt — the orchestrator loads phase-2/3 prompts directly.
+        markdown_filename="initial_screening_research.md",
+        default_artifact_type="memo",
+        default_artifact_status="draft",
+        artifact_title="Initial Screening",
+        output_kind="markdown",
+    ),
+    "initial_screening_v2": PresetDefinition(
+        id="initial_screening_v2",
+        label="Initial Screening v2 (split)",
+        description=(
+            "Same deliverable as Initial Screening, but Phase 1 splits "
+            "into a lightweight survey agent + six parallel section "
+            "agents (team, product, market, competition, round_terms, "
+            "coinvestors). Faster via parallelism; stronger failure "
+            "isolation per section."
+        ),
+        # Phase-1 survey prompt; section + compose/review prompts loaded
+        # by the orchestrator directly.
+        markdown_filename="initial_screening_v2_survey.md",
+        default_artifact_type="memo",
+        default_artifact_status="draft",
+        artifact_title="Initial Screening v2",
+        output_kind="markdown",
+    ),
 }
 
 
@@ -143,6 +176,103 @@ def render_extract_info(
         result += incremental_block
 
     return result
+
+
+def render_initial_screening_research(
+    entity_name: str,
+    entity_website: Optional[str],
+    entity_id: str,
+    run_id: str,
+) -> str:
+    """Render the phase-1 research prompt (runs in ReAct agent with
+    workspace tools + web_search)."""
+    preset = PRESETS["initial_screening"]
+    body = load_preset_body(preset)
+    return (
+        body.replace("{{entity_name}}", entity_name)
+        .replace("{{entity_website}}", entity_website or "(not provided)")
+        .replace("{{entity_id}}", entity_id)
+        .replace("{{run_id}}", run_id)
+    )
+
+
+def load_initial_screening_compose_prompt() -> str:
+    path = _PROMPTS_DIR / "initial_screening_compose.md"
+    return path.read_text(encoding="utf-8")
+
+
+def load_initial_screening_review_prompt() -> str:
+    path = _PROMPTS_DIR / "initial_screening_review.md"
+    return path.read_text(encoding="utf-8")
+
+
+def render_initial_screening_compose(
+    entity_name: str, entity_website: Optional[str],
+) -> str:
+    return (
+        load_initial_screening_compose_prompt()
+        .replace("{{entity_name}}", entity_name)
+        .replace("{{entity_website}}", entity_website or "(not provided)")
+    )
+
+
+# ---------------------------------------------------------------------------
+# Initial Screening v2 — survey + per-section renderers
+# ---------------------------------------------------------------------------
+# The v2 flow splits Phase-1 research into a lightweight survey agent that
+# identifies primary source docs, plus six parallel section agents. Each
+# agent has its own tight prompt + budget. Compose + review are unchanged
+# (reused from v1).
+
+
+V2_SECTION_IDS: tuple[str, ...] = (
+    "team",
+    "market",
+    "product_tech",
+    "business_model",
+    "funding_traction",
+)
+
+
+def _load_v2_prompt(filename: str) -> str:
+    path = _PROMPTS_DIR / filename
+    if not path.exists():
+        raise FileNotFoundError(f"v2 prompt missing: {path}")
+    return path.read_text(encoding="utf-8")
+
+
+def render_initial_screening_v2_survey(
+    entity_name: str,
+    entity_website: Optional[str],
+    entity_id: str,
+    run_id: str,
+) -> str:
+    return (
+        _load_v2_prompt("initial_screening_v2_survey.md")
+        .replace("{{entity_name}}", entity_name)
+        .replace("{{entity_website}}", entity_website or "(not provided)")
+        .replace("{{entity_id}}", entity_id)
+        .replace("{{run_id}}", run_id)
+    )
+
+
+def render_initial_screening_v2_section(
+    section_id: str,
+    entity_name: str,
+    entity_website: Optional[str],
+    run_id: str,
+) -> str:
+    """Render the per-section prompt. ``section_id`` must be one of
+    :data:`V2_SECTION_IDS`."""
+    if section_id not in V2_SECTION_IDS:
+        raise ValueError(f"unknown v2 section: {section_id!r}")
+    filename = f"initial_screening_v2_{section_id}.md"
+    return (
+        _load_v2_prompt(filename)
+        .replace("{{entity_name}}", entity_name)
+        .replace("{{entity_website}}", entity_website or "(not provided)")
+        .replace("{{run_id}}", run_id)
+    )
 
 
 def render_red_team(

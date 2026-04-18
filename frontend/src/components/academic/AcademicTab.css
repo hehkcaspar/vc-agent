@@ -1539,6 +1539,16 @@ a.event-link:hover {
   align-items: flex-start;
 }
 
+.chat-content .entity-conversation-msg-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+}
+
+.chat-content .entity-conversation-msg-user .entity-conversation-msg-header {
+  flex-direction: row-reverse;
+}
+
 .chat-content .entity-conversation-msg-role {
   font-size: 10px;
   font-weight: 700;
@@ -1552,6 +1562,14 @@ a.event-link:hover {
 
 .chat-content .entity-conversation-msg-assistant .entity-conversation-msg-role {
   color: var(--color-accent-gold, #d97706);
+}
+
+.chat-content .entity-conversation-msg-time {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .chat-content .entity-conversation-msg-content {

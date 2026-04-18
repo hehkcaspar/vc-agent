@@ -96,8 +96,20 @@ def _build_agent_core(
     run_id: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
     preset_id: Optional[str] = None,
+    include_web_search: bool = False,
+    tool_allowlist: Optional[Sequence[str]] = None,
 ):
-    """Build the shared components (model, tools, prompt) for any agent mode."""
+    """Build the shared components (model, tools, prompt) for any agent mode.
+
+    ``include_web_search``: when True, appends a Gemini-grounded web search
+    function tool. Opt-in (Initial Screening and future research presets).
+
+    ``tool_allowlist``: when provided, only tools whose name appears in
+    this set are kept. Use to narrow a research sub-agent's attack
+    surface (e.g. v2 section agents get read/write/search only — no tree
+    browsing, no file management — so they can't burn their recursion
+    budget exploring the data room). ``None`` means "all tools".
+    """
     model = build_agent_chat_model(profile_id=model_profile_id)
     ws = WorkspaceService(storage)
     tools = build_workspace_tools(
@@ -112,6 +124,14 @@ def _build_agent_core(
     # Add the entity-agnostic legal-template reader (Tier R1 reference corpus).
     # Read-only and harmless for presets that don't use it.
     tools = tools + build_legal_template_tools(on_status=on_status)
+    if include_web_search:
+        from app.services.web_search_tool import build_web_search_tool
+        tools = tools + [build_web_search_tool(on_status=on_status)]
+
+    if tool_allowlist is not None:
+        allowed = set(tool_allowlist)
+        tools = [t for t in tools if getattr(t, "name", None) in allowed]
+
     system_prompt = build_agent_system_prompt(
         entity,
         extras=system_prompt_extras,
@@ -128,12 +148,17 @@ def create_react_portfolio_agent(
     run_id: Optional[str] = None,
     on_status: Optional[Callable[[str], None]] = None,
     preset_id: Optional[str] = None,
+    include_web_search: bool = False,
+    tool_allowlist: Optional[Sequence[str]] = None,
 ):
     """Create a ReAct agent with only workspace tools (no SDK built-ins).
 
     Uses ``langchain.agents.create_agent`` with cherry-picked middleware:
     - SummarizationMiddleware — auto-compacts context when tokens exceed threshold
     - PatchToolCallsMiddleware — fixes dangling tool calls from interruptions
+
+    ``include_web_search`` opts in a Gemini-grounded web search function tool
+    for research-oriented presets (Initial Screening).
     """
     from deepagents.backends.protocol import (
         BackendProtocol,
@@ -190,6 +215,8 @@ def create_react_portfolio_agent(
         run_id=run_id,
         on_status=on_status,
         preset_id=preset_id,
+        include_web_search=include_web_search,
+        tool_allowlist=tool_allowlist,
     )
     # Use absolute token trigger instead of fraction — ChatGoogleGenerativeAI
     # doesn't expose model metadata, so fraction-based triggers never fire.
@@ -216,10 +243,21 @@ def invoke_react_portfolio_agent(
     agent,
     lc_messages: List[BaseMessage],
     on_status: Optional[Callable[[str], None]] = None,
+    recursion_limit: Optional[int] = None,
 ) -> Tuple[str, Any]:
-    """Invoke a ReAct agent."""
+    """Invoke a ReAct agent.
+
+    ``recursion_limit`` overrides the env-configured default for presets
+    that need more headroom (Initial Screening's multi-section research
+    needs ~60-80 tool calls in a rich workspace).
+    """
     _notify_status(on_status, "Model running (may take a while)...")
-    cfg = {"recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT}
+    limit = (
+        recursion_limit
+        if recursion_limit and recursion_limit > 0
+        else settings.CHAT_AGENT_RECURSION_LIMIT
+    )
+    cfg = {"recursion_limit": limit}
     result = agent.invoke({"messages": lc_messages}, config=cfg)
     _notify_status(on_status, "Composing reply...")
     messages_out = result.get("messages") or []

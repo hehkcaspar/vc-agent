@@ -42,6 +42,52 @@ def _notify(on_status: Optional[Callable[[str], None]], msg: str) -> None:
             pass
 
 
+def _infer_source_type(workspace_path: str) -> str:
+    """Classify a workspace path into a fact_ledger source tier.
+
+    Matches on FOLDER segments (not full-string substrings) so a deck that
+    happens to have "safe" in its name doesn't get misfiled as a legal doc.
+
+    - ``cap_table`` — any segment names a cap table file or folder.
+    - ``legal_doc`` — the path traverses a ``Legal`` folder, or the
+      basename starts with a standard legal instrument prefix.
+    - ``upload`` — anything else (deck, memo, data room doc).
+    """
+    if not workspace_path:
+        return "upload"
+    segments = [seg.strip().lower() for seg in workspace_path.split("/") if seg.strip()]
+    if not segments:
+        return "upload"
+    basename = segments[-1]
+
+    # Cap table: explicit naming in the filename or any folder segment.
+    cap_tokens = ("cap table", "captable", "cap_table", "cap-table")
+    if any(tok in s for s in segments for tok in cap_tokens):
+        return "cap_table"
+
+    # Legal folder anywhere in the path (common: `Data Room/Legal/...`).
+    if any(seg == "legal" or seg.startswith("legal ") for seg in segments[:-1]):
+        return "legal_doc"
+
+    # Basename starts with a standard legal-instrument marker
+    # (e.g. ``safe-...``, ``SPA - executed...``, ``Side Letter...``).
+    legal_prefixes = (
+        "safe", "spa", "ssa", "side letter", "side-letter",
+        "subscription agreement", "investor rights", "voting agreement",
+        "shareholders agreement", "share purchase agreement",
+        "restricted stock", "certificate of incorporation",
+    )
+    for prefix in legal_prefixes:
+        if basename.startswith(prefix):
+            return "legal_doc"
+        # Allow leading numbering like "1. SPA ..." or "1a. SAFE ..."
+        for numbered_match in (f". {prefix}", f".{prefix}"):
+            if numbered_match in basename:
+                return "legal_doc"
+
+    return "upload"
+
+
 def build_workspace_tools(
     entity_id: str,
     session_id: str,
@@ -430,6 +476,33 @@ def build_workspace_tools(
                             "preset_id": preset_id,
                         },
                     },
+                )
+
+                # Ledger shim: mirror hard-fact discrepancies as a proposed
+                # entry so the frontend can show provenance + source-tier
+                # pills even before the user adjudicates. No-op for soft-path
+                # discrepancies.
+                from app.services.fact_ledger_schema import (
+                    CONFIDENCE_STRING_TO_FLOAT, FactSource,
+                )
+                from app.services.fact_manager import (
+                    record_proposed_for_discrepancy,
+                )
+                src_type = _infer_source_type(node.path)
+                record_proposed_for_discrepancy(
+                    metadata,
+                    discrepancy_id=committed["id"],
+                    fact_path=field_path,
+                    proposed_value=_parse(proposed_value),
+                    source=FactSource(
+                        type=src_type,
+                        ref=f"workspace://{node.path}",
+                        quote=(source_doc_quote or None) or None,
+                        preset=preset_id or detected_by,
+                        run_id=run_id,
+                    ),
+                    confidence=CONFIDENCE_STRING_TO_FLOAT.get(confidence, 0.7),
+                    notes=f"proposed_via:propose_fact_update/{detected_by}",
                 )
 
                 entity.metadata_json = json.dumps(metadata, ensure_ascii=False)

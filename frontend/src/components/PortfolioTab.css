@@ -78,8 +78,98 @@
 
 /* .btn-primary is defined in src/styles/primitives.css. */
 
-.portfolio-view-toggle {
+/* Toolbar: stage filter (primary) + status filter (secondary) + view toggle.
+   Each filter sits inside a labelled group so the two dims read as distinct
+   controls. Wraps to multiple rows on narrow screens. */
+.portfolio-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: var(--space-5);
+  flex-wrap: wrap;
   margin-bottom: var(--space-6);
+}
+
+/* Group = small uppercase label + its segmented toggle. Stack label above the
+   control so the dimension name is unambiguous. */
+.portfolio-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.portfolio-filter-label {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  line-height: 1;
+}
+
+.portfolio-stage-filter {
+  /* Let the filter expand as wide as it needs. */
+  max-width: 100%;
+}
+
+.portfolio-view-toggle {
+  flex-shrink: 0;
+  margin-left: auto;
+  align-self: flex-end;
+}
+
+/* Count pill inside each filter button — subtle neutral chip; flips to gold
+   when the parent button is active so counts stay legible in the active state. */
+.portfolio-stage-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: var(--space-2);
+  min-width: 1.25rem;
+  padding: 0 6px;
+  height: 1.125rem;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--color-text-tertiary);
+}
+
+.segmented-toggle button.active .portfolio-stage-count,
+.segmented-toggle button.is-active .portfolio-stage-count {
+  background: var(--color-accent-gold-glow);
+  border-color: var(--color-accent-gold);
+  color: var(--color-text-primary);
+}
+
+/* Stage chip — reuses the .deal-stage-* palette from EntityDetail.css so the
+   row/card pill matches the header badge on the entity detail page. */
+.portfolio-stage-chip {
+  flex-shrink: 0;
+}
+
+/* Row: sit between info and the hover-revealed action buttons. */
+.entity-row .portfolio-stage-chip {
+  margin-right: var(--space-4);
+}
+
+/* Card: put the chip next to the icon (left-aligned) so it doesn't collide
+   with the absolute-positioned hover actions in the top-right corner. Share
+   the icon's bottom margin so the name row below keeps the same rhythm. */
+.entity-card-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-bottom: var(--space-5);
+}
+
+.entity-card-header .entity-card-icon {
+  margin-bottom: 0;
 }
 
 /* Entity Grid */

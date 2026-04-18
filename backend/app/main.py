@@ -14,6 +14,7 @@ from app.routers import (
     chat,
     discrepancies,
     entities,
+    fact_ledger,
     ingest,
     parkinglot,
     settings as settings_router,
@@ -233,6 +234,7 @@ app.include_router(workspace.router)
 app.include_router(academic.router)
 app.include_router(settings_router.router)
 app.include_router(discrepancies.router)
+app.include_router(fact_ledger.router)
 
 
 @app.get("/")

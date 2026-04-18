@@ -31,6 +31,10 @@ from app.services.fact_discrepancies import (
     list_discrepancies,
     reject_discrepancy,
 )
+from app.services.fact_manager import (
+    promote_proposed_to_active,
+    reject_proposed,
+)
 
 router = APIRouter(prefix="/entities", tags=["fact-discrepancies"])
 
@@ -127,6 +131,11 @@ async def accept_fact_discrepancy(
         raise HTTPException(status_code=404, detail="discrepancy not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Ledger shim: promote the linked proposed entry to active (or no-op for
+    # pre-shim discrepancies that have no ledger mirror).
+    promote_proposed_to_active(updated_meta, discrepancy_id)
+
     entity.metadata_json = json.dumps(updated_meta, ensure_ascii=False)
     entity.updated_at = utc_now()
     await db.commit()
@@ -154,6 +163,11 @@ async def reject_fact_discrepancy(
         raise HTTPException(status_code=404, detail="discrepancy not found")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    # Ledger shim: flip the linked proposed entry to rejected (no-op for
+    # pre-shim rows).
+    reject_proposed(updated_meta, discrepancy_id)
+
     entity.metadata_json = json.dumps(updated_meta, ensure_ascii=False)
     entity.updated_at = utc_now()
     await db.commit()

@@ -67,7 +67,7 @@ async def create_entity(
         website=entity.website,
         type="company",
         status="active",
-        deal_stage=entity.deal_stage or "diligence",
+        deal_stage=entity.deal_stage or "prospect",
     )
     db.add(db_entity)
     await db.flush()

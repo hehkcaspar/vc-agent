@@ -58,6 +58,11 @@ from app.services.extract_info_signals import (
     split_extract_info_payload,
 )
 from app.services.fact_discrepancies import append_discrepancy
+from app.services.fact_ledger_schema import FactSource
+from app.services.fact_manager import (
+    extract_hard_facts_from_payload,
+    record_fact_in_metadata,
+)
 from app.services.legal_review_facts import (
     merge_legal_review_opinions,
     merge_prior_round_facts,
@@ -75,6 +80,7 @@ from app.services.preset_registry import (
     get_preset,
     list_presets,
     render_extract_info,
+    render_initial_screening_research,
     render_legal_review,
     render_red_team,
 )
@@ -619,6 +625,20 @@ async def run_preset_agent_job(job_id: str) -> None:
                         meta.get("_fact_discrepancies") or []
                     ),
                 )
+            elif preset_id == "initial_screening":
+                task_body = render_initial_screening_research(
+                    entity_name=entity.name,
+                    entity_website=entity.website,
+                    entity_id=job.entity_id,
+                    # agent_run_id_snap is assigned a bit later; the job id
+                    # is a stable identifier the agent can echo into each
+                    # section JSON's `generated_by_run_id` field.
+                    run_id=str(job.id),
+                )
+            elif preset_id == "initial_screening_v2":
+                # v2 runs its own orchestrator below — task_body stays empty
+                # because we bypass the generic agent invocation.
+                task_body = ""
             else:
                 job.status = "failed"
                 job.error_message = f"preset_not_implemented:{preset_id}"
@@ -685,6 +705,130 @@ async def run_preset_agent_job(job_id: str) -> None:
             default_artifact_type_snap = preset.default_artifact_type
             default_artifact_status_snap = preset.default_artifact_status
             artifact_title_snap = preset.artifact_title
+            # v2 orchestrator needs access to the workspace tree + pointer
+            # list independent of the `user_turn` preamble packing, since
+            # each section agent composes its own turn.
+            workspace_context_snap = workspace_context
+            pointer_list_snap = pointer_list
+            history_snap = list(history)
+
+        # --- initial_screening_v2: bypass single-agent path ---------------
+        # Run survey + 6 parallel section agents + compose + review here,
+        # then emit the assistant message and return. The rest of this
+        # function handles v1 presets untouched.
+        if preset_id == "initial_screening_v2":
+            from app.services.initial_screening_v2_job import (
+                run_compose_review_v2,
+                run_research_v2,
+                V2_MEMO_PATH,
+            )
+
+            outcome = await run_research_v2(
+                brief=brief,
+                session_id=session_id_snap,
+                run_id=agent_run_id_snap,
+                history=history_snap,
+                workspace_context=workspace_context_snap,
+                pointer_list=pointer_list_snap,
+                model_profile_id=model_profile_id_snap,
+                on_status=on_status,
+            )
+
+            async with AsyncSessionLocal() as db:
+                ws = WorkspaceService(storage)
+                memo, warns = await run_compose_review_v2(
+                    db, ws,
+                    entity_id=job.entity_id,
+                    entity_name=brief.name,
+                    entity_website=brief.website,
+                    agent_run_id=agent_run_id_snap,
+                    on_status=on_status,
+                )
+
+                memo_node = await ws.get_node_by_path(
+                    db, job.entity_id, V2_MEMO_PATH,
+                )
+                succeeded = sum(1 for r in outcome.sections if r.succeeded)
+                summary_lines = [
+                    f"Initial Screening v2 complete: "
+                    f"{succeeded}/{len(outcome.sections)} sections, "
+                    f"research {outcome.total_seconds:.0f}s."
+                ]
+                if outcome.survey and outcome.survey.notes:
+                    summary_lines.append(
+                        f"Survey: {outcome.survey.notes}",
+                    )
+                for sec in outcome.sections:
+                    if not sec.succeeded:
+                        summary_lines.append(
+                            f"- [{sec.section_id}] failed "
+                            f"({sec.wall_seconds:.0f}s): {sec.error}",
+                        )
+                if warns:
+                    summary_lines.append("Compose/review warnings:")
+                    for w in warns:
+                        summary_lines.append(f"- {w}")
+                summary_body = "\n\n".join(summary_lines)
+
+                if memo_node is not None:
+                    content = json.dumps({
+                        "_vc_chat": "artifact_card",
+                        "node_id": memo_node.id,
+                        "entity_id": job.entity_id,
+                        "preset_label": preset_label_snap,
+                        "deliverable_type": default_artifact_type_snap,
+                        "artifact_title": artifact_title_snap,
+                        "version": memo_node.version,
+                        "status": default_artifact_status_snap,
+                        "summary": summary_body,
+                        "path": memo_node.path,
+                    })
+                else:
+                    content = (
+                        f"**Initial Screening v2 failed** — no memo was "
+                        f"produced.\n\n{summary_body}"
+                    )
+
+                assistant_msg = ConversationMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=job.session_id,
+                    role="assistant",
+                    content=content,
+                    model_profile_id=normalize_profile_id(model_profile_id_snap),
+                )
+                db.add(assistant_msg)
+
+                res2 = await db.execute(
+                    select(ChatCompletionJob).where(
+                        ChatCompletionJob.id == job_id,
+                    )
+                )
+                job2 = res2.scalar_one_or_none()
+                if job2 and job2.status not in ("succeeded", "failed"):
+                    job2.assistant_message_id = assistant_msg.id
+                    job2.status = "succeeded"
+                    job2.step_detail = "Done"
+                    tool_trace: dict = {
+                        "status_trace": status_trace[-60:],
+                        "v2_total_seconds": outcome.total_seconds,
+                        "v2_sections": [
+                            {
+                                "id": r.section_id,
+                                "ok": r.succeeded,
+                                "seconds": round(r.wall_seconds, 1),
+                                "error": r.error,
+                            }
+                            for r in outcome.sections
+                        ],
+                    }
+                    job2.tool_trace_json = json.dumps(tool_trace)
+                    job2.updated_at = utc_now()
+
+                sess = await _get_session(db, job.entity_id, job.session_id)
+                sess.updated_at = utc_now()
+                await db.commit()
+
+            return  # Skip the single-agent path below.
 
         def _run_agent() -> Tuple[str, Any]:
             kwargs = dict(
@@ -703,9 +847,26 @@ async def run_preset_agent_job(job_id: str) -> None:
                     agent, lc_messages, on_status=on_status,
                 )
             else:
-                agent = create_react_portfolio_agent(**kwargs)
+                # Initial Screening's phase-1 research agent needs Google-
+                # grounded web search. Opt-in per preset so other presets
+                # don't get the tool by default.
+                react_kwargs = dict(kwargs)
+                recursion_override: Optional[int] = None
+                if preset_id == "initial_screening":
+                    react_kwargs["include_web_search"] = True
+                    # Six section JSONs × (~2 file reads + 1 web search + 1
+                    # write) + survey overhead = ~40-50 tool calls in a tight
+                    # workspace, ~60-80 in a rich one. The .env default (50)
+                    # is too tight; give this preset its own headroom without
+                    # relaxing the global cap.
+                    recursion_override = max(
+                        120, settings.CHAT_AGENT_RECURSION_LIMIT,
+                    )
+                agent = create_react_portfolio_agent(**react_kwargs)
                 return invoke_react_portfolio_agent(
-                    agent, lc_messages, on_status=on_status,
+                    agent, lc_messages,
+                    on_status=on_status,
+                    recursion_limit=recursion_override,
                 )
 
         deliverable_body, raw = await asyncio.to_thread(_run_agent)
@@ -832,6 +993,82 @@ async def run_preset_agent_job(job_id: str) -> None:
                             "Synced extract_info metadata to entity %s",
                             job.entity_id,
                         )
+
+                        # ── Fact-ledger retrofit ──────────────────────────
+                        # Mirror each hard-fact field into the append-only
+                        # `_ledger[]`. Source = the workspace docs examined
+                        # in this run. Soft claims (one_liner, description,
+                        # signals, etc.) are NOT routed — they stay on the
+                        # flat fields as per the existing flow.
+                        #
+                        # Implementation note: the flat merge already wrote
+                        # entity.metadata_json above, so re-load it once here
+                        # and mutate in-memory. Per-fact DB roundtrips would
+                        # be O(N) SELECTs for no gain — the pure-dict variant
+                        # batches all writes into one UPDATE at the end.
+                        try:
+                            hard_facts = extract_hard_facts_from_payload(
+                                validated,
+                            )
+                            if hard_facts:
+                                existing_meta_for_ledger = {}
+                                if entity_row.metadata_json:
+                                    try:
+                                        existing_meta_for_ledger = json.loads(
+                                            entity_row.metadata_json,
+                                        )
+                                    except json.JSONDecodeError:
+                                        existing_meta_for_ledger = {}
+                                primary_ref = (
+                                    f"workspace://{read_paths[0]}"
+                                    if read_paths else None
+                                )
+                                source = FactSource(
+                                    type="upload",
+                                    ref=primary_ref,
+                                    preset="extract_info",
+                                    run_id=agent_run_id_snap,
+                                )
+                                notes = (
+                                    f"extract_info examined {len(read_paths)} files"
+                                    if len(read_paths) > 1 else None
+                                )
+                                ledger_writes = 0
+                                for fact_path, value in hard_facts:
+                                    try:
+                                        entry = record_fact_in_metadata(
+                                            existing_meta_for_ledger,
+                                            fact_path=fact_path,
+                                            value=value,
+                                            source=source,
+                                            confidence=0.85,
+                                            notes=notes,
+                                        )
+                                        if entry is not None:
+                                            ledger_writes += 1
+                                    except Exception:
+                                        _log.warning(
+                                            "fact_manager: record_fact_in_metadata "
+                                            "failed for %r", fact_path,
+                                            exc_info=True,
+                                        )
+                                if ledger_writes:
+                                    entity_row.metadata_json = json.dumps(
+                                        existing_meta_for_ledger,
+                                        ensure_ascii=False,
+                                    )
+                                    entity_row.updated_at = utc_now()
+                                    await db.commit()
+                                    _log.info(
+                                        "extract_info retrofit: %d ledger "
+                                        "entries recorded for entity %s",
+                                        ledger_writes, job.entity_id,
+                                    )
+                        except Exception:
+                            _log.warning(
+                                "extract_info fact-ledger retrofit failed",
+                                exc_info=True,
+                            )
                     except Exception:
                         _log.warning(
                             "Failed to sync extract_info metadata", exc_info=True,
@@ -1290,6 +1527,79 @@ async def run_preset_agent_job(job_id: str) -> None:
                     existing_meta["prior_rounds"] = merged_prior_rounds
                     # Drop the legacy combined array — it's been superseded.
                     existing_meta.pop("legal_reviews", None)
+
+                    # ── Fact-ledger retrofit ──────────────────────────────
+                    # Route each fact_block's hard fields through fact_manager
+                    # to append audit entries on ``existing_meta._ledger[]``.
+                    # Source tier = legal_doc (cap_table when the reviewed
+                    # doc is a cap table). Confidence 0.95 — legal docs are
+                    # top-of-trust.
+                    try:
+                        def _legal_src_type(paths: List[str]) -> str:
+                            low = " ".join((p or "").lower() for p in paths)
+                            if (
+                                "captable" in low or "cap_table" in low
+                                or "cap-table" in low
+                            ):
+                                return "cap_table"
+                            return "legal_doc"
+
+                        ledger_writes = 0
+                        for review_entry, fact_block in zip(
+                            incoming_reviews, incoming_facts,
+                        ):
+                            docs_reviewed = (
+                                review_entry.get("documents_reviewed") or []
+                            )
+                            primary_ref = (
+                                f"workspace://{docs_reviewed[0]}"
+                                if docs_reviewed else None
+                            )
+                            src_type = _legal_src_type(docs_reviewed)
+                            source = FactSource(
+                                type=src_type,
+                                ref=primary_ref,
+                                preset="legal_review",
+                                run_id=agent_run_id_snap,
+                            )
+                            notes = (
+                                f"legal_review examined {len(docs_reviewed)} docs"
+                                if len(docs_reviewed) > 1 else None
+                            )
+                            # Wrap the fact_block so it matches the
+                            # prior_rounds[] shape the extractor expects.
+                            hard_facts = extract_hard_facts_from_payload(
+                                {"prior_rounds": [fact_block]}
+                            )
+                            for fact_path, value in hard_facts:
+                                try:
+                                    entry_out = record_fact_in_metadata(
+                                        existing_meta,
+                                        fact_path=fact_path,
+                                        value=value,
+                                        source=source,
+                                        confidence=0.95,
+                                        notes=notes,
+                                    )
+                                    if entry_out is not None:
+                                        ledger_writes += 1
+                                except Exception:
+                                    _log.warning(
+                                        "fact_manager: record_fact failed "
+                                        "for %r", fact_path, exc_info=True,
+                                    )
+                        if ledger_writes:
+                            _log.info(
+                                "legal_review retrofit: %d ledger entries "
+                                "recorded for entity %s",
+                                ledger_writes, job.entity_id,
+                            )
+                    except Exception:
+                        _log.warning(
+                            "legal_review fact-ledger retrofit failed",
+                            exc_info=True,
+                        )
+
                     entity_row.metadata_json = json.dumps(
                         existing_meta, ensure_ascii=False,
                     )
@@ -1416,6 +1726,114 @@ async def run_preset_agent_job(job_id: str) -> None:
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
                     tool_trace: dict = {
+                        "status_trace": status_trace[-40:],
+                        "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
+                    }
+                    if isinstance(raw, dict):
+                        tool_trace["keys"] = list(raw.keys())
+                        tool_trace["message_count"] = len(
+                            raw.get("messages") or []
+                        )
+                    job2.tool_trace_json = json.dumps(tool_trace)
+                    job2.updated_at = utc_now()
+
+                sess = await _get_session(db, job.entity_id, job.session_id)
+                sess.updated_at = utc_now()
+                await db.commit()
+
+            return  # Skip general deliverable post-processing
+
+        # --- initial_screening: orchestrate compose + review stages ---------
+        if preset_id == "initial_screening":
+            from app.services.initial_screening_job import (
+                run_compose_stage, run_review_stage,
+                INITIAL_SCREENING_MEMO_PATH,
+            )
+            async with AsyncSessionLocal() as db:
+                ws = WorkspaceService(storage)
+                memo, warns = await run_compose_stage(
+                    db, ws,
+                    entity_id=job.entity_id,
+                    entity_name=brief.name,
+                    entity_website=brief.website,
+                    agent_run_id=agent_run_id_snap,
+                    on_status=on_status,
+                )
+                if memo:
+                    review_warns = await run_review_stage(
+                        db, ws,
+                        entity_id=job.entity_id,
+                        entity_name=brief.name,
+                        entity_website=brief.website,
+                        agent_run_id=agent_run_id_snap,
+                        memo_draft=memo,
+                        on_status=on_status,
+                    )
+                    warns.extend(review_warns)
+
+                # Lift the final memo content into the assistant message.
+                memo_node = await ws.get_node_by_path(
+                    db, job.entity_id, INITIAL_SCREENING_MEMO_PATH,
+                )
+                summary_body = deliverable_body.strip() or (
+                    "Initial Screening complete."
+                )
+                if memo_node and memo_node.storage_key:
+                    try:
+                        final_memo = storage.read_file_sync(
+                            memo_node.storage_key,
+                        ).decode("utf-8", errors="replace")
+                        summary_body = (
+                            final_memo.splitlines()[0][:200]
+                            if final_memo else summary_body
+                        )
+                    except Exception:
+                        pass
+
+                if warns:
+                    summary_body += "\n\nWarnings:\n" + "\n".join(
+                        f"- {w}" for w in warns
+                    )
+
+                if memo_node is not None:
+                    content = json.dumps({
+                        "_vc_chat": "artifact_card",
+                        "node_id": memo_node.id,
+                        "entity_id": job.entity_id,
+                        "preset_label": preset_label_snap,
+                        "deliverable_type": default_artifact_type_snap,
+                        "artifact_title": artifact_title_snap,
+                        "version": memo_node.version,
+                        "status": default_artifact_status_snap,
+                        "summary": summary_body,
+                        "path": memo_node.path,
+                    })
+                else:
+                    content = (
+                        f"**Initial Screening failed** — no memo was "
+                        f"produced.\n\n{summary_body}"
+                    )
+
+                assistant_msg = ConversationMessage(
+                    id=str(uuid.uuid4()),
+                    session_id=job.session_id,
+                    role="assistant",
+                    content=content,
+                    model_profile_id=normalize_profile_id(model_profile_id_snap),
+                )
+                db.add(assistant_msg)
+
+                res2 = await db.execute(
+                    select(ChatCompletionJob).where(
+                        ChatCompletionJob.id == job_id,
+                    )
+                )
+                job2 = res2.scalar_one_or_none()
+                if job2 and job2.status not in ("succeeded", "failed"):
+                    job2.assistant_message_id = assistant_msg.id
+                    job2.status = "succeeded"
+                    job2.step_detail = "Done"
+                    tool_trace = {
                         "status_trace": status_trace[-40:],
                         "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
                     }
@@ -2082,7 +2500,10 @@ async def run_chat_preset(
     # extract_info + legal_review always run in react mode — they browse the
     # workspace, call workspace_read_file on selected docs, and need a
     # guaranteed workspace_write_file for the JSON deliverable.
-    if preset_id in {"extract_info", "legal_review"}:
+    if preset_id in {
+        "extract_info", "legal_review",
+        "initial_screening", "initial_screening_v2",
+    }:
         mode = "react"
 
     # ----- Agent path (react or deep_agent): background job, return 202 -----
@@ -2134,6 +2555,23 @@ async def run_chat_preset(
                 existing_fact_discrepancies=(
                     meta.get("_fact_discrepancies") or []
                 ),
+            )
+        elif preset_id == "initial_screening":
+            # Phase 1 prompt only — compose/review stages run after the
+            # agent finishes (see run_preset_agent_job below).
+            task_body = render_initial_screening_research(
+                entity_name=entity.name,
+                entity_website=entity.website,
+                entity_id=entity_id,
+                run_id="{{run_id}}",  # substituted at agent build time
+            )
+        elif preset_id == "initial_screening_v2":
+            # The v2 orchestrator builds its own prompts per sub-agent; no
+            # top-level task_body is used. Stub a label for the user
+            # message summary line only.
+            task_body = (
+                "Run Initial Screening v2: split research (survey + 6 "
+                "parallel section agents) → compose → fact-check."
             )
         else:
             raise HTTPException(status_code=400, detail="Preset not implemented")

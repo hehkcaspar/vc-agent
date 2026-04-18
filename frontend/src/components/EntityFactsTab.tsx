@@ -2,12 +2,18 @@
  * Facts view for EntityDetail — a read-only overview of the canonical fact store.
  *
  * Displays, in order:
- *   1. Identity (Tier 1)
- *   2. Team (Tier 2 — founders + key team)
- *   3. Rounds history (Tier 3 — prior_rounds[] with expandable term blocks)
- *   4. Our positions (_positions[] with implied MOIC)
- *   5. Pending fact discrepancies (count + link to the existing panel)
- *   6. Extraction metadata footer
+ *   1. Pending fact discrepancies banner (only when present)
+ *   2. Identity — snapshot KV (HQ, Founded, Business model) above a collapsed
+ *      "Legal & corporate" disclosure (Company name, Legal name, Website,
+ *      Incorporation). The header already shows the bold one-liner, so Identity
+ *      leads with the longer description (or one-liner as a fallback when no
+ *      description exists) — never both.
+ *   3. Co-investors — quiet chip row from existing_investors[]
+ *   4. Team (Tier 2 — founders + key team, bios clamped to 2 lines + show-more)
+ *   5. Deal & rounds (Tier 3 — current raise context + prior_rounds[] with
+ *      expandable term blocks; existing_investors lives in section 3 instead)
+ *   6. Our positions (_positions[] with implied MOIC)
+ *   7. Extraction metadata footer
  *
  * All display helpers come from ../lib/entityFormat, ../lib/moicColor,
  * ../lib/relativeTime — nothing bespoke. Edits route through EntityEditModal
@@ -16,7 +22,7 @@
  * See docs/design/FACTS_VS_OPINIONS.md.
  */
 
-import { Fragment, useMemo, useState } from 'react';
+import { Fragment, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
   AlertTriangle,
@@ -38,10 +44,20 @@ import {
 } from '../lib/entityFormat';
 import { formatRelativeTime } from '../lib/relativeTime';
 import { formatMoic, getMoicColor } from '../lib/moicColor';
+import { FactProvenanceBadge } from './FactProvenance';
 
 // ---------------------------------------------------------------------------
 // Section: Identity
 // ---------------------------------------------------------------------------
+//
+// Layered to avoid loud-loud duplication with EntityHeader. The header already
+// renders one-liner + company name + website prominently, so Identity:
+//   • leads with the longer description (or the one-liner only when no
+//     description exists) — never stacks both
+//   • shows a small "snapshot" KV (HQ, Founded, Business model) — the
+//     "what is this company today" facts that aren't in the header
+//   • tucks the closing/legal facts (Company name, Legal name, Website,
+//     Incorporation) under a collapsed "Legal & corporate" disclosure
 
 function IdentitySection({ meta, entity }: { meta: Record<string, unknown> | null; entity: Entity }) {
   const companyName = asString(meta?.company_name) ?? entity.name;
@@ -56,38 +72,49 @@ function IdentitySection({ meta, entity }: { meta: Record<string, unknown> | nul
   const incJurisdiction = asString(meta?.incorporation_jurisdiction);
   const incEntityType = asString(meta?.incorporation_entity_type);
 
-  const kv = [
+  // Prefer description (longer expanded version). Fall back to one-liner as a
+  // plain paragraph when no description is set.
+  const pitch = description ?? oneLiner;
+
+  const snapshotKv: ReadonlyArray<readonly [string, ReactNode | string | null]> = [
+    ['HQ', hqLocation],
+    ['Founded', foundedDate],
+    ['Business model', businessModel],
+  ];
+
+  const websiteNode: ReactNode = website ? (
+    <>
+      <a
+        href={website.startsWith('http') ? website : `https://${website}`}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="facts-link"
+      >
+        {website} <ExternalLink size={12} />
+      </a>
+      <FactProvenanceBadge factPath="website" />
+    </>
+  ) : null;
+
+  const legalKv: ReadonlyArray<readonly [string, ReactNode | string | null]> = [
     ['Company name', companyName],
     ['Legal name', legalName],
-    ['HQ', hqLocation],
-    [
-      'Website',
-      website ? (
-        <a
-          href={website.startsWith('http') ? website : `https://${website}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="facts-link"
-        >
-          {website} <ExternalLink size={12} />
-        </a>
-      ) : null,
-    ],
-    ['Founded', foundedDate],
+    ['Website', websiteNode],
     [
       'Incorporation',
       incJurisdiction
         ? `${incJurisdiction}${incEntityType ? ` · ${incEntityType}` : ''}`
         : null,
     ],
-    ['Business model', businessModel],
-  ] as const;
+  ];
+
+  const hasLegal = legalKv.some(([, v]) => v != null && v !== '');
+  const [legalOpen, setLegalOpen] = useState(false);
 
   return (
     <section className="facts-section">
       <h3 className="facts-section-title">Identity</h3>
-      {oneLiner && <p className="facts-oneliner">{oneLiner}</p>}
-      {description && <p className="facts-description">{description}</p>}
+      {pitch && <p className="facts-description">{pitch}</p>}
       {industryTags.length > 0 && (
         <div className="facts-tags">
           {industryTags.map((t, i) => (
@@ -96,15 +123,67 @@ function IdentitySection({ meta, entity }: { meta: Record<string, unknown> | nul
         </div>
       )}
       <dl className="facts-kv">
-        {kv.map(([k, v]) =>
+        {snapshotKv.map(([k, v]) =>
           v ? (
-            <Fragment key={k as string}>
+            <Fragment key={k}>
               <dt>{k}</dt>
               <dd>{v}</dd>
             </Fragment>
           ) : null,
         )}
       </dl>
+      {hasLegal && (
+        <div className="facts-disclosure">
+          <button
+            type="button"
+            className="facts-disclosure-trigger"
+            onClick={() => setLegalOpen((o) => !o)}
+            aria-expanded={legalOpen}
+          >
+            {legalOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            <span>Legal &amp; corporate</span>
+          </button>
+          {legalOpen && (
+            <dl className="facts-kv facts-disclosure-content">
+              {legalKv.map(([k, v]) =>
+                v ? (
+                  <Fragment key={k}>
+                    <dt>{k}</dt>
+                    <dd>{v}</dd>
+                  </Fragment>
+                ) : null,
+              )}
+            </dl>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Section: Co-investors
+// ---------------------------------------------------------------------------
+
+function CoInvestorsSection({ meta }: { meta: Record<string, unknown> | null }) {
+  const investors = asArray<string>(meta?.existing_investors).filter(
+    (s) => typeof s === 'string' && s.trim(),
+  );
+  if (investors.length === 0) return null;
+  return (
+    <section className="facts-section">
+      <h3 className="facts-section-title">
+        Co-investors
+        <span className="facts-section-hint"> · {investors.length}</span>
+      </h3>
+      <div className="facts-coinvestors">
+        {investors.map((name, i) => (
+          <span key={`${name}-${i}`} className="facts-coinvestor-chip">
+            {name}
+          </span>
+        ))}
+        <FactProvenanceBadge factPath="existing_investors" />
+      </div>
     </section>
   );
 }
@@ -112,6 +191,53 @@ function IdentitySection({ meta, entity }: { meta: Record<string, unknown> | nul
 // ---------------------------------------------------------------------------
 // Section: Team
 // ---------------------------------------------------------------------------
+//
+// Bios can run several sentences (degree → postdoc → faculty → industry).
+// Stacked across 5+ key-team members that eats the fold, so each bio is
+// clamped to 2 lines with a per-row "show more" toggle.
+//
+// We measure actual DOM overflow rather than guessing from character count —
+// a 270-char bio at 1600px viewport fits in 2 lines, while the same bio at
+// 800px wraps to 4. A char heuristic produces a useless toggle in the wide
+// case (clicking expands nothing). useLayoutEffect runs synchronously after
+// mount with the clamp class applied, so scrollHeight > clientHeight is the
+// authoritative answer.
+
+function BioCell({ text }: { text: string | null | undefined }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [expanded, setExpanded] = useState(false);
+  const [overflows, setOverflows] = useState(false);
+
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    const el = ref.current;
+    // Measured while clamp class is applied (initial render is not expanded).
+    setOverflows(el.scrollHeight > el.clientHeight + 1);
+  }, [text]);
+
+  if (!text) return null;
+
+  return (
+    <div className="facts-team-bg-wrap">
+      <span
+        ref={ref}
+        className={'facts-team-bg' + (!expanded ? ' facts-team-bg--clamped' : '')}
+      >
+        {text}
+      </span>
+      {overflows && (
+        <button
+          type="button"
+          className="facts-team-bg-toggle"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+        >
+          {expanded ? 'show less' : 'show more'}
+        </button>
+      )}
+    </div>
+  );
+}
 
 function TeamSection({ meta }: { meta: Record<string, unknown> | null }) {
   const founders = useMemo(() => readFounders(meta), [meta]);
@@ -125,12 +251,11 @@ function TeamSection({ meta }: { meta: Record<string, unknown> | null }) {
     return null;
   }
 
+  // Header chip already shows team size — drop the redundant " · N headcount"
+  // subtitle so the same number isn't loud in two adjacent surfaces.
   return (
     <section className="facts-section">
-      <h3 className="facts-section-title">
-        Team
-        {teamSize != null && <span className="facts-section-hint"> · {teamSize} headcount</span>}
-      </h3>
+      <h3 className="facts-section-title">Team</h3>
       {founders.length > 0 && (
         <ul className="facts-team-list">
           {founders.map((f, i) => (
@@ -143,7 +268,14 @@ function TeamSection({ meta }: { meta: Record<string, unknown> | null }) {
               >
                 {f.status === 'departed' ? <s>{f.name}</s> : f.name}
               </span>
-              {f.title && <span className="facts-team-title">{f.title}</span>}
+              {f.title && (
+                <span className="facts-team-title">
+                  {f.title}
+                  <FactProvenanceBadge
+                    factPath={`founders[name=${f.name}].title`}
+                  />
+                </span>
+              )}
               {f.linkedin_url && (
                 <a
                   href={f.linkedin_url}
@@ -155,9 +287,7 @@ function TeamSection({ meta }: { meta: Record<string, unknown> | null }) {
                   <Link2 size={12} />
                 </a>
               )}
-              {f.background && (
-                <span className="facts-team-bg">{f.background}</span>
-              )}
+              <BioCell text={f.background} />
             </li>
           ))}
         </ul>
@@ -175,7 +305,7 @@ function TeamSection({ meta }: { meta: Record<string, unknown> | null }) {
                 <li key={`${name}-${i}`} className="facts-team-row">
                   <span className="facts-team-name">{name}</span>
                   {title && <span className="facts-team-title">{title}</span>}
-                  {bg && <span className="facts-team-bg">{bg}</span>}
+                  <BioCell text={bg} />
                 </li>
               );
             })}
@@ -338,7 +468,8 @@ function RoundsSection({ meta }: { meta: Record<string, unknown> | null }) {
   const raiseInstrument = asString(meta?.raise_instrument);
   const valuationCap = asString(meta?.valuation_cap);
   const preMoney = asString(meta?.pre_money_valuation);
-  const existingInvestors = asArray<string>(meta?.existing_investors);
+  // Existing investors render in their own Co-investors section above to give
+  // them visual weight (signal quality of the deal). Don't duplicate the KV row.
   const referral = asString(meta?.referral_source);
 
   return (
@@ -354,12 +485,6 @@ function RoundsSection({ meta }: { meta: Record<string, unknown> | null }) {
         {valuationCap && <><dt>Valuation cap</dt><dd>{valuationCap}</dd></>}
         {preMoney && <><dt>Pre-money</dt><dd>{preMoney}</dd></>}
         {currentRound && <><dt>Current round</dt><dd>{currentRound}</dd></>}
-        {existingInvestors.length > 0 && (
-          <>
-            <dt>Existing investors</dt>
-            <dd>{existingInvestors.join(', ')}</dd>
-          </>
-        )}
         {referral && <><dt>Referral</dt><dd>{referral}</dd></>}
       </dl>
 
@@ -426,9 +551,19 @@ function RoundsSection({ meta }: { meta: Record<string, unknown> | null }) {
                         {isCurrent && <span className="facts-round-badge">current</span>}
                       </td>
                       <td>{date ?? '—'}</td>
-                      <td className="facts-num">{amount ?? '—'}</td>
+                      <td className="facts-num">
+                        {amount ?? '—'}
+                        <FactProvenanceBadge
+                          factPath={`prior_rounds[round_name=${roundName}].amount`}
+                        />
+                      </td>
                       <td>{instrument ?? '—'}</td>
-                      <td>{lead ?? '—'}</td>
+                      <td>
+                        {lead ?? '—'}
+                        <FactProvenanceBadge
+                          factPath={`prior_rounds[round_name=${roundName}].lead_investor`}
+                        />
+                      </td>
                     </tr>
                     {isExpanded && hasTerms && (
                       <tr className="facts-round-detail-row">
@@ -684,6 +819,7 @@ export function EntityFactsTab({
     <div className="entity-facts-tab">
       <DiscrepanciesBanner meta={meta} onOpenPanel={onOpenDiscrepancyPanel} />
       <IdentitySection meta={meta} entity={entity} />
+      <CoInvestorsSection meta={meta} />
       <TeamSection meta={meta} />
       <RoundsSection meta={meta} />
       <PositionsSection meta={meta} funds={funds} onOpenEdit={onOpenEdit} />

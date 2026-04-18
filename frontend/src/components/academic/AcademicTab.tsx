@@ -10,7 +10,7 @@ import { academicApi } from '../../services/academicApi';
 import { AddScholarModal } from './AddScholarModal';
 import { Modal } from '../ui/Modal';
 import { RankingView } from './RankingView';
-import { ScholarDetail } from './ScholarDetail';
+import { ScholarDetail, type ContentTab } from './ScholarDetail';
 import { TasksView } from './TasksView';
 import type { Scholar, UserSettableStatus } from '../../types/academic';
 import { SCHOLAR_STATUS_LABELS, PRIORITY_LABELS, lifecycleOptionsFor } from '../../types/academic';
@@ -53,6 +53,11 @@ function timeAgo(dateStr: string): string {
 
 export function AcademicTab() {
   const [selectedScholar, setSelectedScholar] = useState<Scholar | null>(null);
+  const [detailInitialTab, setDetailInitialTab] = useState<ContentTab>('report');
+  const openScholar = (s: Scholar, tab: ContentTab = 'report') => {
+    setDetailInitialTab(tab);
+    setSelectedScholar(s);
+  };
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingScholar, setEditingScholar] = useState<Scholar | null>(null);
   const [feedOpen, setFeedOpen] = useState(false);
@@ -260,7 +265,7 @@ export function AcademicTab() {
   const handleFeedEventClick = (scholarId: string) => {
     const s = scholars.find((sc) => sc.id === scholarId);
     if (s) {
-      setSelectedScholar(s);
+      openScholar(s, 'timeline');
     }
   };
 
@@ -300,6 +305,7 @@ export function AcademicTab() {
     return (
       <ScholarDetail
         scholar={selectedScholar}
+        initialTab={detailInitialTab}
         onBack={() => { setSelectedScholar(null); mutate(); }}
       />
     );
@@ -449,7 +455,7 @@ export function AcademicTab() {
 
       {/* Ranking view */}
       {viewMode === 'ranking' && (
-        <RankingView onSelectScholar={(s) => setSelectedScholar(s as Scholar)} />
+        <RankingView onSelectScholar={(s) => openScholar(s as Scholar)} />
       )}
 
       {/* Tasks view */}
@@ -492,7 +498,7 @@ export function AcademicTab() {
             <div
               key={scholar.id}
               className="task-row"
-              onClick={() => setSelectedScholar(scholar)}
+              onClick={() => openScholar(scholar)}
             >
               <span className="col-name">
                 <span className="task-name">{scholar.name}</span>

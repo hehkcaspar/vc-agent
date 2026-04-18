@@ -16,7 +16,9 @@ import type {
   Entity,
   FactDiscrepancy,
   FactDiscrepancyConfidence,
+  FactSourceType,
 } from '../types';
+import { SourceTierPill, useFactProvenance } from './FactProvenance';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -78,6 +80,25 @@ export function FactDiscrepancyPanel({
     () => asDiscrepancies(entity.metadata).filter((d) => d.status === 'pending'),
     [entity.metadata],
   );
+
+  // Look up source-tier pills from the provenance context (ledger shim
+  // mirrors each hard-fact discrepancy as a `status=proposed` ledger entry
+  // linked by discrepancy id). `revalidate` re-fetches the ledger after
+  // an accept/reject so the canonical-fact badge (in EntityFactsTab /
+  // EntityHeader) picks up the new source, not the stale pre-accept one.
+  const { groups: provenanceGroups, revalidate: revalidateProvenance } =
+    useFactProvenance();
+  const sourceTypeByDiscrepancyId = useMemo<Record<string, FactSourceType | null>>(() => {
+    const out: Record<string, FactSourceType | null> = {};
+    for (const group of Object.values(provenanceGroups)) {
+      for (const entry of group.history) {
+        if (entry.status === 'proposed' && entry.linked_discrepancy_id) {
+          out[entry.linked_discrepancy_id] = entry.source.type;
+        }
+      }
+    }
+    return out;
+  }, [provenanceGroups]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
@@ -89,6 +110,10 @@ export function FactDiscrepancyPanel({
     try {
       const updated = await api.discrepancies.accept(entity.id, id);
       onEntityChanged(updated);
+      // Ledger shim: the linked proposed entry was promoted to active on
+      // the backend — revalidate so the Facts tab / EntityHeader badges
+      // reflect the new source tier + value.
+      revalidateProvenance();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Accept failed');
     } finally {
@@ -104,6 +129,7 @@ export function FactDiscrepancyPanel({
         entity.id, id, rejectReason.trim() || undefined,
       );
       onEntityChanged(updated);
+      revalidateProvenance();
       setRejectingId(null);
       setRejectReason('');
     } catch (e) {
@@ -151,6 +177,9 @@ export function FactDiscrepancyPanel({
               >
                 {d.confidence}
               </span>
+              {sourceTypeByDiscrepancyId[d.id] && (
+                <SourceTierPill type={sourceTypeByDiscrepancyId[d.id]!} small />
+              )}
               <span className="fact-discrepancy-detector">
                 via {d.detected_by}
               </span>

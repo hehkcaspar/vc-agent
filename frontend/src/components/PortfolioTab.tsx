@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ParkingSquare, Building2, Pencil, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
 import { useEntities } from '../hooks/useEntities';
 import { useTabContext } from '../store/TabContext';
-import { Entity } from '../types';
+import { DealStage, Entity, StageFilter, StatusFilter } from '../types';
 import { api } from '../services/api';
 import { EntityDetail } from './EntityDetail';
 import { CreateEntityModal } from './CreateEntityModal';
@@ -13,11 +13,66 @@ import './PortfolioTab.css';
 
 const TAB_ID = 'portfolio';
 
+const DEAL_STAGE_LABELS: Record<DealStage, string> = {
+  prospect: 'Prospect',
+  diligence: 'Diligence',
+  portfolio: 'Portfolio',
+  passed: 'Passed',
+  exited: 'Exited',
+};
+
+// "Funnel" = live pipeline (prospect + diligence + portfolio). Passed/exited
+// are historical and noisy in day-to-day browsing, so they're hidden by default.
+const FUNNEL_STAGES: DealStage[] = ['prospect', 'diligence', 'portfolio'];
+
+// Order in the segmented control. "Funnel" is the default slice; individual
+// stages follow in funnel order. An explicit "All stages" button is omitted —
+// it was visually indistinguishable from "Funnel" until passed/exited grew.
+const STAGE_FILTER_ORDER: StageFilter[] = [
+  'funnel',
+  'prospect',
+  'diligence',
+  'portfolio',
+  'passed',
+  'exited',
+];
+
+const STAGE_FILTER_LABELS: Record<StageFilter, string> = {
+  all: 'All',
+  funnel: 'Funnel',
+  prospect: 'Prospect',
+  diligence: 'Diligence',
+  portfolio: 'Portfolio',
+  passed: 'Passed',
+  exited: 'Exited',
+};
+
+// Archive dim — orthogonal to workflow stage. Default "Active" hides archived.
+const STATUS_FILTER_ORDER: StatusFilter[] = ['active', 'archived', 'all'];
+
+const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
+  active: 'Active',
+  archived: 'Archived',
+  all: 'All',
+};
+
+/** Back-compat for stage filter values persisted before we redesigned the bar. */
+function normaliseStageFilter(value: StageFilter | undefined): StageFilter {
+  // 'active' was renamed to 'funnel' when the archive dim split out.
+  if ((value as string) === 'active') return 'funnel';
+  // 'all' was removed from the UI because it was visually redundant with
+  // 'funnel' for small portfolios; fall back to 'funnel' when loading.
+  if (value === 'all') return 'funnel';
+  return value ?? 'funnel';
+}
+
 export function PortfolioTab() {
   const { getTabState, setTabState } = useTabContext();
   const savedState = getTabState(TAB_ID);
   
   const [viewMode, setViewMode] = useState<'list' | 'grid'>(savedState?.viewMode ?? 'grid');
+  const [stageFilter, setStageFilter] = useState<StageFilter>(normaliseStageFilter(savedState?.stageFilter));
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedState?.statusFilter ?? 'active');
   const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isParkingLotOpen, setIsParkingLotOpen] = useState(false);
@@ -25,13 +80,63 @@ export function PortfolioTab() {
   const [deleteTarget, setDeleteTarget] = useState<Entity | null>(null);
   const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
   const [isDeletingEntity, setIsDeletingEntity] = useState(false);
-  
+
   const { entities, isLoading, mutate } = useEntities();
   const { count: parkingLotCount } = useParkingLotCount();
+
+  // Counts per filter bucket — rendered inline on each segmented control so
+  // the user sees stage and archival volumes at a glance. Each dim is counted
+  // independently against the full entity list so counts don't jitter when
+  // the other dim changes.
+  const stageCounts = useMemo(() => {
+    const counts: Record<StageFilter, number> = {
+      all: 0, funnel: 0,
+      prospect: 0, diligence: 0, portfolio: 0, passed: 0, exited: 0,
+    };
+    if (!entities) return counts;
+    for (const e of entities) {
+      counts.all += 1;
+      if (FUNNEL_STAGES.includes(e.deal_stage)) counts.funnel += 1;
+      counts[e.deal_stage] += 1;
+    }
+    return counts;
+  }, [entities]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<StatusFilter, number> = { active: 0, archived: 0, all: 0 };
+    if (!entities) return counts;
+    for (const e of entities) {
+      counts.all += 1;
+      if (e.status === 'archived') counts.archived += 1;
+      else counts.active += 1;
+    }
+    return counts;
+  }, [entities]);
+
+  const visibleEntities = useMemo(() => {
+    if (!entities) return entities;
+    return entities.filter((e) => {
+      if (statusFilter === 'active' && e.status !== 'active') return false;
+      if (statusFilter === 'archived' && e.status !== 'archived') return false;
+      if (stageFilter === 'all') return true;
+      if (stageFilter === 'funnel') return FUNNEL_STAGES.includes(e.deal_stage);
+      return e.deal_stage === stageFilter;
+    });
+  }, [entities, stageFilter, statusFilter]);
 
   const handleViewModeChange = (mode: 'list' | 'grid') => {
     setViewMode(mode);
     setTabState(TAB_ID, { viewMode: mode });
+  };
+
+  const handleStageFilterChange = (next: StageFilter) => {
+    setStageFilter(next);
+    setTabState(TAB_ID, { stageFilter: next });
+  };
+
+  const handleStatusFilterChange = (next: StatusFilter) => {
+    setStatusFilter(next);
+    setTabState(TAB_ID, { statusFilter: next });
   };
 
   const handleEntitySelect = (entity: Entity) => {
@@ -127,21 +232,59 @@ export function PortfolioTab() {
         </div>
       </div>
 
-      <div className="segmented-toggle portfolio-view-toggle">
-        <button 
-          type="button"
-          className={viewMode === 'list' ? 'active' : ''}
-          onClick={() => handleViewModeChange('list')}
-        >
-          List
-        </button>
-        <button 
-          type="button"
-          className={viewMode === 'grid' ? 'active' : ''}
-          onClick={() => handleViewModeChange('grid')}
-        >
-          Grid
-        </button>
+      <div className="portfolio-toolbar">
+        <div className="portfolio-filter-group">
+          <span className="portfolio-filter-label">Stage</span>
+          <div className="segmented-toggle portfolio-stage-filter" role="tablist" aria-label="Filter by deal stage">
+            {STAGE_FILTER_ORDER.map((f) => (
+              <button
+                key={f}
+                type="button"
+                role="tab"
+                aria-selected={stageFilter === f}
+                className={stageFilter === f ? 'active' : ''}
+                onClick={() => handleStageFilterChange(f)}
+              >
+                {STAGE_FILTER_LABELS[f]}
+                <span className="portfolio-stage-count">{stageCounts[f]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="portfolio-filter-group portfolio-filter-group--secondary">
+          <span className="portfolio-filter-label">Status</span>
+          <div className="segmented-toggle portfolio-status-filter" role="tablist" aria-label="Filter by archival status">
+            {STATUS_FILTER_ORDER.map((f) => (
+              <button
+                key={f}
+                type="button"
+                role="tab"
+                aria-selected={statusFilter === f}
+                className={statusFilter === f ? 'active' : ''}
+                onClick={() => handleStatusFilterChange(f)}
+              >
+                {STATUS_FILTER_LABELS[f]}
+                <span className="portfolio-stage-count">{statusCounts[f]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="segmented-toggle portfolio-view-toggle">
+          <button
+            type="button"
+            className={viewMode === 'list' ? 'active' : ''}
+            onClick={() => handleViewModeChange('list')}
+          >
+            List
+          </button>
+          <button
+            type="button"
+            className={viewMode === 'grid' ? 'active' : ''}
+            onClick={() => handleViewModeChange('grid')}
+          >
+            Grid
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -150,13 +293,19 @@ export function PortfolioTab() {
         <div className="empty-state">
           No entities yet. Create your first entity to get started.
         </div>
+      ) : visibleEntities?.length === 0 ? (
+        <div className="empty-state">
+          No entities matching <strong>{STAGE_FILTER_LABELS[stageFilter]}</strong>
+          {' · '}
+          <strong>{STATUS_FILTER_LABELS[statusFilter]}</strong>. Try a different filter.
+        </div>
       ) : (
         <div className={viewMode === 'list' ? 'entity-list' : 'entity-grid'}>
-          {entities?.map(entity => (
+          {visibleEntities?.map(entity => (
             viewMode === 'list' ? (
-              <EntityRow 
-                key={entity.id} 
-                entity={entity} 
+              <EntityRow
+                key={entity.id}
+                entity={entity}
                 onClick={() => handleEntitySelect(entity)}
                 onEdit={(e) => {
                   e.stopPropagation();
@@ -166,9 +315,9 @@ export function PortfolioTab() {
                 onDelete={(e) => requestDeleteEntity(e, entity)}
               />
             ) : (
-              <EntityCard 
-                key={entity.id} 
-                entity={entity} 
+              <EntityCard
+                key={entity.id}
+                entity={entity}
                 onClick={() => handleEntitySelect(entity)}
                 onEdit={(e) => {
                   e.stopPropagation();
@@ -267,6 +416,16 @@ export function PortfolioTab() {
   );
 }
 
+function StageChip({ stage }: { stage: DealStage }) {
+  // Reuses the .tag-menu-trigger + .deal-stage-* palette from EntityDetail so
+  // chip colours match the header badge on the detail page.
+  return (
+    <span className={`tag-menu-trigger deal-stage-${stage} portfolio-stage-chip`}>
+      {DEAL_STAGE_LABELS[stage]}
+    </span>
+  );
+}
+
 function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   const isArchived = entity.status === 'archived';
   return (
@@ -281,9 +440,10 @@ function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: E
           {entity.website || 'No website'} • Updated {new Date(entity.updated_at).toLocaleDateString()}
         </div>
       </div>
+      <StageChip stage={entity.deal_stage} />
       <div className="entity-row-actions">
-        <button 
-          className="btn-icon" 
+        <button
+          className="btn-icon"
           onClick={onEdit}
           title="Edit entity"
         >
@@ -313,8 +473,8 @@ function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: 
   return (
     <div className={`entity-card ${isArchived ? 'archived' : ''}`} onClick={onClick}>
       <div className="card-actions">
-        <button 
-          className="btn-icon card-edit-btn" 
+        <button
+          className="btn-icon card-edit-btn"
           onClick={onEdit}
           title="Edit entity"
         >
@@ -336,7 +496,10 @@ function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: 
         </button>
       </div>
       {isArchived && <div className="archived-overlay">Archived</div>}
-      <div className="entity-card-icon"><Building2 size={32} /></div>
+      <div className="entity-card-header">
+        <div className="entity-card-icon"><Building2 size={32} /></div>
+        <StageChip stage={entity.deal_stage} />
+      </div>
       <div className="entity-card-name">
         {entity.name}
       </div>

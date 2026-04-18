@@ -150,6 +150,62 @@ export interface FactDiscrepancy {
 }
 
 // ---------------------------------------------------------------------------
+// Fact ledger — append-only provenance for canonical hard facts.
+// Populated by fact_manager.record_fact on the backend; read-only surface
+// here (provenance popovers, history drawer). See docs/design/FACTS_VS_OPINIONS.md.
+// ---------------------------------------------------------------------------
+
+export type FactSourceType =
+  | 'cap_table'
+  | 'legal_doc'
+  | 'user'
+  | 'upload'
+  | 'third_party'
+  | 'communication'
+  | 'web'
+  | 'self_claim';
+
+export type FactEntryStatus =
+  | 'active'
+  | 'superseded'
+  | 'contradicted'
+  | 'proposed'
+  | 'rejected'
+  | 'verified';
+
+export interface FactSourceOut {
+  type: FactSourceType;
+  ref?: string | null;
+  quote?: string | null;
+  preset?: string | null;
+  run_id?: string | null;
+}
+
+export interface FactLedgerEntry {
+  entry_id: string;
+  fact_path: string;
+  value: unknown;
+  source: FactSourceOut;
+  confidence: number;
+  as_of?: string | null;
+  recorded_at: string;
+  supersedes?: string | null;
+  status: FactEntryStatus;
+  notes?: string | null;
+  linked_discrepancy_id?: string | null;
+}
+
+export interface FactProvenanceGroup {
+  current: FactLedgerEntry | null;
+  history: FactLedgerEntry[];
+}
+
+export interface FactProvenance {
+  /** Keyed by fact_path. Only paths with at least one ledger entry appear. */
+  groups: Record<string, FactProvenanceGroup>;
+}
+
+// ---------------------------------------------------------------------------
 // Workspace (replaces Resource + Artifact)
 // ---------------------------------------------------------------------------
 
@@ -375,11 +431,19 @@ export type PresetRunResponse =
       warnings: string[];
     };
 
+/** Portfolio workflow filter. "funnel" = prospect + diligence + portfolio (live pipeline). */
+export type StageFilter = 'all' | 'funnel' | DealStage;
+
+/** Portfolio archival filter. Distinct dim from workflow stage. */
+export type StatusFilter = 'active' | 'archived' | 'all';
+
 export interface TabState {
   viewMode: 'list' | 'grid';
   scrollPosition: number;
   selectedEntityId?: string;
   searchQuery: string;
+  stageFilter?: StageFilter;
+  statusFilter?: StatusFilter;
 }
 
 // ============== Entity Metadata Form Configuration ==============

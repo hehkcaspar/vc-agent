@@ -28,14 +28,15 @@ import {
 } from '../../types/academic';
 import { useScholars } from '../../hooks/useAcademic';
 
+export type ContentTab = 'report' | 'timeline' | 'evaluation' | 'publications' | 'profiles' | 'chat';
+
 interface ScholarDetailProps {
   scholar: Scholar;
   onBack: () => void;
+  initialTab?: ContentTab;
 }
 
-type ContentTab = 'report' | 'timeline' | 'evaluation' | 'publications' | 'profiles' | 'chat';
-
-export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailProps) {
+export function ScholarDetail({ scholar: scholarProp, onBack, initialTab = 'report' }: ScholarDetailProps) {
   const { scholars: allScholars, mutate: mutateScholars } = useScholars();
   const scholar = allScholars.find((s) => s.id === scholarProp.id) ?? scholarProp;
   const { narratives, mutate: mutateNarratives } = useScholarNarratives(scholar.id);
@@ -59,7 +60,7 @@ export function ScholarDetail({ scholar: scholarProp, onBack }: ScholarDetailPro
 
   const [selectedNarrativeIdx, setSelectedNarrativeIdx] = useState(0);
   const [isEvaluating, setIsEvaluating] = useState(false);
-  const [contentTab, setContentTab] = useState<ContentTab>('report');
+  const [contentTab, setContentTab] = useState<ContentTab>(initialTab);
   const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
   const [showConfirmEval, setShowConfirmEval] = useState(false);
   const versionSelectorRef = useRef<HTMLDivElement>(null);
