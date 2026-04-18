@@ -141,11 +141,10 @@ def _compose_data_gaps_context(
     Closes a known reliability gap: ``required_sources`` was advisory
     (only used to compute the audit snapshot_id) and source failures
     were swallowed inside ``_run_source``. A dim like D2 with
-    ``[patents_lens, news_web, crunchbase_startups]`` would score
-    confidently against an empty fact store whenever patents_lens
-    was a scaffold or crunchbase_startups was disabled — the LLM
-    would write "zero commercial events" when the ground truth was
-    "we couldn't check."
+    ``[patents_web, news_web, startups_web]`` would score confidently
+    against an empty fact store whenever any required source was a
+    scaffold, disabled, or errored — the LLM would write "zero
+    commercial events" when the ground truth was "we couldn't check."
 
     For each declared required source, classify the state from
     ``cfg.sources`` and the source's last snapshot detail:

@@ -117,7 +117,7 @@ _MINIMAL_CONFIG: dict = {
             "default_cadence_days": 1,
             "description": "test source",
         },
-        "patents_lens": {
+        "patents_web": {
             "layer": 2,
             "enabled": True,
             "default_cadence_days": 30,

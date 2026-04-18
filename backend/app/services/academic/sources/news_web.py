@@ -104,8 +104,7 @@ _FILTER_PROMPT = (
 def _collect_known_ventures(scholar_id: str) -> list[str]:
     """Best-effort list of venture names from prior source data.
 
-    Reads `startups.json` (written by ``crunchbase_startups`` when that
-    source is enabled; empty scaffold otherwise). Returns an empty list
+    Reads `startups.json` (written by ``startups_web``). Returns an empty list
     on a fresh bootstrap where nothing has been discovered yet — the
     search prompt then asks Gemini to discover ventures as part of its
     grounded search. Venture enrichment closes a known blind spot:

@@ -755,11 +755,11 @@ heartbeat reads it on every tick. No hardcoded cadences anywhere.
       "priority_overrides": { "high": 3, "low": 14 },
       "description": "Fetch h-index, i10, total citations from Google Scholar (SerpAPI)"
     },
-    "patents_lens": {
+    "patents_web": {
       "layer": 2,
       "enabled": true,
       "default_cadence_days": 30,
-      "description": "Patent search via Lens.org"
+      "description": "Scholar patents via Gemini grounded search"
     },
     "news_web": {
       "layer": 2,
@@ -767,11 +767,11 @@ heartbeat reads it on every tick. No hardcoded cadences anywhere.
       "default_cadence_days": 1,
       "description": "Targeted news search for scholar name + known startups"
     },
-    "crunchbase_startups": {
+    "startups_web": {
       "layer": 2,
-      "enabled": false,
+      "enabled": true,
       "default_cadence_days": 30,
-      "description": "Funding / revenue data for scholar-affiliated startups"
+      "description": "Scholar-founded startups + exits via Gemini grounded search"
     }
   },
 
@@ -788,7 +788,7 @@ heartbeat reads it on every tick. No hardcoded cadences anywhere.
       "layer": 3,
       "enabled": true,
       "default_cadence_days": 7,
-      "required_sources": ["patents_lens", "news_web", "crunchbase_startups"],
+      "required_sources": ["patents_web", "news_web", "startups_web"],
       "triage_model": "gemini-3-flash-preview",
       "scoring_model": "gemini-3.1-pro-preview"
     },
@@ -796,7 +796,7 @@ heartbeat reads it on every tick. No hardcoded cadences anywhere.
       "layer": 3,
       "enabled": true,
       "default_cadence_days": 14,
-      "required_sources": ["news_web", "crunchbase_startups", "semantic_scholar_papers"]
+      "required_sources": ["news_web", "startups_web", "semantic_scholar_papers"]
     },
     "growth_trajectory": {
       "layer": 3,
@@ -1413,7 +1413,7 @@ deep-tech outcome" (or already has). Look for *signs of excellence* — one
 exceptional outcome (a successful strategic acquisition, an IPO, a widely-
 licensed IP family) can carry a band even when other categories are absent.
 
-**Required sources:** `patents_lens`, `news_web`, `crunchbase_startups`,
+**Required sources:** `patents_web`, `news_web`, `startups_web`,
 `semantic_scholar_papers`.
 
 **What counts as commercial output:**
@@ -1537,7 +1537,7 @@ exceptional signal (deep domain dominance, visible grit on a hard problem,
 a track record of attracting top talent) can carry a band even when other
 signals are absent.
 
-**Required sources:** `news_web`, `crunchbase_startups`,
+**Required sources:** `news_web`, `startups_web`,
 `semantic_scholar_papers`.
 
 **Core signals** — judge holistically, not as a checklist:
