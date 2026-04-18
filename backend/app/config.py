@@ -102,6 +102,18 @@ class Settings(BaseSettings):
     LANGSMITH_PROJECT: str = "vc-portfolio-agent"
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
 
+    # CORS — comma-separated list of allowed origins, or "*" for any (dev default).
+    # In production, set to the Vercel URL, e.g. "https://vc-agent.vercel.app".
+    # Multiple origins: "https://vc-agent.vercel.app,https://vc-agent-preview.vercel.app".
+    CORS_ORIGINS: str = "*"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        raw = self.CORS_ORIGINS.strip()
+        if not raw or raw == "*":
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
     @property
     def database_url_sync(self) -> str:
         """SQLAlchemy sync URL for the same SQLite file (agent tools / sync session)."""

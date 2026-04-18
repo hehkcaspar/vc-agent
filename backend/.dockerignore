@@ -1,0 +1,51 @@
+# Keep the build context small — speeds up docker build and avoids leaking
+# local state into the image.
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets / local env
+.env
+**/.env
+backend/.env
+
+# Local runtime data (mounted at /data in the container)
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Tests (not needed in production image)
+backend/tests/
+
+# Frontend (separate deploy target)
+frontend/
+
+# Docs + reference material
+docs/
+reference-project/
+*.md
+!backend/app/**/*.md
+
+# Tooling
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo

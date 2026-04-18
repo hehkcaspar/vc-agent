@@ -216,11 +216,15 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+# CORS middleware. Origins configurable via CORS_ORIGINS env var (comma-separated).
+# Note: allow_credentials=True is incompatible with allow_origins=["*"] per the
+# CORS spec — Starlette will quietly drop credentials in that case. When a
+# concrete origin list is provided, credentials work normally.
+_cors_origins = settings.cors_origins_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

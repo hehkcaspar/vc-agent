@@ -1,0 +1,58 @@
+# Fly.io config for the FastAPI backend.
+#
+# First-time setup (from repo root, with flyctl installed and logged in):
+#   flyctl launch --no-deploy --copy-config --name vc-agent-backend
+#   flyctl volumes create vc_agent_data --region iad --size 10
+#   flyctl secrets set GEMINI_API_KEY=... CORS_ORIGINS=https://your-frontend.vercel.app
+#   flyctl deploy
+#
+# The volume mount at /data persists SQLite + workspace blobs + scholar
+# dossiers across deploys. Swap to Neon/Supabase Postgres later if you outgrow
+# single-node SQLite.
+
+app = "vc-agent-backend"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8000"
+  # Point SQLite + blob storage at the persistent volume. These override
+  # the defaults in backend/app/config.py.
+  DATA_ROOT = "/data/entities"
+  DATABASE_URL = "sqlite+aiosqlite:////data/vc_portfolio.db"
+  ACADEMIC_DATABASE_URL = "sqlite+aiosqlite:////data/academic.db"
+
+# Persist SQLite + file blobs across deploys. Size is in GB.
+[[mounts]]
+  source = "vc_agent_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 50
+    soft_limit = 40
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "GET"
+    path = "/health"
+
+# Long agent runs need a roomy VM. 2 shared CPUs + 2 GB is a reasonable
+# starting point — bump if Gemini calls + LangChain tool loops OOM.
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "2gb"
+  cpu_kind = "shared"
+  cpus = 2
