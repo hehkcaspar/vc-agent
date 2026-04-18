@@ -1,8 +1,8 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Text, Index, text
+from sqlalchemy import Column, String, ForeignKey, Integer, Text, Index, text
 from sqlalchemy.orm import declarative_base, relationship
 
-from app.datetime_support import utc_now
+from app.datetime_support import UtcDateTime, utc_now
 
 Base = declarative_base()
 
@@ -23,8 +23,8 @@ class Entity(Base):
     # Deal lifecycle stage: prospect | diligence | portfolio | passed | exited.
     # Distinct from `status` (active | archived); lifecycle vs archival visibility.
     deal_stage = Column(String, nullable=False, default="diligence")
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
 
     workspace_nodes = relationship(
         "WorkspaceNode", back_populates="entity", cascade="all, delete-orphan",
@@ -45,8 +45,8 @@ class IngestItem(Base):
     entity_hint_name = Column(String, nullable=True)
     entity_hint_domain = Column(String, nullable=True)
     error = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
 
 
 class ConversationSession(Base):
@@ -55,12 +55,12 @@ class ConversationSession(Base):
     id = Column(String, primary_key=True, default=generate_uuid)
     entity_id = Column(String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
     title = Column(String, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
 
     # Gemini Interactions API chain bookmark
     last_gemini_interaction_id = Column(String, nullable=True)
-    last_gemini_interaction_at = Column(DateTime, nullable=True)
+    last_gemini_interaction_at = Column(UtcDateTime, nullable=True)
 
     entity = relationship("Entity", back_populates="chat_sessions")
     messages = relationship(
@@ -88,7 +88,7 @@ class ConversationMessage(Base):
     content = Column(Text, nullable=False)
     model_profile_id = Column(String, nullable=True)   # "gemini_google" | "kimi_moonshot"
     node_ids_json = Column(Text, nullable=True)         # JSON array of attached workspace node IDs
-    created_at = Column(DateTime, default=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
 
     session = relationship("ConversationSession", back_populates="messages")
 
@@ -124,8 +124,8 @@ class ChatCompletionJob(Base):
     # deliverable_status, industry, stage}.
     preset_payload_json = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
 
 
 # ---------------------------------------------------------------------------
@@ -167,9 +167,9 @@ class WorkspaceNode(Base):
     # Metadata (deliverable type/status, descriptions, etc.)
     metadata_json = Column(Text, nullable=True)
 
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
-    deleted_at = Column(DateTime, nullable=True)        # soft delete
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
+    deleted_at = Column(UtcDateTime, nullable=True)        # soft delete
 
     entity = relationship("Entity", back_populates="workspace_nodes")
 
@@ -206,5 +206,5 @@ class WorkspaceOp(Base):
     before_checksum = Column(String, nullable=True)
     after_checksum = Column(String, nullable=True)
 
-    undone_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
+    undone_at = Column(UtcDateTime, nullable=True)
+    created_at = Column(UtcDateTime, default=utc_now)
