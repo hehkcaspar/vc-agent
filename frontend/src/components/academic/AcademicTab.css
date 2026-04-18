@@ -1013,8 +1013,18 @@
 }
 
 .profiles-table th.col-source     { width: 180px; }
-.profiles-table th.col-monitoring { width: 200px; }
+.profiles-table th.col-monitoring { width: 160px; }
 .profiles-table th.col-actions    { width: 80px; text-align: right; }
+
+/* URL cell flex-fills whatever's left. Collapse the whole Monitoring
+ * column on narrow screens — the channel-status info isn't readable at
+ * that width anyway and the column was stealing room from the URL. */
+@media (max-width: 900px) {
+  .profiles-table th.col-monitoring,
+  .profiles-table td.profile-monitoring-cell {
+    display: none;
+  }
+}
 
 .profiles-table td {
   padding: var(--space-3);
@@ -1049,14 +1059,14 @@
 
 .profile-url-link {
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
   gap: var(--space-1);
   max-width: 100%;
+  min-width: 0;
   font-size: var(--text-xs);
   color: var(--color-accent-gold);
   text-decoration: none;
   line-height: 1.4;
-  word-break: break-all;
 }
 
 .profile-url-link:hover {
@@ -1065,11 +1075,13 @@
 
 .profile-url-link svg {
   flex-shrink: 0;
-  margin-top: 2px;
 }
 
 .profile-url-text {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .profile-monitoring-cell {
