@@ -63,30 +63,36 @@ def _normalize_url(url: str) -> str:
 
 
 _PROMPT_TEMPLATE = (
-    "Find recent (last 30 days) news, press releases, or blog posts where "
-    "the academic researcher **{name}**{affiliation_clause} is a named "
-    "protagonist — they are quoted, awarded, appointed, or their specific "
-    "work, paper, or startup is the primary subject. "
-    "Do NOT include: news about their university, institute, or lab unless "
-    "{name} is specifically named and central to the story; news primarily "
-    "about colleagues, students, or co-workers; general field trends or "
-    "blog posts that don't feature {name} directly. "
+    "Find recent (last 30 days) news, press releases, or blog posts related "
+    "to academic researcher **{name}**{affiliation_clause} — either they "
+    "are a named protagonist (quoted, awarded, appointed, or their "
+    "specific work is the subject), OR the story is primarily about a "
+    "commercial venture (startup, company, product) they have founded or "
+    "co-founded. "
+    "{ventures_clause}"
+    "Do NOT include: news about their university, institute, or lab that "
+    "doesn't name {name} or one of their ventures; news primarily about "
+    "colleagues, students, or co-workers; general field trends or blog "
+    "posts that don't feature {name} or a venture directly. "
     "Return a JSON array where each item has: "
     "`title`, `url`, `published_date` (ISO 8601 if known), `source`, "
     "`summary` (1-3 sentences), `category` (one of: funding, launch, "
-    "partnership, award, appointment, talk, other)."
+    "partnership, award, appointment, acquisition, talk, other)."
 )
 
 
 _FILTER_PROMPT = (
     "You are a relevance filter for a scholar-tracking system.\n"
-    "Scholar: **{name}**{affiliation_clause}\n\n"
-    "For each candidate news item below, decide:\n"
-    "1. `relevant` — Is this item DIRECTLY about {name}? They must be a "
-    "named protagonist: quoted, awarded, appointed, or their specific "
-    "work/startup is the subject. Institutional news about their "
-    "university/lab, news about colleagues or students, and field-level "
-    "trends do NOT count even if they mention {name} in passing.\n"
+    "Scholar: **{name}**{affiliation_clause}\n"
+    "{ventures_line}"
+    "\nFor each candidate news item below, decide:\n"
+    "1. `relevant` — Is this item (a) directly about {name} as a named "
+    "protagonist (quoted, awarded, appointed, or their specific work is "
+    "the subject), OR (b) primarily about a commercial venture {name} has "
+    "founded or co-founded (acquisition, funding, launch, etc.)? "
+    "Institutional news about their university or lab, news about "
+    "colleagues or students, and field-level trends do NOT count even if "
+    "they mention {name} in passing.\n"
     "2. `duplicate_of` — If this item covers the same underlying story as "
     "an earlier item in the list (same event, different source URL), set "
     "this to the index of the earlier item. Otherwise null.\n\n"
@@ -95,10 +101,61 @@ _FILTER_PROMPT = (
 )
 
 
+def _collect_known_ventures(scholar_id: str) -> list[str]:
+    """Best-effort list of venture names from prior source data.
+
+    Reads `startups.json` (written by ``crunchbase_startups`` when that
+    source is enabled; empty scaffold otherwise). Returns an empty list
+    on a fresh bootstrap where nothing has been discovered yet — the
+    search prompt then asks Gemini to discover ventures as part of its
+    grounded search. Venture enrichment closes a known blind spot:
+    headlines that mention only the company (e.g. "Viant Acquires
+    TVision") are otherwise filtered out because the scholar isn't
+    named as a protagonist.
+    """
+    startups = read_json(dossier_path(scholar_id) / "startups.json") or {}
+    names: set[str] = set()
+    for item in startups.get("items") or []:
+        name = (item.get("name") or item.get("company") or "").strip()
+        if name:
+            names.add(name)
+    return sorted(names)
+
+
+def _build_ventures_clauses(
+    name: str, ventures: list[str]
+) -> tuple[str, str]:
+    """Return (search_clause, filter_line) pair based on known ventures.
+
+    Search clause goes into `_PROMPT_TEMPLATE.ventures_clause`; filter
+    line goes into `_FILTER_PROMPT.ventures_line`. Keeping both pieces
+    here so the branching logic lives in one place.
+    """
+    if ventures:
+        venture_list = ", ".join(ventures)
+        search = (
+            f"Ventures {name} has founded or co-founded include: "
+            f"{venture_list}. Actively search for recent news mentioning "
+            f"any of these by name, even if {name} isn't in the headline. "
+        )
+        filter_line = f"Known ventures founded/co-founded: {venture_list}.\n"
+    else:
+        search = (
+            f"If {name} has founded or co-founded any startups, companies, "
+            f"or products, briefly identify them (consult their homepage, "
+            f"LinkedIn, or biographical sources) and include recent news "
+            f"about any such venture even if {name} isn't named in the "
+            f"headline. "
+        )
+        filter_line = ""
+    return search, filter_line
+
+
 async def _filter_news(
     candidates: list[dict],
     name: str,
     affiliation: str,
+    ventures: list[str],
     existing_titles: list[str],
 ) -> list[dict]:
     """Filter candidates for relevance and semantic dedup via structured LLM."""
@@ -110,6 +167,7 @@ async def _filter_news(
     from ....config import settings
 
     affiliation_clause = f" at {affiliation}" if affiliation else ""
+    _, ventures_line = _build_ventures_clauses(name, ventures)
 
     # Build numbered candidate list
     candidate_lines = []
@@ -127,6 +185,7 @@ async def _filter_news(
     prompt = _FILTER_PROMPT.format(
         name=name,
         affiliation_clause=affiliation_clause,
+        ventures_line=ventures_line,
         candidates="\n".join(candidate_lines),
         existing=existing_block,
     )
@@ -163,7 +222,13 @@ async def run(
 
     affiliation = ((profile.get("affiliation") or {}).get("current")) or ""
     affiliation_clause = f" at {affiliation}" if affiliation else ""
-    prompt = _PROMPT_TEMPLATE.format(name=name, affiliation_clause=affiliation_clause)
+    ventures = _collect_known_ventures(scholar_id)
+    ventures_clause, _ = _build_ventures_clauses(name, ventures)
+    prompt = _PROMPT_TEMPLATE.format(
+        name=name,
+        affiliation_clause=affiliation_clause,
+        ventures_clause=ventures_clause,
+    )
 
     # Lazy import — llm_client is built in Phase 3. Soft-fail if absent.
     try:
@@ -206,7 +271,9 @@ async def run(
     ]
 
     try:
-        filtered = await _filter_news(valid_items, name, affiliation, existing_titles)
+        filtered = await _filter_news(
+            valid_items, name, affiliation, ventures, existing_titles
+        )
     except Exception:
         logger.warning("news_web: relevance filter failed; using unfiltered items", exc_info=True)
         filtered = valid_items
