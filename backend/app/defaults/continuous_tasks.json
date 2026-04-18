@@ -22,11 +22,11 @@
       },
       "description": "Fetch h-index, i10, total citations from Google Scholar via SerpAPI"
     },
-    "patents_lens": {
+    "patents_web": {
       "layer": 2,
       "enabled": true,
       "default_cadence_days": 30,
-      "description": "Patent search via Lens.org (scaffold; returns empty until integration lands)"
+      "description": "Scholar patents via Gemini grounded search (covers Google Patents / Lens / Espacenet / USPTO)"
     },
     "news_web": {
       "layer": 2,
@@ -34,11 +34,11 @@
       "default_cadence_days": 1,
       "description": "Targeted news search for scholar name + known startups (Gemini grounded search)"
     },
-    "crunchbase_startups": {
+    "startups_web": {
       "layer": 2,
-      "enabled": false,
+      "enabled": true,
       "default_cadence_days": 30,
-      "description": "Funding / revenue data for scholar-affiliated startups (scaffold, disabled)"
+      "description": "Scholar-founded startups + exits via Gemini grounded search"
     },
     "red_flags_watch": {
       "layer": 2,
@@ -65,9 +65,9 @@
       "enabled": true,
       "default_cadence_days": 7,
       "required_sources": [
-        "patents_lens",
+        "patents_web",
         "news_web",
-        "crunchbase_startups"
+        "startups_web"
       ],
       "triage_model": "gemini-3-flash-preview",
       "scoring_model": "gemini-3.1-pro-preview"
@@ -78,7 +78,7 @@
       "default_cadence_days": 14,
       "required_sources": [
         "news_web",
-        "crunchbase_startups",
+        "startups_web",
         "semantic_scholar_papers"
       ],
       "triage_model": "gemini-3-flash-preview",
