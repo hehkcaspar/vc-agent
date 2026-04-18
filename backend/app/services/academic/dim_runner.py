@@ -72,10 +72,20 @@ def _compose_fact_context(snap: FactStoreSnapshot) -> str:
     )
 
 
+_PEER_GROUP_INTERNAL_KEYS = {"discovery_excerpt", "prev_id", "id"}
+
+
 def _compose_peer_group_context(snap: FactStoreSnapshot) -> str:
     if not snap.peer_group:
         return "PEER GROUP: not yet classified. Use your best subfield guess, mark uncertainty: high."
-    return "PEER GROUP:\n" + json.dumps(snap.peer_group, ensure_ascii=False, default=str, indent=2)
+    # Strip internal metadata before sending to the scorer. The
+    # phase_classifier stamps `discovery_excerpt` (a 2000-char dossier
+    # snippet) onto each peer_group record for auditability — Gemini
+    # was picking that field name as the literal `source` value in
+    # every EvidenceItem because it was the only "source-looking" label
+    # in its context.
+    cleaned = {k: v for k, v in snap.peer_group.items() if k not in _PEER_GROUP_INTERNAL_KEYS}
+    return "PEER GROUP:\n" + json.dumps(cleaned, ensure_ascii=False, default=str, indent=2)
 
 
 def _compose_last_eval_context(scholar_id: str, dim_id: str) -> str:
