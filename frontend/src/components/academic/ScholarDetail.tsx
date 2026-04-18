@@ -251,8 +251,8 @@ export function ScholarDetail({ scholar: scholarProp, onBack, initialTab = 'repo
               {scholar.total_citations != null && (
                 <span className="metric-badge">Citations: <strong>{scholar.total_citations.toLocaleString()}</strong></span>
               )}
-              {papers.length > 0 && (
-                <span className="metric-badge">Papers: <strong>{papers.length}</strong></span>
+              {(papersSummary?.total ?? papers.length) > 0 && (
+                <span className="metric-badge">Papers: <strong>{papersSummary?.total ?? papers.length}</strong></span>
               )}
               {lastEvaluated && (
                 <span className="metric-badge last-evaluated">Last evaluated: <strong>{lastEvaluated}</strong></span>
