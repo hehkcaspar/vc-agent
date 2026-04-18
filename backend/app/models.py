@@ -53,7 +53,7 @@ class ConversationSession(Base):
     __tablename__ = "conversation_sessions"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
+    entity_id = Column(String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
     title = Column(String, nullable=True)
     created_at = Column(DateTime, default=utc_now)
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
@@ -99,7 +99,7 @@ class ChatCompletionJob(Base):
     __tablename__ = "chat_completion_jobs"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    entity_id = Column(String, ForeignKey("entities.id"), nullable=False)
+    entity_id = Column(String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False)
     session_id = Column(String, ForeignKey("conversation_sessions.id"), nullable=False)
     user_message_id = Column(String, ForeignKey("conversation_messages.id"), nullable=False)
 
@@ -138,13 +138,17 @@ class WorkspaceNode(Base):
     __tablename__ = "workspace_nodes"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    entity_id = Column(String, ForeignKey("entities.id"), nullable=False, index=True)
+    entity_id = Column(String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Tree structure
     node_type = Column(String, nullable=False)          # file | folder | bookmark
     name = Column(String, nullable=False)               # display name
     path = Column(String, nullable=False)               # materialized: "Data Room/Financials/Q4.xlsx"
-    parent_id = Column(String, ForeignKey("workspace_nodes.id"), nullable=True)
+    parent_id = Column(
+        String,
+        ForeignKey("workspace_nodes.id", ondelete="CASCADE"),
+        nullable=True,
+    )
 
     # File-specific (ignored for folders and bookmarks)
     mime_type = Column(String, nullable=True)
@@ -185,7 +189,7 @@ class WorkspaceOp(Base):
     __tablename__ = "workspace_ops"
 
     id = Column(String, primary_key=True, default=generate_uuid)
-    entity_id = Column(String, ForeignKey("entities.id"), nullable=False, index=True)
+    entity_id = Column(String, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False, index=True)
     batch_id = Column(String, nullable=True, index=True)    # group for atomic undo
 
     op_type = Column(String, nullable=False)       # create_file | create_folder | overwrite |
