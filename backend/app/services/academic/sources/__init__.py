@@ -6,19 +6,19 @@ API. `refresh_dispatcher.trigger_refresh` routes by module name.
 """
 
 from . import (
-    crunchbase_startups,
     google_scholar_stats,
     news_web,
-    patents_lens,
+    patents_web,
     red_flags_watch,
     semantic_scholar_papers,
+    startups_web,
 )
 
 __all__ = [
     "semantic_scholar_papers",
     "google_scholar_stats",
-    "patents_lens",
+    "patents_web",
     "news_web",
-    "crunchbase_startups",
+    "startups_web",
     "red_flags_watch",
 ]

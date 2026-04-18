@@ -50,8 +50,8 @@ You have tools:
 - `read_dim_history(dim_id)` — full JSONL history for one dimension
   (use when the analyst asks how a score changed over time).
 - `trigger_refresh(source_id, reason)` — kick a Layer 2 refresher
-  (`semantic_scholar_papers`, `google_scholar_stats`, `patents_lens`,
-  `news_web`, `crunchbase_startups`, `red_flags_watch`). Only call
+  (`semantic_scholar_papers`, `google_scholar_stats`, `patents_web`,
+  `news_web`, `startups_web`, `red_flags_watch`). Only call
   this when the analyst explicitly asks for fresher data or you have
   a clear reason to believe the fact store is stale for the question.
 - `log_event(event_type, title, summary, significance)` — append a
@@ -124,8 +124,8 @@ _FUNCTION_DECLARATIONS: list[dict[str, Any]] = [
                     "type": "string",
                     "description": (
                         "One of: semantic_scholar_papers, "
-                        "google_scholar_stats, patents_lens, news_web, "
-                        "crunchbase_startups, red_flags_watch"
+                        "google_scholar_stats, patents_web, news_web, "
+                        "startups_web, red_flags_watch"
                     ),
                 },
                 "reason": {
