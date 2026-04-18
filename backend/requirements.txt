@@ -3,7 +3,12 @@ uvicorn[standard]>=0.32.0,<0.35.0
 # 2.0.25 (and other early 2.0.x) crash on Python 3.13 at import:
 # AssertionError: SQLCoreOperations ... TypingOnly ... __static_attributes__, __firstlineno__
 sqlalchemy[asyncio]==2.0.48
+# Local-dev SQLite driver. Production uses Postgres via the two drivers below.
 aiosqlite==0.19.0
+# Postgres drivers: asyncpg for the async engine (main + academic DBs),
+# psycopg[binary] for the sync engine consumed by LangChain workspace tools.
+asyncpg==0.30.0
+psycopg[binary]==3.2.4
 python-multipart==0.0.6
 # 2.5.x on Python 3.13/Windows often has no pydantic-core wheel → sdist build needs Rust/Cargo.
 pydantic==2.12.5

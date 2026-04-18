@@ -102,21 +102,52 @@ class Settings(BaseSettings):
     LANGSMITH_PROJECT: str = "vc-portfolio-agent"
     LANGSMITH_ENDPOINT: str = "https://api.smith.langchain.com"
 
+    # CORS — comma-separated list of allowed origins, or "*" for any (dev default).
+    # In production, set to the deployed frontend URL(s), e.g. the Firebase
+    # Hosting domain. Multiple origins accepted comma-separated.
+    CORS_ORIGINS: str = "*"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        raw = self.CORS_ORIGINS.strip()
+        if not raw or raw == "*":
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
+    @staticmethod
+    def _to_sync_url(url: str) -> str:
+        """Map an async SQLAlchemy URL to its sync counterpart.
+
+        aiosqlite → sqlite (stdlib), asyncpg → psycopg v3. Any other prefix
+        is returned unchanged (treated as already-sync).
+        """
+        if url.startswith("sqlite+aiosqlite:///"):
+            return "sqlite:///" + url.removeprefix("sqlite+aiosqlite:///")
+        if url.startswith("postgresql+asyncpg://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgresql+asyncpg://")
+        return url
+
     @property
     def database_url_sync(self) -> str:
-        """SQLAlchemy sync URL for the same SQLite file (agent tools / sync session)."""
-        u = self.DATABASE_URL
-        if u.startswith("sqlite+aiosqlite:///"):
-            return "sqlite:///" + u.removeprefix("sqlite+aiosqlite:///")
-        return u
+        """Sync URL for the portfolio DB (LangChain workspace tools use this)."""
+        return self._to_sync_url(self.DATABASE_URL)
 
     @property
     def academic_database_url_sync(self) -> str:
-        """Sync URL for the academic SQLite file."""
-        u = self.ACADEMIC_DATABASE_URL
-        if u.startswith("sqlite+aiosqlite:///"):
-            return "sqlite:///" + u.removeprefix("sqlite+aiosqlite:///")
-        return u
+        """Sync URL for the academic DB."""
+        return self._to_sync_url(self.ACADEMIC_DATABASE_URL)
+
+    @staticmethod
+    def _is_sqlite_url(url: str) -> bool:
+        return url.startswith("sqlite")
+
+    @property
+    def portfolio_is_sqlite(self) -> bool:
+        return self._is_sqlite_url(self.DATABASE_URL)
+
+    @property
+    def academic_is_sqlite(self) -> bool:
+        return self._is_sqlite_url(self.ACADEMIC_DATABASE_URL)
 
 
 settings = Settings()

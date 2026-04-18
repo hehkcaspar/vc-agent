@@ -1,0 +1,50 @@
+# Keep the build context small.
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+venv/
+.venv/
+env/
+ENV/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets / local env
+.env
+**/.env
+backend/.env
+
+# Local runtime data (mounted from GCS in prod)
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Tests (not in production image)
+backend/tests/
+
+# Frontend (separate deploy target)
+frontend/
+
+# Docs + reference
+docs/
+reference-project/
+*.md
+!backend/app/**/*.md
+
+# Tooling
+.git/
+.gitignore
+.github/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+*.swp
+*.swo

@@ -5,6 +5,7 @@ import os
 import re
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect as sa_inspect
 
 from app.config import settings
 from app.academic_database import init_academic_db
@@ -98,64 +99,112 @@ async def lifespan(app: FastAPI):
     await init_db()
     await init_academic_db()
 
-    # V2 migration — ensure `last_interaction_id` column exists on
-    # academic_chat_sessions (added by the scholar evaluation framework
-    # rewrite). Single ALTER TABLE, idempotent.
-    try:
-        from sqlalchemy import text
-        from app.academic_database import academic_engine
-        async with academic_engine.begin() as conn:
-            res = await conn.exec_driver_sql(
-                "PRAGMA table_info(academic_chat_sessions)"
+    # Idempotent column-adds. Driver-agnostic: sqlalchemy.inspect works on
+    # both SQLite and Postgres. ALTER TABLE ... ADD COLUMN is ANSI-standard
+    # and accepted unchanged by both (TEXT type, DEFAULT literals all work).
+
+    async def _missing_columns(engine_async, table: str, *needed: str) -> set[str]:
+        """Return the subset of `needed` that don't exist on `table`."""
+        async with engine_async.connect() as conn:
+            present = await conn.run_sync(
+                lambda sc: {c["name"] for c in sa_inspect(sc).get_columns(table)}
             )
-            cols = {row[1] for row in res.fetchall()}
-            if "last_interaction_id" not in cols:
+        return {c for c in needed if c not in present}
+
+    # V2 migration — last_interaction_id on academic_chat_sessions.
+    try:
+        from app.academic_database import academic_engine
+        if "last_interaction_id" in await _missing_columns(
+            academic_engine, "academic_chat_sessions", "last_interaction_id"
+        ):
+            async with academic_engine.begin() as conn:
                 await conn.exec_driver_sql(
                     "ALTER TABLE academic_chat_sessions "
                     "ADD COLUMN last_interaction_id TEXT"
                 )
-                logger.info("Added last_interaction_id column to academic_chat_sessions")
+            logger.info("Added last_interaction_id column to academic_chat_sessions")
     except Exception:
         logger.warning("v2 migration (last_interaction_id) failed", exc_info=True)
 
-    # Add agent_mode column to chat_completion_jobs (react vs deep_agent dispatch)
+    # agent_mode on chat_completion_jobs (react vs deep_agent dispatch).
     try:
         from app.database import engine as portfolio_engine
-        async with portfolio_engine.begin() as conn:
-            res = await conn.exec_driver_sql(
-                "PRAGMA table_info(chat_completion_jobs)"
-            )
-            cols = {row[1] for row in res.fetchall()}
-            if "agent_mode" not in cols:
+        if "agent_mode" in await _missing_columns(
+            portfolio_engine, "chat_completion_jobs", "agent_mode"
+        ):
+            async with portfolio_engine.begin() as conn:
                 await conn.exec_driver_sql(
                     "ALTER TABLE chat_completion_jobs "
                     "ADD COLUMN agent_mode TEXT DEFAULT 'deep_agent'"
                 )
-                logger.info("Added agent_mode column to chat_completion_jobs")
+            logger.info("Added agent_mode column to chat_completion_jobs")
     except Exception:
         logger.warning("agent_mode migration failed", exc_info=True)
 
-    # Add metadata_json + deal_stage columns to entities
+    # metadata_json + deal_stage on entities.
     try:
         from app.database import engine as portfolio_engine  # noqa: F811
-        async with portfolio_engine.begin() as conn:
-            res = await conn.exec_driver_sql(
-                "PRAGMA table_info(entities)"
-            )
-            cols = {row[1] for row in res.fetchall()}
-            if "metadata_json" not in cols:
-                await conn.exec_driver_sql(
-                    "ALTER TABLE entities ADD COLUMN metadata_json TEXT"
-                )
-                logger.info("Added metadata_json column to entities")
-            if "deal_stage" not in cols:
-                await conn.exec_driver_sql(
-                    "ALTER TABLE entities ADD COLUMN deal_stage TEXT "
-                    "NOT NULL DEFAULT 'diligence'"
-                )
-                logger.info("Added deal_stage column to entities")
+        missing = await _missing_columns(
+            portfolio_engine, "entities", "metadata_json", "deal_stage"
+        )
+        if missing:
+            async with portfolio_engine.begin() as conn:
+                if "metadata_json" in missing:
+                    await conn.exec_driver_sql(
+                        "ALTER TABLE entities ADD COLUMN metadata_json TEXT"
+                    )
+                    logger.info("Added metadata_json column to entities")
+                if "deal_stage" in missing:
+                    await conn.exec_driver_sql(
+                        "ALTER TABLE entities ADD COLUMN deal_stage TEXT "
+                        "NOT NULL DEFAULT 'diligence'"
+                    )
+                    logger.info("Added deal_stage column to entities")
     except Exception:
         logger.warning("entities column migration failed", exc_info=True)
+
+    # Upgrade entity-referring FKs to ON DELETE CASCADE.
+    # SQLite doesn't enforce FKs by default so this class of bug only bites
+    # on Postgres: DELETE entity with children in workspace_nodes (self-FK
+    # on parent_id) or workspace_ops (no ORM relationship) fails with
+    # `update or delete … violates foreign key constraint "…_fkey"`.
+    # pg_constraint.confdeltype: 'c' = CASCADE, 'a' = NO ACTION. Loop
+    # covers the four child tables plus the self-referential
+    # workspace_nodes.parent_id. Only runs on Postgres; SQLite paths
+    # untouched.
+    _FK_CASCADE_SPEC: tuple[tuple[str, str, str, str], ...] = (
+        # (table, constraint_name, column, references)
+        ("workspace_nodes", "workspace_nodes_parent_id_fkey", "parent_id", "workspace_nodes(id)"),
+        ("workspace_nodes", "workspace_nodes_entity_id_fkey", "entity_id", "entities(id)"),
+        ("workspace_ops", "workspace_ops_entity_id_fkey", "entity_id", "entities(id)"),
+        ("conversation_sessions", "conversation_sessions_entity_id_fkey", "entity_id", "entities(id)"),
+        ("chat_completion_jobs", "chat_completion_jobs_entity_id_fkey", "entity_id", "entities(id)"),
+    )
+    try:
+        if not settings.portfolio_is_sqlite:
+            from app.database import engine as portfolio_engine  # noqa: F811
+            async with portfolio_engine.begin() as conn:
+                for table, constraint, column, references in _FK_CASCADE_SPEC:
+                    res = await conn.exec_driver_sql(
+                        f"SELECT confdeltype FROM pg_constraint "
+                        f"WHERE conname = '{constraint}'"
+                    )
+                    row = res.fetchone()
+                    if row and row[0] != "c":
+                        await conn.exec_driver_sql(
+                            f'ALTER TABLE {table} DROP CONSTRAINT "{constraint}"'
+                        )
+                        await conn.exec_driver_sql(
+                            f'ALTER TABLE {table} '
+                            f'ADD CONSTRAINT "{constraint}" '
+                            f'FOREIGN KEY ({column}) REFERENCES {references} '
+                            f'ON DELETE CASCADE'
+                        )
+                        logger.info(
+                            "Upgraded %s.%s FK to ON DELETE CASCADE", table, column
+                        )
+    except Exception:
+        logger.warning("FK cascade migration failed", exc_info=True)
 
     # Reset any scholars stuck in "evaluating" (no background tasks survive restart)
     try:
@@ -182,17 +231,22 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("eval_log rotation check failed", exc_info=True)
 
-    # Seed legal-review config files if they don't exist yet. Both files are
-    # idempotent — no-op when already present.
+    # Seed universal config files (schema, D1-D4 prompts, heartbeat schedule,
+    # starter ranking presets, legal review). All ensure-functions are
+    # idempotent and never overwrite existing user-customised files.
+    # Per-environment files (funds.json, digests/*) are intentionally NOT
+    # seeded — they must come from user action or runtime generation.
     try:
         from app.services.legal_templates_config import ensure_legal_templates_seed
         from app.services.legal_review_checklist_config import (
             ensure_legal_review_checklist_seed,
         )
+        from app.services.config_seeding import ensure_universal_configs_seeded
         ensure_legal_templates_seed()
         ensure_legal_review_checklist_seed()
+        ensure_universal_configs_seeded()
     except Exception:
-        logger.warning("legal_review config seeding failed", exc_info=True)
+        logger.warning("config seeding failed", exc_info=True)
 
     # Start academic heartbeat scheduler
     from app.services.academic.heartbeat import HeartbeatScheduler
@@ -216,11 +270,33 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# CORS middleware
+
+# Strip a leading '/api' from inbound paths. Vite dev proxy already rewrites
+# '/api/**' → backend without the prefix; Firebase Hosting rewrites do not
+# strip, so this normalises production to match dev. Routers stay
+# prefix-free.
+@app.middleware("http")
+async def _strip_api_prefix(request, call_next):
+    path = request.url.path
+    if path == "/api":
+        request.scope["path"] = "/"
+        request.scope["raw_path"] = b"/"
+    elif path.startswith("/api/"):
+        new_path = path[len("/api"):]
+        request.scope["path"] = new_path
+        request.scope["raw_path"] = new_path.encode("utf-8")
+    return await call_next(request)
+
+
+# CORS middleware. Origins configurable via CORS_ORIGINS env var (comma-separated).
+# Note: allow_credentials=True is incompatible with allow_origins=["*"] per the
+# CORS spec — Starlette silently drops credentials in that case. When a concrete
+# origin list is provided, credentials work normally.
+_cors_origins = settings.cors_origins_list
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify exact origins
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )

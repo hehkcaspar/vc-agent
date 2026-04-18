@@ -1,0 +1,9 @@
+{
+  "name": "Impact Focused",
+  "weights": {
+    "academic_excellence": 0.6,
+    "tech_transfer_experience": 0.1,
+    "founder_potential": 0.1,
+    "growth_trajectory": 0.2
+  }
+}

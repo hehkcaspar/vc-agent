@@ -1,0 +1,9 @@
+{
+  "name": "VC Commercialization",
+  "weights": {
+    "academic_excellence": 0.15,
+    "tech_transfer_experience": 0.35,
+    "founder_potential": 0.35,
+    "growth_trajectory": 0.15
+  }
+}

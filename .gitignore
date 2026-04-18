@@ -19,6 +19,7 @@ ENV/
 .env
 **/.env
 backend/.env
+.deploy_*.secret
 
 # Node
 node_modules/
@@ -32,6 +33,9 @@ dist-ssr/
 *.swp
 *.swo
 *~
+
+# Firebase CLI local cache
+.firebase/
 
 # Claude Code local state
 .claude/

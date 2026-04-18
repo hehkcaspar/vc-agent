@@ -1,0 +1,26 @@
+{
+  "checks": [
+    {
+      "id": "channel_poll",
+      "enabled": false,
+      "interval_minutes": 5,
+      "action": "poll_due_channels"
+    },
+    {
+      "id": "high_priority_refresh",
+      "enabled": false,
+      "interval_minutes": 10080,
+      "action": "refresh_stale_scholars",
+      "filter": {
+        "tracking_priority": "high",
+        "stale_days": 7
+      }
+    },
+    {
+      "id": "weekly_digest",
+      "enabled": false,
+      "interval_minutes": 10080,
+      "action": "generate_digest"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "Balanced",
+  "weights": {
+    "academic_excellence": 1.0,
+    "tech_transfer_experience": 1.0,
+    "founder_potential": 1.0,
+    "growth_trajectory": 1.0
+  }
+}

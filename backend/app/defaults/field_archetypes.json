@@ -1,0 +1,17 @@
+{
+  "database_and_ai": {
+    "commercialization_signals": [
+      "patents",
+      "startup_founding",
+      "industrial_lab_leadership",
+      "tech_transfer"
+    ],
+    "high_impact_venues": [
+      "SIGMOD",
+      "VLDB",
+      "ICDE",
+      "NeurIPS",
+      "ICLR"
+    ]
+  }
+}
