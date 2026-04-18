@@ -131,6 +131,78 @@ def _compose_red_flags_context(snap: FactStoreSnapshot, dim_id: str) -> str:
     return "ACTIVE RED FLAGS:\n" + json.dumps(flags, ensure_ascii=False, default=str, indent=2)
 
 
+def _compose_data_gaps_context(
+    scholar_id: str,
+    dim_cfg: Any,
+    cfg: ContinuousTasksConfig,
+) -> tuple[str, list[str]]:
+    """Per-source availability check for this dim's ``required_sources``.
+
+    Closes a known reliability gap: ``required_sources`` was advisory
+    (only used to compute the audit snapshot_id) and source failures
+    were swallowed inside ``_run_source``. A dim like D2 with
+    ``[patents_lens, news_web, crunchbase_startups]`` would score
+    confidently against an empty fact store whenever patents_lens
+    was a scaffold or crunchbase_startups was disabled — the LLM
+    would write "zero commercial events" when the ground truth was
+    "we couldn't check."
+
+    For each declared required source, classify the state from
+    ``cfg.sources`` and the source's last snapshot detail:
+
+    - not declared in ``cfg.sources``     → config gap
+    - declared but ``enabled = false``    → disabled
+    - enabled but no snapshot yet         → never ran for this scholar
+    - snapshot.detail has ``error``       → last run failed
+    - snapshot.detail has ``skipped``     → soft-skip (e.g. missing llm_client)
+    - snapshot.detail has ``scaffold``    → placeholder, no real signal
+
+    Returns ``(context_block, gap_list)``. The context block is fed
+    to the scorer so it can adjust score + uncertainty; ``gap_list``
+    is merged back into the eval record's ``missing_data`` after
+    scoring so the gap is preserved even if the LLM omits it.
+    """
+    gaps: list[str] = []
+    for src_id in dim_cfg.required_sources:
+        src_cfg = cfg.sources.get(src_id)
+        if src_cfg is None:
+            gaps.append(f"{src_id}: not declared in continuous_tasks.json")
+            continue
+        if not src_cfg.enabled:
+            gaps.append(f"{src_id}: source disabled in config — signal unavailable")
+            continue
+        snap = last_snapshot_for_source(scholar_id, src_id)
+        if snap is None:
+            gaps.append(
+                f"{src_id}: enabled but not yet run for this scholar — signal unavailable"
+            )
+            continue
+        detail = snap.get("detail") or {}
+        if detail.get("error"):
+            err = str(detail["error"])[:120]
+            gaps.append(f"{src_id}: last run errored ({err}) — signal unverified")
+        elif detail.get("skipped"):
+            gaps.append(
+                f"{src_id}: last run skipped ({detail['skipped']}) — signal unavailable"
+            )
+        elif detail.get("scaffold"):
+            gaps.append(
+                f"{src_id}: scaffold placeholder, real integration pending — signal unavailable"
+            )
+
+    if not gaps:
+        return "DATA GAPS: none — every required source produced signal.", gaps
+
+    block = (
+        "DATA GAPS (required sources without verified signal — do NOT score "
+        "as \"zero evidence\" when the real truth is \"couldn't check\". "
+        "Surface each gap in your `missing_data` list and widen "
+        "`uncertainty` accordingly):\n"
+        + "\n".join(f"- {g}" for g in gaps)
+    )
+    return block, gaps
+
+
 _TRIAGE_PROMPT = (
     "You are the triage gate for a Layer 3 dimension evaluation. Given "
     "the fact-store context and the last scored evaluation for this "
@@ -166,6 +238,7 @@ async def run_dim_eval(
     peer_ctx = _compose_peer_group_context(snap)
     last_ctx = _compose_last_eval_context(scholar_id, dim_id)
     red_ctx = _compose_red_flags_context(snap, dim_id)
+    gaps_ctx, gaps_list = _compose_data_gaps_context(scholar_id, dim_cfg, cfg)
 
     # Audit snapshot id = most recent snapshot across *all* required
     # sources this dim reads, so the id genuinely represents the
@@ -215,7 +288,7 @@ async def run_dim_eval(
     try:
         result = await generate_structured(
             model=dim_cfg.scoring_model,
-            prompt_parts=[prompt, fact_ctx, peer_ctx, last_ctx, red_ctx],
+            prompt_parts=[prompt, fact_ctx, peer_ctx, last_ctx, red_ctx, gaps_ctx],
             response_schema=DimEvalResult,
         )
     except Exception as e:
@@ -236,6 +309,10 @@ async def run_dim_eval(
     # Score 0 is the LLM sentinel for "insufficient evidence to evaluate".
     # Convert to scoreable=False / score=None — skip red-flag caps.
     if result.score == 0:
+        missing = list(result.missing_data)
+        for g in gaps_list:
+            if g not in missing:
+                missing.append(g)
         payload = {
             "dimension_id": dim_id,
             "scholar_id": scholar_id,
@@ -246,7 +323,7 @@ async def run_dim_eval(
             "score": None,
             "evidence": [e.model_dump() for e in result.evidence],
             "uncertainty": result.uncertainty,
-            "missing_data": list(result.missing_data),
+            "missing_data": missing,
             "mini_report": result.mini_report,
             "questions_for_investor": result.questions_for_investor,
             "diff_from_last": (
@@ -267,6 +344,9 @@ async def run_dim_eval(
     missing = list(result.missing_data)
     if flag_notes:
         missing.extend(flag_notes)
+    for g in gaps_list:
+        if g not in missing:
+            missing.append(g)
 
     payload = {
         "dimension_id": dim_id,
