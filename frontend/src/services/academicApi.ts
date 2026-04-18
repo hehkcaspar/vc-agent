@@ -117,7 +117,13 @@ export const academicApi = {
     refresh: (id: string) =>
       fetchJson<{ ok: boolean; status: string }>(`/academic/scholars/${id}/refresh`, { method: 'POST' }),
 
-    papers: (id: string, limit = 50, sortBy = 'citations', authorPosition?: string) => {
+    papers: (id: string, limit = 500, sortBy = 'citations', authorPosition?: string) => {
+      // Default matches the backend cap (500) because the Publications tab
+      // filters by role client-side. A lower default truncates the set
+      // before the filter runs, so `First: 14` in the summary would show
+      // only the first-author papers that happen to be in the top-N by
+      // citations. 500 is large enough for any real scholar and still
+      // cheap to paint.
       let qs = `/academic/scholars/${id}/papers?limit=${limit}&sort_by=${sortBy}`;
       if (authorPosition) qs += `&author_position=${authorPosition}`;
       return fetchJson<PapersResponse>(qs);
