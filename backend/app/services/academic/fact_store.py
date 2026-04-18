@@ -24,6 +24,11 @@ from .file_utils import (
     read_records,
 )
 
+# Cap how many recent news items Layer 3 dim runners see. news.jsonl
+# grows unbounded over a scholar's lifetime; scorers only need the
+# recent window to judge commercial/award/appointment signal.
+_NEWS_WINDOW = 30
+
 
 # ── Red-flag projection (Concept 7) ───────────────────────────────────
 
@@ -151,6 +156,7 @@ class FactStoreSnapshot:
     attributed_metrics: dict[str, Any]
     peer_group: dict[str, Any] | None
     red_flags_active: list[dict[str, Any]] = field(default_factory=list)
+    news: list[dict[str, Any]] = field(default_factory=list)
 
 
 def _read_list_json(scholar_id: str, name: str) -> list[dict[str, Any]]:
@@ -163,6 +169,23 @@ def _read_list_json(scholar_id: str, name: str) -> list[dict[str, Any]]:
         if isinstance(items, list):
             return items
     return []
+
+
+def _recent_news(scholar_id: str, limit: int) -> list[dict[str, Any]]:
+    """Return the most recent *limit* news items, sorted newest-first.
+
+    Sorts by `published_date` with `id` (ISO-timestamp of append) as
+    the fallback, so items the LLM couldn't date still land in
+    discovery order.
+    """
+    items = read_records(scholar_id, "news")
+    if not items:
+        return []
+    items.sort(
+        key=lambda r: (r.get("published_date") or "", r.get("id") or ""),
+        reverse=True,
+    )
+    return items[:limit]
 
 
 def current_state(scholar_id: str) -> FactStoreSnapshot:
@@ -179,4 +202,5 @@ def current_state(scholar_id: str) -> FactStoreSnapshot:
         ),
         peer_group=latest_record(scholar_id, "peer_group"),
         red_flags_active=active_red_flags(scholar_id),
+        news=_recent_news(scholar_id, _NEWS_WINDOW),
     )

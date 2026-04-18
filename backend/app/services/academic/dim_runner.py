@@ -42,6 +42,14 @@ def _dim_prompt(dim_id: str) -> str | None:
     return None
 
 
+_NEWS_FIELDS = ("title", "url", "source", "published_date", "category", "summary")
+
+
+def _project_news(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Trim each news record to the fields a scorer actually needs."""
+    return [{k: it.get(k) for k in _NEWS_FIELDS if it.get(k) is not None} for it in items]
+
+
 def _compose_fact_context(snap: FactStoreSnapshot) -> str:
     """Render the fact-store snapshot into a prompt-friendly block."""
     profile_min = {
@@ -65,6 +73,12 @@ def _compose_fact_context(snap: FactStoreSnapshot) -> str:
             "startups_count": len(snap.startups),
             "patents": snap.patents[:20],
             "startups": snap.startups[:20],
+            # `recent_news` is the Layer 2 `news_web` projection. Scorers
+            # mine it for commercial (funding/launch/partnership/
+            # acquisition), recognition (award), and career (appointment)
+            # signals the structured stores don't yet cover.
+            "recent_news_count": len(snap.news),
+            "recent_news": _project_news(snap.news),
         },
         ensure_ascii=False,
         default=str,
