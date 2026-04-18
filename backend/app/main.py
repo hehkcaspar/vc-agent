@@ -206,6 +206,49 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("FK cascade migration failed", exc_info=True)
 
+    # Upgrade every `TIMESTAMP WITHOUT TIME ZONE` column to
+    # `TIMESTAMP WITH TIME ZONE` so the new `UtcDateTime` TypeDecorator
+    # round-trips cleanly on Postgres. Existing naive values were
+    # stored as UTC wall-time by `utc_now()`; the `AT TIME ZONE 'UTC'`
+    # clause tells Postgres to reinterpret them as UTC instants.
+    # Discovery is dynamic (information_schema) so any new DateTime
+    # column gets migrated on next boot without code changes. Scope is
+    # limited to the `public` schema to avoid touching Postgres
+    # internals or extensions. SQLite-backed instances skip entirely.
+    async def _upgrade_timestamp_columns(engine, label: str) -> None:
+        async with engine.begin() as conn:
+            res = await conn.exec_driver_sql(
+                "SELECT table_name, column_name "
+                "FROM information_schema.columns "
+                "WHERE table_schema = 'public' "
+                "AND data_type = 'timestamp without time zone'"
+            )
+            rows = res.fetchall()
+            for table, column in rows:
+                await conn.exec_driver_sql(
+                    f'ALTER TABLE "{table}" '
+                    f'ALTER COLUMN "{column}" '
+                    f'TYPE TIMESTAMP WITH TIME ZONE '
+                    f'USING "{column}" AT TIME ZONE \'UTC\''
+                )
+                logger.info(
+                    "TZ migration (%s): %s.%s -> TIMESTAMPTZ",
+                    label, table, column,
+                )
+
+    try:
+        if not settings.portfolio_is_sqlite:
+            from app.database import engine as portfolio_engine  # noqa: F811
+            await _upgrade_timestamp_columns(portfolio_engine, "portfolio")
+    except Exception:
+        logger.warning("TZ migration (portfolio) failed", exc_info=True)
+    try:
+        if not settings.academic_is_sqlite:
+            from app.academic_database import academic_engine  # noqa: F811
+            await _upgrade_timestamp_columns(academic_engine, "academic")
+    except Exception:
+        logger.warning("TZ migration (academic) failed", exc_info=True)
+
     # Reset any scholars stuck in "evaluating" (no background tasks survive restart)
     try:
         from sqlalchemy import update
