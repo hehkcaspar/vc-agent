@@ -13,24 +13,10 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
-
-
-def _to_naive_utc(dt: datetime | None) -> datetime | None:
-    """Normalise to naive-UTC to match the DateTime column storage.
-
-    The rest of the app uses `datetime_support.utc_now()` which is
-    naive-UTC by convention. SQLite silently coerced tz-aware sources
-    (e.g. news_web's `_parse_date` which tags UTC); Postgres rejects
-    the insert with "can't subtract offset-naive and offset-aware
-    datetimes". Convert to UTC then strip tzinfo.
-    """
-    if dt is None or dt.tzinfo is None:
-        return dt
-    return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 async def log_event(
@@ -62,7 +48,7 @@ async def log_event(
                     title=title,
                     is_read=False,
                     source_url=(payload or {}).get("url"),
-                    event_date=_to_naive_utc(event_date),
+                    event_date=event_date,
                 )
             )
             await db.commit()

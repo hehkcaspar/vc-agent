@@ -10,11 +10,11 @@ See docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md.
 
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.academic_database import AcademicBase
-from app.datetime_support import utc_now
+from app.datetime_support import UtcDateTime, utc_now
 
 
 def _uuid() -> str:
@@ -33,8 +33,8 @@ class Scholar(AcademicBase):
     tags = Column(Text, nullable=True)                       # JSON array
     entity_id = Column(String, nullable=True)                # FK to portfolio entity (nullable)
     dossier_path = Column(String, nullable=False)            # data/scholars/{id}/
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
 
     events = relationship(
         "ScholarEvent",
@@ -65,8 +65,8 @@ class ScholarEvent(AcademicBase):
     title = Column(String, nullable=True)
     is_read = Column(Boolean, default=False)
     source_url = Column(String, nullable=True)
-    event_date = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
+    event_date = Column(UtcDateTime, nullable=True)
+    created_at = Column(UtcDateTime, default=utc_now)
 
     scholar = relationship("Scholar", back_populates="events")
 
@@ -82,10 +82,10 @@ class Channel(AcademicBase):
     url = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     polling_interval_hours = Column(Integer, default=168)     # 1 week
-    last_polled_at = Column(DateTime, nullable=True)
-    last_changed_at = Column(DateTime, nullable=True)
+    last_polled_at = Column(UtcDateTime, nullable=True)
+    last_changed_at = Column(UtcDateTime, nullable=True)
     poll_error_count = Column(Integer, default=0)
-    created_at = Column(DateTime, default=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
 
     scholar = relationship("Scholar", back_populates="channels")
 
@@ -102,8 +102,8 @@ class AcademicChatSession(AcademicBase):
     # the first turn of a session has no previous_interaction_id and
     # this field is populated once the first turn completes.
     last_interaction_id = Column(String, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
 
     scholar = relationship("Scholar", back_populates="chat_sessions")
     messages = relationship(
@@ -123,7 +123,7 @@ class AcademicChatMessage(AcademicBase):
     session_id = Column(String, ForeignKey("academic_chat_sessions.id"), nullable=False)
     role = Column(String, nullable=False)  # user | assistant
     content = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
 
     session = relationship("AcademicChatSession", back_populates="messages")
 
@@ -142,5 +142,5 @@ class AcademicChatJob(AcademicBase):
     assistant_message_id = Column(String, nullable=True)
     error_message = Column(Text, nullable=True)
     agent_run_id = Column(String, nullable=True)
-    created_at = Column(DateTime, default=utc_now)
-    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+    created_at = Column(UtcDateTime, default=utc_now)
+    updated_at = Column(UtcDateTime, default=utc_now, onupdate=utc_now)
