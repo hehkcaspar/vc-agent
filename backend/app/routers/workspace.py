@@ -10,8 +10,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import Entity, WorkspaceNode
+from app.models import Entity, WorkspaceNode, generate_uuid
 from app.schemas import (
+    UploadCommitRequest,
+    UploadInitRequest,
+    UploadInitResponse,
     WorkspaceAnnotateRequest,
     WorkspaceCopyRequest,
     WorkspaceMoveRequest,
@@ -33,6 +36,8 @@ from app.services.workspace import (
     ProtectedFileError,
     ValidationError,
     WorkspaceError,
+    _make_storage_key,
+    _sanitize_name,
     workspace_service,
 )
 
@@ -228,6 +233,156 @@ async def upload_folder(
             created.append({"path": full_path, "error": str(e)})
     await db.commit()
     return {"uploaded": len([c for c in created if "id" in c]), "results": created}
+
+
+# ── Signed-URL upload flow ────────────────────────────────────────────
+#
+# init: client declares what it wants to upload; backend returns a plan
+#       (signed PUT URL on prod, use_direct_upload=True on local dev).
+# PUT:  client sends bytes directly to the storage URL (or falls back to
+#       POST /workspace/file when use_direct_upload is True).
+# commit: client hands back the upload_id; backend verifies the blob
+#       landed + registers the WorkspaceNode.
+#
+# Rationale: Cloud Run's HTTP/1 request-body ceiling is 32 MB hard. For
+# deck-sized PDFs / large zips we need the browser to upload directly
+# to GCS and bypass Cloud Run for the file bytes. See
+# backend/app/services/storage.py::GcsSignedUrlAdapter.
+
+
+def _canonical_upload_path(path: str) -> str:
+    """Normalise a caller-supplied path. Trims, forbids traversal."""
+    p = (path or "").strip().strip("/")
+    if not p:
+        raise HTTPException(status_code=400, detail="path is required")
+    if ".." in p.split("/"):
+        raise HTTPException(status_code=400, detail="path may not contain '..' segments")
+    return p
+
+
+@router.post("/upload-init", response_model=UploadInitResponse)
+async def upload_init(
+    entity_id: str,
+    body: UploadInitRequest,
+    db: AsyncSession = Depends(get_db),
+) -> UploadInitResponse:
+    """Issue an upload plan for a new file.
+
+    Pure advisory — doesn't mutate the DB. Overwrite is out of scope for
+    v1 of this flow: if a node already exists at ``path`` we force the
+    client to fall back to the legacy direct-POST path so versioning +
+    provenance logic in ``write_file`` stays authoritative.
+    """
+    await _require_entity(db, entity_id)
+    path = _canonical_upload_path(body.path)
+
+    # Overwrite guard — signed URLs can't snapshot the old version before
+    # the PUT lands. Send the client back to the direct-POST path.
+    existing = await workspace_service.get_node_by_path(db, entity_id, path)
+    if existing is not None and existing.node_type == "file":
+        return UploadInitResponse(
+            upload_id=generate_uuid(),  # unused in direct path
+            storage_key="",
+            method="POST",
+            upload_url=None,
+            max_bytes=settings.WORKSPACE_MAX_FILE_BYTES,
+            ttl_seconds=0,
+            use_direct_upload=True,
+        )
+
+    if body.size > settings.WORKSPACE_MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"File exceeds workspace limit "
+                f"({body.size} > {settings.WORKSPACE_MAX_FILE_BYTES} bytes)"
+            ),
+        )
+
+    node_id = generate_uuid()
+    name = path.rsplit("/", 1)[-1]
+    storage_key = _make_storage_key(entity_id, node_id, name)
+
+    plan = storage.mint_upload(
+        storage_key,
+        content_type=body.mime_type,
+        size=body.size,
+    )
+
+    return UploadInitResponse(
+        upload_id=node_id,
+        storage_key=plan.storage_key,
+        method=plan.method,
+        upload_url=plan.url,
+        upload_headers=plan.headers,
+        max_bytes=plan.max_bytes,
+        ttl_seconds=plan.ttl_seconds,
+        use_direct_upload=plan.use_direct_upload,
+    )
+
+
+@router.post("/upload-commit", response_model=WorkspaceNodeResponse)
+async def upload_commit(
+    entity_id: str,
+    body: UploadCommitRequest,
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceNodeResponse:
+    """Register a blob that the client has already uploaded.
+
+    Verifies the blob exists at the canonical storage_key, reads its
+    size + sha256, and calls ``register_uploaded_blob`` to create the
+    ``WorkspaceNode``. If the client skipped init (or hit
+    ``use_direct_upload=True``), this endpoint is not called — the
+    legacy ``POST /workspace/file`` handles the whole round-trip.
+    """
+    await _require_entity(db, entity_id)
+    path = _canonical_upload_path(body.path)
+
+    existing = await workspace_service.get_node_by_path(db, entity_id, path)
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"A node already exists at '{path}'. Use the overwrite endpoint "
+                f"(POST /workspace/file) to replace existing files."
+            ),
+        )
+
+    name = path.rsplit("/", 1)[-1]
+    storage_key = _make_storage_key(entity_id, body.upload_id, name)
+
+    try:
+        size, checksum = await storage.finalize_upload(storage_key)
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No uploaded blob found for upload_id={body.upload_id}. "
+                f"Complete the PUT against the signed URL first."
+            ),
+        )
+
+    mime = body.mime_type or mimetypes.guess_type(name)[0]
+    actor = Actor(type="user")
+    try:
+        node = await workspace_service.register_uploaded_blob(
+            db,
+            entity_id,
+            path,
+            node_id=body.upload_id,
+            storage_key=storage_key,
+            size=size,
+            checksum=checksum,
+            mime_type=mime,
+            actor=actor,
+            metadata=body.metadata,
+            origin_type="upload",
+        )
+        await db.commit()
+        await db.refresh(node)
+        return node
+    except WorkspaceError as e:
+        _handle_ws_error(e)
 
 
 @router.post("/folder", response_model=WorkspaceNodeResponse)
