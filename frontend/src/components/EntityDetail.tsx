@@ -603,6 +603,29 @@ function humanMb(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function humanBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
+
+function humanRate(bps: number): string {
+  if (bps <= 0) return '';
+  if (bps < 1024) return `${bps.toFixed(0)} B/s`;
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`;
+  return `${(bps / (1024 * 1024)).toFixed(1)} MB/s`;
+}
+
+function humanDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return '';
+  if (seconds < 1) return '<1s';
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const m = Math.floor(seconds / 60);
+  const s = Math.round(seconds % 60);
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+
 function FileUploadModal({ entityId, onClose, onSuccess }: {
   entityId: string; onClose: () => void; onSuccess: () => void;
 }) {
@@ -615,7 +638,33 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
   const [uploadLoaded, setUploadLoaded] = useState(0);
   const [uploadTotal, setUploadTotal] = useState(0);
   const [uploadLabel, setUploadLabel] = useState<string | undefined>(undefined);
+  const [uploadDetail, setUploadDetail] = useState<string | undefined>(undefined);
   const [pendingLargeFile, setPendingLargeFile] = useState<{ bytes: number } | null>(null);
+  // Speed sampling — rolling window of (timestamp, loaded) samples so rate
+  // stays smooth across network jitter. Exponential moving average over
+  // the last ~2 s of XHR progress ticks.
+  const rateSamplesRef = useRef<Array<{ t: number; loaded: number }>>([]);
+  const computeRateDetail = (loaded: number, total: number) => {
+    const now = performance.now();
+    const samples = rateSamplesRef.current;
+    samples.push({ t: now, loaded });
+    const cutoff = now - 2000;
+    while (samples.length > 1 && samples[0].t < cutoff) samples.shift();
+    if (samples.length < 2) return undefined;
+    const first = samples[0];
+    const dt = (now - first.t) / 1000;
+    const db = loaded - first.loaded;
+    if (dt <= 0 || db <= 0) return undefined;
+    const bps = db / dt;
+    const remainingBytes = total > 0 ? Math.max(0, total - loaded) : 0;
+    const etaSeconds = bps > 0 && remainingBytes > 0 ? remainingBytes / bps : 0;
+    const rateStr = humanRate(bps);
+    if (!rateStr) return undefined;
+    if (etaSeconds >= 1 && etaSeconds < 60 * 60) {
+      return `${rateStr} · ${humanDuration(etaSeconds)} remaining`;
+    }
+    return rateStr;
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
@@ -685,50 +734,63 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
     setUploadLoaded(0);
     setUploadTotal(0);
     setUploadLabel(undefined);
+    setUploadDetail(undefined);
+    rateSamplesRef.current = [];
     try {
-      if (mode === 'files') {
+      if (mode === 'files' || mode === 'folder') {
         if (files.length === 0) return;
         const total = files.reduce((s, f) => s + f.size, 0);
         setUploadTotal(total);
         let completedBytes = 0;
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          setUploadLabel(`${i + 1}/${files.length} — ${file.name}`);
-          await api.workspace.uploadFile(
-            entityId,
-            `Inbox/${file.name}`,
-            file,
-            {
-              onProgress: (loaded) => {
-                setUploadLoaded(completedBytes + loaded);
-              },
-            },
+          // Folder mode preserves webkitRelativePath; Files mode flattens.
+          const rel =
+            mode === 'folder'
+              ? (file as File & { webkitRelativePath?: string })
+                  .webkitRelativePath || file.name
+              : file.name;
+          const destPath = `Inbox/${rel}`;
+          setUploadLabel(
+            `${i + 1}/${files.length} — ${file.name} (${humanBytes(file.size)})`,
           );
+          await api.workspace.uploadFile(entityId, destPath, file, {
+            onProgress: (loaded) => {
+              const agg = completedBytes + loaded;
+              setUploadLoaded(agg);
+              const d = computeRateDetail(agg, total);
+              if (d) setUploadDetail(d);
+            },
+          });
           completedBytes += file.size;
           setUploadLoaded(completedBytes);
         }
-        showToast(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`, 'success');
-      } else if (mode === 'folder') {
-        if (files.length === 0) return;
-        const total = files.reduce((s, f) => s + f.size, 0);
-        setUploadTotal(total);
-        setUploadLabel(`${files.length} file${files.length === 1 ? '' : 's'}`);
-        const result = await api.workspace.uploadFolder(entityId, files, 'Inbox', {
-          onProgress: (loaded) => setUploadLoaded(loaded),
-        });
-        showToast(`Uploaded ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} from folder`, 'success');
+        showToast(
+          `Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`,
+          'success',
+        );
       } else if (mode === 'zip') {
         if (!zipFile) return;
         setUploadTotal(zipFile.size);
-        setUploadLabel(zipFile.name);
+        setUploadLabel(`${zipFile.name} (${humanBytes(zipFile.size)})`);
         const result = await api.workspace.uploadZip(entityId, zipFile, {
-          onProgress: (loaded) => setUploadLoaded(loaded),
+          onProgress: (loaded) => {
+            setUploadLoaded(loaded);
+            const d = computeRateDetail(loaded, zipFile.size);
+            if (d) setUploadDetail(d);
+          },
         });
-        showToast(`Unpacked ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} into ${result.base_path}`, 'success');
+        showToast(
+          `Unpacked ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} into ${result.base_path}`,
+          'success',
+        );
       } else {
         const body = textContent.trim();
         if (!body) return;
-        const base = sanitizeFilename(textTitle || `note-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`);
+        const base = sanitizeFilename(
+          textTitle ||
+            `note-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}`,
+        );
         const name = /\.[a-z0-9]{1,8}$/i.test(base) ? base : `${base}.md`;
         const file = new File([body], name, { type: 'text/markdown' });
         await api.workspace.uploadFile(entityId, `Inbox/${name}`, file);
@@ -736,12 +798,17 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
       }
       onSuccess();
     } catch (err) {
-      showToast('Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
+      showToast(
+        'Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'),
+        'error',
+      );
     } finally {
       setIsUploading(false);
       setUploadLoaded(0);
       setUploadTotal(0);
       setUploadLabel(undefined);
+      setUploadDetail(undefined);
+      rateSamplesRef.current = [];
     }
   };
 
@@ -883,6 +950,7 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
             total={uploadTotal}
             active
             label={uploadLabel}
+            detail={uploadDetail}
           />
         )}
         <div className="modal-footer">
