@@ -1,0 +1,121 @@
+{
+  "sources": {
+    "semantic_scholar_papers": {
+      "layer": 2,
+      "enabled": true,
+      "default_cadence_days": 7,
+      "priority_overrides": {
+        "high": 3,
+        "low": 14
+      },
+      "rate_limit_per_minute": 60,
+      "on_failure": "retry_next_tick",
+      "description": "Fetch papers + citation counts from Semantic Scholar"
+    },
+    "google_scholar_stats": {
+      "layer": 2,
+      "enabled": true,
+      "default_cadence_days": 7,
+      "priority_overrides": {
+        "high": 3,
+        "low": 14
+      },
+      "description": "Fetch h-index, i10, total citations from Google Scholar via SerpAPI"
+    },
+    "patents_web": {
+      "layer": 2,
+      "enabled": true,
+      "default_cadence_days": 30,
+      "description": "Scholar patents via Gemini grounded search (covers Google Patents / Lens / Espacenet / USPTO)"
+    },
+    "news_web": {
+      "layer": 2,
+      "enabled": true,
+      "default_cadence_days": 1,
+      "description": "Targeted news search for scholar name + known startups (Gemini grounded search)"
+    },
+    "startups_web": {
+      "layer": 2,
+      "enabled": true,
+      "default_cadence_days": 30,
+      "description": "Scholar-founded startups + exits via Gemini grounded search"
+    },
+    "red_flags_watch": {
+      "layer": 2,
+      "enabled": true,
+      "default_cadence_days": 3,
+      "description": "Retraction Watch + PubPeer + web search for misconduct/lawsuits/failed ventures/ethics concerns"
+    }
+  },
+  "dimensions": {
+    "academic_excellence": {
+      "layer": 3,
+      "enabled": true,
+      "default_cadence_days": 14,
+      "required_sources": [
+        "semantic_scholar_papers",
+        "google_scholar_stats",
+        "news_web"
+      ],
+      "triage_model": "gemini-3-flash-preview",
+      "scoring_model": "gemini-3.1-pro-preview"
+    },
+    "tech_transfer_experience": {
+      "layer": 3,
+      "enabled": true,
+      "default_cadence_days": 7,
+      "required_sources": [
+        "patents_web",
+        "news_web",
+        "startups_web"
+      ],
+      "triage_model": "gemini-3-flash-preview",
+      "scoring_model": "gemini-3.1-pro-preview"
+    },
+    "founder_potential": {
+      "layer": 3,
+      "enabled": true,
+      "default_cadence_days": 14,
+      "required_sources": [
+        "news_web",
+        "startups_web",
+        "semantic_scholar_papers"
+      ],
+      "triage_model": "gemini-3-flash-preview",
+      "scoring_model": "gemini-3.1-pro-preview"
+    },
+    "growth_trajectory": {
+      "layer": 3,
+      "enabled": true,
+      "default_cadence_days": 30,
+      "required_sources": [
+        "semantic_scholar_papers",
+        "google_scholar_stats",
+        "news_web"
+      ],
+      "triage_model": "gemini-3-flash-preview",
+      "scoring_model": "gemini-3.1-pro-preview"
+    }
+  },
+  "narrative_synthesizer": {
+    "layer": 3,
+    "enabled": true,
+    "default_cadence_days": 30,
+    "model": "gemini-3.1-pro-preview",
+    "on_demand_only": false
+  },
+  "phase_classifier": {
+    "layer": 3,
+    "enabled": true,
+    "default_cadence_days": 60,
+    "required_sources": [
+      "semantic_scholar_papers",
+      "google_scholar_stats",
+      "news_web"
+    ],
+    "triage_model": "gemini-3-flash-preview",
+    "classifier_model": "gemini-3.1-pro-preview",
+    "writes_to": "peer_group.jsonl",
+    "description": "Classify scholar into R1-R4 phase (Axis A academic age + Axis B achievement gates). Non-scoring task — writes classification events, not dim scores."
+  }
+}
