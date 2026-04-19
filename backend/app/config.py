@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     # 32 MB request-body limit. When empty (local dev), adapter falls
     # back to direct-POST uploads through the backend.
     GCS_BUCKET: str = ""
+    # GCS object-key prefix. DATA_ROOT (`/mnt/gcs/entities`) lives one
+    # level under the bucket's FUSE mount (`/mnt/gcs`), so storage_keys
+    # that are relative to DATA_ROOT need this prefix when addressed as
+    # GCS objects in signed URLs. Default: `entities/`. Set to empty
+    # when DATA_ROOT is the bucket root itself.
+    GCS_OBJECT_PREFIX: str = "entities/"
 
     # Gemini (google-genai). API key from https://aistudio.google.com/apikey
     GEMINI_API_KEY: str = ""

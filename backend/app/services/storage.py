@@ -256,10 +256,22 @@ class GcsSignedUrlAdapter(LocalFilesystemAdapter):
         itself to self-sign credentials (no service-account key file).
     """
 
-    def __init__(self, root_path: Path, bucket_name: str):
+    def __init__(self, root_path: Path, bucket_name: str, object_prefix: str = ""):
         super().__init__(root_path)
         self.bucket_name = bucket_name
+        # Prefix prepended to ``storage_key`` when addressing GCS objects.
+        # DATA_ROOT typically lives under the bucket's FUSE mount (e.g.
+        # bucket mounted at /mnt/gcs, DATA_ROOT=/mnt/gcs/entities →
+        # object_prefix="entities/"). Local write paths stay relative
+        # to DATA_ROOT; GCS signed URLs use the prefixed key.
+        self.object_prefix = object_prefix
         self._gcs_client = None  # lazy
+
+    def _gcs_object_key(self, storage_key: str) -> str:
+        key = storage_key.lstrip("/")
+        if self.object_prefix:
+            return f"{self.object_prefix.rstrip('/')}/{key}"
+        return key
 
     def _client(self):
         if self._gcs_client is None:
@@ -279,7 +291,8 @@ class GcsSignedUrlAdapter(LocalFilesystemAdapter):
 
         content_type = content_type or "application/octet-stream"
         try:
-            blob = self._client().bucket(self.bucket_name).blob(storage_key)
+            gcs_key = self._gcs_object_key(storage_key)
+            blob = self._client().bucket(self.bucket_name).blob(gcs_key)
 
             # Cloud Run's default compute-SA credentials don't carry a
             # private key locally, so ``generate_signed_url`` on its own
@@ -336,6 +349,10 @@ class GcsSignedUrlAdapter(LocalFilesystemAdapter):
 
 # Global storage instance — one adapter per process, chosen at startup.
 if settings.GCS_BUCKET:
-    storage: StorageAdapter = GcsSignedUrlAdapter(settings.DATA_ROOT, settings.GCS_BUCKET)
+    storage: StorageAdapter = GcsSignedUrlAdapter(
+        settings.DATA_ROOT,
+        settings.GCS_BUCKET,
+        object_prefix=settings.GCS_OBJECT_PREFIX,
+    )
 else:
     storage = LocalFilesystemAdapter(settings.DATA_ROOT)
