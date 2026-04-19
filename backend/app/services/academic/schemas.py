@@ -139,3 +139,25 @@ class NewsFilterResult(BaseModel):
     """Batch relevance + dedup judgment for news candidates."""
 
     items: list[NewsRelevanceItem]
+
+
+# ── Cross-batch canonicalization ────────────────────────────────────────
+
+
+class CanonMatch(BaseModel):
+    """One match verdict from the cross-batch canonicalizer.
+
+    `matches_existing_index` is the integer index into the `existing`
+    list passed to `canonicalize_candidates`, or None if the candidate
+    refers to a genuinely new entity/story not in the ledger.
+    """
+
+    candidate_index: int
+    matches_existing_index: Optional[int] = None
+    reason: str = ""
+
+
+class CanonResult(BaseModel):
+    """Batch canonicalization judgment — one match per candidate."""
+
+    items: list[CanonMatch]
