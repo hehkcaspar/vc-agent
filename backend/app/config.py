@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     DATA_ROOT: Path = PROJECT_ROOT / "data" / "entities"
     DATABASE_URL: str = f"sqlite+aiosqlite:///{PROJECT_ROOT / 'data' / 'vc_portfolio.db'}"
 
+    # Object-store bucket for workspace blobs. When set (prod on Cloud Run
+    # with GCS FUSE mount), storage adapter issues v4 signed PUT URLs so
+    # the browser uploads bytes directly to GCS, bypassing Cloud Run's
+    # 32 MB request-body limit. When empty (local dev), adapter falls
+    # back to direct-POST uploads through the backend.
+    GCS_BUCKET: str = ""
+
     # Gemini (google-genai). API key from https://aistudio.google.com/apikey
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = _DEFAULT_GEMINI_CHAT_MODEL
