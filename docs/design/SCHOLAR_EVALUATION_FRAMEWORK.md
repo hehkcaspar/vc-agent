@@ -645,6 +645,70 @@ First eval of a new scholar runs Layer 2 in `bootstrap` mode (full fetch from
 every source), then runs all Layer 3 dim jobs against the bootstrap snapshot.
 Subsequent runs are incremental diffs.
 
+For grounded-search sources (`news_web`, `patents_web`, `startups_web`) this
+distinction is encoded in the prompt itself:
+
+- **Bootstrap**: full-career sweep, no time limit, no prior-items exclusion.
+  The ledger is empty, so the model needs full scope.
+- **Incremental**: time-windowed ("since {last_snapshot − 24h}") with the
+  existing ledger entries fed back as context. The model focuses on deltas
+  (genuinely new items) plus active status verification for known items
+  (startups_web Part (a): "flag any known venture whose recorded state is
+  stale"; patents_web Part (b): "check if any pending application has been
+  granted"). `_incremental.py` centralises the cutoff lookup + known-items
+  formatters.
+
+The mode flag from `trigger_refresh` is advisory — if no prior snapshot
+exists for a source, `should_use_bootstrap` forces the bootstrap prompt
+regardless of the declared mode. This means a user-forced `incremental`
+on a cold scholar still produces the right query shape.
+
+### Cross-batch dedup — rule-based keys plus LLM canonicalization
+
+Raw grounded-search output arrives with surface-level variations the same
+real-world entity gets across outlets, aggregators, or rebrands. Pure
+string-key dedup handles the easy cases:
+
+- `patents_web`: `_patent_key` normalises `patent_number` to
+  alphanumerics-uppercase. Strong enough on its own — patent numbers don't
+  have brand variations.
+- `news_web`: normalised URL (utm/ref/fbclid stripped) + `(title.lower(),
+  published_date)` tuple. Cheap first pass.
+
+What rule-based keys miss:
+- "Rivet AI" vs "Rivet" — same venture, different surface name.
+- "TVision" (attention-tracking AI) vs "TVision Medical" (sleep diagnostic)
+  — different ventures, prefix collision.
+- "NVIDIA Acquires OmniML" vs "NVIDIA Snaps Up Startup OmniML" — same story,
+  reworded headline, different URL slug.
+
+`startups_web` and `news_web` therefore run `canonicalize_candidates`
+(`sources/_canonicalize.py`) after the relevance filter. It's a Flash LLM
+pass that reads the existing ledger + scholar research areas as context,
+then returns `{candidate_idx: existing_idx | None}` per candidate. Semantics
+diverge by ledger type:
+
+- `startups.json` is wholesale-rewritten → matched candidate triggers a
+  merge (`{**existing, **candidate}`), unmatched becomes a new entry. Status
+  transitions fire `log_event` as usual.
+- `news.jsonl` is append-only → matched candidate is skipped (don't
+  double-append the same story), unmatched is appended normally.
+
+The pass self-skips when either `candidates` or `existing` is empty.
+`patents_web` doesn't use it — `_patent_key` is strong enough that the
+marginal LLM cost isn't justified.
+
+### Prompt hygiene for grounded-search sources
+
+All three grounded-search sources must return a JSON array. Gemini mirrors
+markdown structure back in its response, so prompts that use section
+headers like `**Part 1 — X** / **Part 2 — Y**` produce markdown-wrapped
+prose (`### Part 1 — X ...`) that the `re.search(r"\[...\]")` JSON parser
+in `llm_client.grounded_search_json` cannot extract. Prompts use flowing
+prose with inline `(a) ... (b) ...` branching plus an explicit
+`Return ONLY a JSON array — no prose, no markdown, no section headers.`
+guardrail at the end.
+
 #### Q4.6 — Scheduling: all handled by heartbeat
 
 `services/academic/heartbeat.py` owns all continuous tasks. It becomes the
