@@ -14,6 +14,7 @@ import {
   hasScreeningMemo,
 } from './EntityInitialScreeningTab';
 import { EntityNewsTab } from './EntityNewsTab';
+import { UploadProgressBar } from './ui/UploadProgressBar';
 import { FactDiscrepancyPanel } from './FactDiscrepancyPanel';
 import { FactProvenanceProvider } from './FactProvenance';
 import {
@@ -590,6 +591,18 @@ type UploadMode = 'files' | 'folder' | 'zip' | 'text';
 const sanitizeFilename = (s: string) =>
   s.trim().replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 120) || 'note';
 
+/**
+ * Threshold above which we prompt the user to confirm the upload.
+ * Large files work fine with signed URLs but network + server commit
+ * time grows enough that a "compress first" nudge is kinder than a
+ * silent 30-second pause with a slow progress bar.
+ */
+const LARGE_FILE_WARN_BYTES = 100 * 1024 * 1024;
+
+function humanMb(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function FileUploadModal({ entityId, onClose, onSuccess }: {
   entityId: string; onClose: () => void; onSuccess: () => void;
 }) {
@@ -599,6 +612,10 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
   const [textContent, setTextContent] = useState('');
   const [textTitle, setTextTitle] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadLoaded, setUploadLoaded] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [uploadLabel, setUploadLabel] = useState<string | undefined>(undefined);
+  const [pendingLargeFile, setPendingLargeFile] = useState<{ bytes: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
   const zipInputRef = useRef<HTMLInputElement>(null);
@@ -663,22 +680,50 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
     });
   };
 
-  const handleSubmit = async () => {
+  const runUpload = async () => {
     setIsUploading(true);
+    setUploadLoaded(0);
+    setUploadTotal(0);
+    setUploadLabel(undefined);
     try {
       if (mode === 'files') {
         if (files.length === 0) return;
-        for (const file of files) {
-          await api.workspace.uploadFile(entityId, `Inbox/${file.name}`, file);
+        const total = files.reduce((s, f) => s + f.size, 0);
+        setUploadTotal(total);
+        let completedBytes = 0;
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          setUploadLabel(`${i + 1}/${files.length} — ${file.name}`);
+          await api.workspace.uploadFile(
+            entityId,
+            `Inbox/${file.name}`,
+            file,
+            {
+              onProgress: (loaded) => {
+                setUploadLoaded(completedBytes + loaded);
+              },
+            },
+          );
+          completedBytes += file.size;
+          setUploadLoaded(completedBytes);
         }
         showToast(`Uploaded ${files.length} file${files.length > 1 ? 's' : ''}`, 'success');
       } else if (mode === 'folder') {
         if (files.length === 0) return;
-        const result = await api.workspace.uploadFolder(entityId, files, 'Inbox');
+        const total = files.reduce((s, f) => s + f.size, 0);
+        setUploadTotal(total);
+        setUploadLabel(`${files.length} file${files.length === 1 ? '' : 's'}`);
+        const result = await api.workspace.uploadFolder(entityId, files, 'Inbox', {
+          onProgress: (loaded) => setUploadLoaded(loaded),
+        });
         showToast(`Uploaded ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} from folder`, 'success');
       } else if (mode === 'zip') {
         if (!zipFile) return;
-        const result = await api.workspace.uploadZip(entityId, zipFile);
+        setUploadTotal(zipFile.size);
+        setUploadLabel(zipFile.name);
+        const result = await api.workspace.uploadZip(entityId, zipFile, {
+          onProgress: (loaded) => setUploadLoaded(loaded),
+        });
         showToast(`Unpacked ${result.uploaded} file${result.uploaded === 1 ? '' : 's'} into ${result.base_path}`, 'success');
       } else {
         const body = textContent.trim();
@@ -694,7 +739,25 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
       showToast('Upload error: ' + (err instanceof Error ? err.message : 'Unknown error'), 'error');
     } finally {
       setIsUploading(false);
+      setUploadLoaded(0);
+      setUploadTotal(0);
+      setUploadLabel(undefined);
     }
+  };
+
+  const handleSubmit = () => {
+    // Identify the largest file about to upload (skip text mode — instant).
+    let largest = 0;
+    if (mode === 'files' || mode === 'folder') {
+      for (const f of files) largest = Math.max(largest, f.size);
+    } else if (mode === 'zip' && zipFile) {
+      largest = zipFile.size;
+    }
+    if (largest > LARGE_FILE_WARN_BYTES) {
+      setPendingLargeFile({ bytes: largest });
+      return;
+    }
+    void runUpload();
   };
 
   const canSubmit =
@@ -814,12 +877,62 @@ function FileUploadModal({ entityId, onClose, onSuccess }: {
             )}
           </div>
         </div>
+        {isUploading && (
+          <UploadProgressBar
+            loaded={uploadLoaded}
+            total={uploadTotal}
+            active
+            label={uploadLabel}
+          />
+        )}
         <div className="modal-footer">
           <button className="btn-secondary" onClick={onClose} disabled={isUploading}>Cancel</button>
           <button className="btn-primary" onClick={handleSubmit} disabled={!canSubmit}>
             {isUploading ? 'Uploading...' : 'Upload'}
           </button>
         </div>
+      {pendingLargeFile && (
+        <Modal
+          isOpen
+          onClose={() => setPendingLargeFile(null)}
+          title="Large upload"
+          size="narrow"
+        >
+          <div className="modal-body">
+            <p>
+              This upload includes a file that's <strong>{humanMb(pendingLargeFile.bytes)}</strong>.
+              Large uploads are slower and more fragile — if any file
+              fails, the whole batch can take minutes to surface the
+              error.
+            </p>
+            <p>
+              For PDFs, compressing the file first (Preview → File →
+              Export, reduce quality; or a tool like Smallpdf) usually
+              shrinks size by 5-10× with no visible quality loss. Images
+              and videos benefit from the same one-shot compression.
+            </p>
+          </div>
+          <div className="modal-footer">
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => setPendingLargeFile(null)}
+            >
+              Cancel — I'll compress first
+            </button>
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                setPendingLargeFile(null);
+                void runUpload();
+              }}
+            >
+              Upload anyway
+            </button>
+          </div>
+        </Modal>
+      )}
     </Modal>
   );
 }
