@@ -492,3 +492,45 @@ export const ENTITY_METADATA_FIELDS: EntityMetadataField[] = [
     ],
   },
 ];
+
+
+// ---------------------------------------------------------------------------
+// Per-entity news feed (news_web tracking)
+// ---------------------------------------------------------------------------
+
+export interface EntityNewsItem {
+  id: string;
+  title: string;
+  url?: string | null;
+  source?: string | null;
+  summary?: string | null;
+  published_date?: string | null;
+  category?: string | null;
+}
+
+export interface EntityNewsTracking {
+  enabled: boolean;
+  cadence_days: number;
+  last_bootstrapped_at?: string | null;
+  last_run_at?: string | null;
+  last_error?: string | null;
+}
+
+export interface EntityNewsSnapshot {
+  created_at?: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface EntityNewsFeed {
+  entity_id: string;
+  tracking: EntityNewsTracking | null;
+  items: EntityNewsItem[];
+  total: number;
+  last_snapshot: EntityNewsSnapshot | null;
+}
+
+export interface EntityNewsRefreshResponse {
+  status: 'queued' | 'running';
+  mode: 'bootstrap' | 'incremental' | string;
+  message: string;
+}

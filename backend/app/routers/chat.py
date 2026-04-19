@@ -828,6 +828,17 @@ async def run_preset_agent_job(job_id: str) -> None:
                 sess.updated_at = utc_now()
                 await db.commit()
 
+            try:
+                from app.routers.entity_news import maybe_bootstrap_after_preset
+                await maybe_bootstrap_after_preset(
+                    job.entity_id, trigger_preset="initial_screening_v2",
+                )
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "news_web auto-bootstrap (initial_screening_v2) failed",
+                    exc_info=True,
+                )
+
             return  # Skip the single-agent path below.
 
         def _run_agent() -> Tuple[str, Any]:
@@ -1263,6 +1274,17 @@ async def run_preset_agent_job(job_id: str) -> None:
                 sess = await _get_session(db, job.entity_id, job.session_id)
                 sess.updated_at = utc_now()
                 await db.commit()
+
+            try:
+                from app.routers.entity_news import maybe_bootstrap_after_preset
+                await maybe_bootstrap_after_preset(
+                    job.entity_id, trigger_preset="extract_info",
+                )
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "news_web auto-bootstrap (extract_info) failed",
+                    exc_info=True,
+                )
 
             return  # Skip general deliverable post-processing
 
@@ -1848,6 +1870,17 @@ async def run_preset_agent_job(job_id: str) -> None:
                 sess = await _get_session(db, job.entity_id, job.session_id)
                 sess.updated_at = utc_now()
                 await db.commit()
+
+            try:
+                from app.routers.entity_news import maybe_bootstrap_after_preset
+                await maybe_bootstrap_after_preset(
+                    job.entity_id, trigger_preset="initial_screening",
+                )
+            except Exception:
+                logging.getLogger(__name__).warning(
+                    "news_web auto-bootstrap (initial_screening) failed",
+                    exc_info=True,
+                )
 
             return  # Skip general deliverable post-processing
 

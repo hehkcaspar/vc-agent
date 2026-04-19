@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, ForeignKey, Integer, Text, Index, text
+from sqlalchemy import Boolean, Column, String, ForeignKey, Integer, Text, Index, text
 from sqlalchemy.orm import declarative_base, relationship
 
 from app.datetime_support import UtcDateTime, utc_now
@@ -214,3 +214,38 @@ class WorkspaceOp(Base):
 
     undone_at = Column(UtcDateTime, nullable=True)
     created_at = Column(UtcDateTime, default=utc_now)
+
+
+# ---------------------------------------------------------------------------
+# Entity timeline events (news mentions, funding milestones, partnerships…)
+# ---------------------------------------------------------------------------
+
+class EntityEvent(Base):
+    """SQL single source of truth for per-entity timeline events.
+
+    Populated by Layer 2 portfolio sources (news_web, etc.) via
+    ``services/portfolio/events_sync.log_event``. Future Timeline / News
+    tabs read from this table.
+    """
+
+    __tablename__ = "entity_events"
+
+    id = Column(String, primary_key=True, default=generate_uuid)
+    entity_id = Column(
+        String,
+        ForeignKey("entities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type = Column(String, nullable=False)             # news_mention | funding | etc.
+    significance = Column(String, default="medium")          # high | medium | low
+    title = Column(String, nullable=True)
+    is_read = Column(Boolean, default=False)
+    source_url = Column(String, nullable=True)
+    payload_json = Column(Text, nullable=True)               # extra source-specific data
+    event_date = Column(UtcDateTime, nullable=True)          # when the event happened
+    created_at = Column(UtcDateTime, default=utc_now)        # when we ingested it
+
+    __table_args__ = (
+        Index("ix_entity_events_entity_date", "entity_id", "event_date"),
+    )

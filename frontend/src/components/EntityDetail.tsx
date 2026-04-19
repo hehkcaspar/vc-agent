@@ -13,6 +13,7 @@ import {
   EntityInitialScreeningTab,
   hasScreeningMemo,
 } from './EntityInitialScreeningTab';
+import { EntityNewsTab } from './EntityNewsTab';
 import { FactDiscrepancyPanel } from './FactDiscrepancyPanel';
 import { FactProvenanceProvider } from './FactProvenance';
 import {
@@ -142,7 +143,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [discrepancyPanelOpen, setDiscrepancyPanelOpen] = useState(false);
   const [contentTab, setContentTab] = useState<
-    'workroom' | 'facts' | 'screening_v1' | 'screening_v2'
+    'workroom' | 'facts' | 'screening_v1' | 'screening_v2' | 'news'
   >('workroom');
   const [agentMode, setAgentMode] = useState<AgentMode>('react'); // default unlimited until child reports
 
@@ -216,13 +217,17 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const someSelected = allFileIds.some(id => selectedNodeIds.has(id));
   const showScreeningV1 = hasScreeningMemo(tree, 'Deliverables/Memos/initial_screening.md');
   const showScreeningV2 = hasScreeningMemo(tree, 'Deliverables/Memos/initial_screening_v2.md');
+  const showNews = Boolean(
+    (liveEntity?.metadata as Record<string, unknown> | null | undefined)?._news_tracking,
+  );
 
   // If the active screening tab's underlying memo disappears (deleted, tree
   // refresh), fall back to workroom so the tablist stays coherent.
   useEffect(() => {
     if (contentTab === 'screening_v1' && !showScreeningV1) setContentTab('workroom');
     if (contentTab === 'screening_v2' && !showScreeningV2) setContentTab('workroom');
-  }, [contentTab, showScreeningV1, showScreeningV2]);
+    if (contentTab === 'news' && !showNews) setContentTab('workroom');
+  }, [contentTab, showScreeningV1, showScreeningV2, showNews]);
 
   // Reconcile `selectedNodeIds` against the live tree on every refresh: drop
   // any ids no longer present so a stale selection (e.g. after Process Inbox
@@ -357,6 +362,18 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             {showScreeningV1 ? 'Screening v2' : 'Initial Screening'}
           </button>
         )}
+        {showNews && (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={contentTab === 'news'}
+            aria-controls="entity-tab-news"
+            className={`content-tab ${contentTab === 'news' ? 'active' : ''}`}
+            onClick={() => setContentTab('news')}
+          >
+            News
+          </button>
+        )}
       </div>
 
       {contentTab === 'facts' && (
@@ -398,6 +415,12 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
               setContentTab('workroom');
             }}
           />
+        </div>
+      )}
+
+      {contentTab === 'news' && showNews && (
+        <div role="tabpanel" id="entity-tab-news" aria-labelledby="entity-tab-news-btn">
+          <EntityNewsTab entityId={entity.id} />
         </div>
       )}
 
