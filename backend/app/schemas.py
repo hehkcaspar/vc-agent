@@ -156,6 +156,42 @@ class WorkspaceCopyRequest(BaseModel):
     to_path: str
 
 
+# ============== Direct-to-storage upload (signed URL flow) ==============
+
+
+class UploadInitRequest(BaseModel):
+    """Client calls this before uploading a file.
+
+    The backend issues a plan (signed PUT URL on prod / use_direct_upload
+    flag on local dev) pointing at the canonical ``storage_key``. The
+    client then PUTs the bytes directly and follows up with
+    ``upload-commit`` to register the ``WorkspaceNode``.
+    """
+
+    path: str = Field(..., description="Target workspace path, e.g. 'Inbox/deck.pdf'")
+    size: int = Field(..., ge=0, description="Expected file size in bytes (verified on commit)")
+    mime_type: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
+class UploadInitResponse(BaseModel):
+    upload_id: str
+    storage_key: str
+    method: Literal["PUT", "POST"] = "PUT"
+    upload_url: Optional[str] = None
+    upload_headers: dict[str, str] = Field(default_factory=dict)
+    max_bytes: int
+    ttl_seconds: int
+    use_direct_upload: bool = False
+
+
+class UploadCommitRequest(BaseModel):
+    upload_id: str
+    path: str
+    mime_type: Optional[str] = None
+    metadata: Optional[dict] = None
+
+
 # ============== Metadata pre-process (in-memory jobs) ==============
 
 
