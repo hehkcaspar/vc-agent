@@ -1,22 +1,42 @@
 """
-Scholar evaluation dimensions — unified, file-backed configuration.
+Scholar evaluation dimensions — JSON-backed, deploy-tracked configuration.
 
-All dimensions (both the original 7 and any user-added ones) live in one JSON
-file and are treated equally. The file is seeded with sensible defaults on
-first read. Prompts are built dynamically from this list so adding, removing,
-or editing a dimension requires no code changes.
+Two files are involved:
+
+- **Seed** (``dimensions_seed.json``, sibling of this module): the canonical
+  prompt content. Tracked in git, ships with the backend package via the
+  existing ``COPY backend/`` in the Dockerfile, so every deploy carries the
+  latest prompts into the image. Edit this file when iterating on prompt
+  content — changes propagate to prod on redeploy.
+- **Runtime** (``ACADEMIC_CONFIG_DIR/dimensions.json``): per-environment
+  override state. Gitignored (lives under ``data/`` locally, under the GCS
+  FUSE mount in prod). On first read after a deploy the runtime file is
+  seeded from ``dimensions_seed.json``; the Settings UI's CRUD endpoints
+  then write user customizations back here.
+
+Why the split: the runtime file was previously the ONLY source of rich
+prompts — but it's gitignored, so the rich content never reached prod on
+first deploy. Pulling the seed into the tracked package solves that
+systematically. (Fixed 2026-04-19; see commit log for context.)
+
+To update prompts on an existing prod deploy whose bucket already has a
+``dimensions.json``, either edit via the Settings UI (persists in the
+bucket) or ``gsutil rm gs://$GCS_BUCKET/config/dimensions.json`` before
+redeploying to force a re-seed from the shipped file.
 """
 
 from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import TypedDict
 
 from ...config import settings
 
 
 DIMENSIONS_PATH = settings.ACADEMIC_CONFIG_DIR / "dimensions.json"
+SEED_PATH = Path(__file__).parent / "dimensions_seed.json"
 
 
 class Dimension(TypedDict):
@@ -35,53 +55,23 @@ _SCOREABLE_GUIDANCE = (
     "this scholar's profile — not merely because data is sparse."
 )
 
-# NOTE: these are fallback seeds used only when `data/config/dimensions.json`
-# is missing or empty. The real source of truth is the JSON file. The seeds
-# here mirror the 4 MECE dims from the scholar evaluation framework doc;
-# when we update `dimensions.json` with richer prompts those override
-# these defaults on every read.
-DEFAULT_DIMENSIONS: list[Dimension] = [
-    {
-        "key": "academic_excellence",
-        "name": "Academic Excellence",
-        "prompt": (
-            "Holistic judgment of scientific contribution + peer standing. "
-            "Use author-position-weighted citations, field recognition "
-            "(awards, editorial roles, keynotes), and collaboration quality. "
-            "Calibrate top bands against billion-dollar-outcome potential."
-        ),
-    },
-    {
-        "key": "tech_transfer_experience",
-        "name": "Tech-transfer Experience",
-        "prompt": (
-            "Historical track record of moving research to market. Score "
-            "against commercial peers. Weight revenue > investor funding > "
-            "grants. Verify IP ownership structure. Judge ventures, patents, "
-            "licensing, and partnerships holistically."
-        ),
-    },
-    {
-        "key": "founder_potential",
-        "name": "Founder Potential",
-        "prompt": (
-            "Predict founder success probability. Core signals: "
-            "founder-market fit (including domain dominance), determination, "
-            "commitment/bridging, team-attracting ability, public presence, "
-            "and prior operating experience (bonus, not required)."
-        ),
-    },
-    {
-        "key": "growth_trajectory",
-        "name": "Growth Trajectory",
-        "prompt": (
-            "Slope across scientific / commercial / operator axes over the "
-            "recent past. Multi-axis acceleration > single-axis spike. "
-            "Phase-sensitive: flat is fine at R4, concerning at R3a. "
-            "Recency weighted; last 24 months dominate."
-        ),
-    },
-]
+
+def _load_seed() -> list[Dimension]:
+    """Load the shipped seed. Fail loud if it's missing or malformed —
+    the whole point of shipping it in-repo is to guarantee it exists."""
+    data = json.loads(SEED_PATH.read_text(encoding="utf-8"))
+    dims = data.get("dimensions")
+    if not isinstance(dims, list) or not dims:
+        raise RuntimeError(
+            f"{SEED_PATH} is missing or contains no dimensions — "
+            f"this file is tracked in git and ships with the image; "
+            f"something has gone very wrong with the deploy."
+        )
+    return dims
+
+
+# Loaded once at module import. Every deploy ships the current seed.
+DEFAULT_DIMENSIONS: list[Dimension] = _load_seed()
 
 
 def read_dimensions() -> list[Dimension]:
