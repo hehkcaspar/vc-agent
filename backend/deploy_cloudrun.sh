@@ -54,7 +54,7 @@ gcloud run deploy "$SERVICE" \
     --execution-environment=gen2 \
     --add-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
     --update-secrets="GEMINI_API_KEY=gemini-api-key:latest,DATABASE_URL=portfolio-db-url:latest,ACADEMIC_DATABASE_URL=academic-db-url:latest" \
-    --set-env-vars="^@@^CORS_ORIGINS=${CORS_ORIGINS}" \
+    --set-env-vars="^@@^CORS_ORIGINS=${CORS_ORIGINS}@@GCS_BUCKET=${GCS_BUCKET}" \
     --add-volume="name=gcs-data,type=cloud-storage,bucket=${GCS_BUCKET}" \
     --add-volume-mount="volume=gcs-data,mount-path=/mnt/gcs"
 
