@@ -1,4 +1,10 @@
 import {
+  uploadFileViaSignedUrl,
+  uploadFolderViaSignedUrl,
+  uploadZipViaDirectPost,
+  type UploadOptions,
+} from './upload';
+import {
   Entity,
   EntityUpdateData,
   EntityNewsFeed,
@@ -104,36 +110,25 @@ export const api = {
       fetch(apiUrl(`/entities/${entityId}/workspace/file/${nodeId}/versions/${version}`)),
     downloadFileByPath: (entityId: string, path: string) =>
       fetch(apiUrl(`/entities/${entityId}/workspace/file?path=${encodeURIComponent(path)}`)),
-    uploadFile: (entityId: string, path: string, file: File) => {
-      const fd = new FormData();
-      fd.append('file', file);
-      return fetchJson<WorkspaceNode>(
-        `/entities/${entityId}/workspace/file?path=${encodeURIComponent(path)}`,
-        { method: 'POST', body: fd },
-      );
-    },
-    uploadFolder: (entityId: string, files: File[], basePath = 'Inbox') => {
-      const fd = new FormData();
-      files.forEach((f) => {
-        // Preserve the directory tree: webkitRelativePath like
-        // "Series A Closing/Transaction Docs/SPA.pdf" becomes the multipart
-        // filename so the backend can reconstruct the tree.
-        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-        fd.append('files', f, rel);
-      });
-      return fetchJson<{ uploaded: number; results: unknown[] }>(
-        `/entities/${entityId}/workspace/upload?base_path=${encodeURIComponent(basePath)}`,
-        { method: 'POST', body: fd },
-      );
-    },
-    uploadZip: (entityId: string, zipFile: File) => {
-      const fd = new FormData();
-      fd.append('file', zipFile);
-      return fetchJson<{ uploaded: number; base_path: string; results: unknown[] }>(
-        `/entities/${entityId}/workspace/upload-zip`,
-        { method: 'POST', body: fd },
-      );
-    },
+    // Uploads route through the signed-URL flow in services/upload.ts
+    // so the browser can send bytes directly to GCS on prod (bypassing
+    // Cloud Run's 32 MB request-body ceiling) while local dev falls
+    // back to the legacy POST endpoints automatically. UploadOptions
+    // plumbs onProgress + signal through to XHR.
+    uploadFile: (
+      entityId: string,
+      path: string,
+      file: File,
+      opts?: UploadOptions,
+    ) => uploadFileViaSignedUrl(entityId, path, file, opts ?? {}),
+    uploadFolder: (
+      entityId: string,
+      files: File[],
+      basePath = 'Inbox',
+      opts?: UploadOptions,
+    ) => uploadFolderViaSignedUrl(entityId, files, basePath, opts ?? {}),
+    uploadZip: (entityId: string, zipFile: File, opts?: UploadOptions) =>
+      uploadZipViaDirectPost(entityId, zipFile, opts ?? {}),
     processInbox: (entityId: string) =>
       fetchJson<{ job_id: string }>(
         `/entities/${entityId}/workspace/inbox/process`,
