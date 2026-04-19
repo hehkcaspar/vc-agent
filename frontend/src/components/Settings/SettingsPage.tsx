@@ -92,7 +92,7 @@ export function SettingsPage({
       case 'academic-tasks':
         return <TasksSettings />;
       case 'academic-dimensions':
-        return <DimensionsSettings onNavigateTab={onNavigateTab} />;
+        return <DimensionsSettings />;
       case 'academic-ranking':
         return <RankingSettings onNavigateTab={onNavigateTab} />;
       case 'appearance':
