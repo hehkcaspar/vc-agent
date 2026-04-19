@@ -394,6 +394,35 @@ ACADEMIC_DATABASE_URL="postgresql+asyncpg://vc:${DB_PASSWORD}@127.0.0.1:5432/aca
   weekly digest leaked into prod on 2026-04-18. If you must seed a
   per-environment file (e.g. `funds.json`), target the single file
   explicitly and never the whole dir.
+- **Self-seed preserves existing files — rename-in-source means stale
+  prod config.** The seeder only writes when the target is missing, so
+  any structural rename (e.g. `patents_lens` → `patents_web` when the
+  scaffold became a real source) leaves the prod file pinned on the
+  old keys. Fix is an explicit `gsutil cp backend/app/defaults/<file>
+  gs://$GCS_BUCKET/config/<file>` timed just after the Cloud Run
+  revision swap (so the new container serves the freshly-aligned
+  config immediately; the old container's remaining seconds see
+  `Unknown source '<oldname>'` errors that `_run_source` swallows).
+  `_compose_data_gaps_context` will surface the mismatch as
+  `missing_data` entries until the config is rewritten.
+- **Postgres timestamp columns reject tz-aware datetimes until migrated.**
+  Every `Column(DateTime)` in `models.py` + `academic_models.py` was
+  swapped to the `UtcDateTime` TypeDecorator (defined in
+  `datetime_support.py`), which declares `DateTime(timezone=True)` at
+  the dialect level and normalises aware-UTC on both the write and
+  read paths. `utc_now()` now returns aware UTC. An existing Postgres
+  DB predates the switch — its columns are still `TIMESTAMP WITHOUT
+  TIME ZONE` and asyncpg raises
+  `DataError: can't subtract offset-naive and offset-aware datetimes`
+  on every insert until the lifespan migration
+  (`_upgrade_timestamp_columns`, Postgres-only, gated on
+  `settings.portfolio_is_sqlite` / `.academic_is_sqlite`) has rewritten
+  each column with `ALTER COLUMN … TYPE TIMESTAMP WITH TIME ZONE USING
+  col AT TIME ZONE 'UTC'`. Discovery is dynamic
+  (`information_schema.columns`), so any new DateTime column picks up
+  the migration on next boot without code changes. During the
+  rolling deploy, the outgoing revision's naive writes will error for
+  10-30 s against the new schema; acceptable for MVP traffic.
 
 ## 9. Graduation paths
 
