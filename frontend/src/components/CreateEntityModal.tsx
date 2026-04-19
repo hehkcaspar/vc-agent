@@ -126,6 +126,23 @@ export function CreateEntityModal({ onClose, onSuccess }: CreateEntityModalProps
     e.preventDefault();
     if (!metadata.name?.trim()) return;
 
+    // Stopgap guard — entity creation goes through POST /ingest/resources
+    // which is still capped at Cloud Run's 32 MB request-body ceiling
+    // (the signed-URL flow that bypasses this only covers workspace
+    // uploads today). For now, block files >= 30 MB here and tell the
+    // user to create the entity first, then upload via the workspace
+    // panel which has no such cap.
+    const INGEST_MAX_FILE_BYTES = 30 * 1024 * 1024;
+    const tooBig = files.find((f) => f.size >= INGEST_MAX_FILE_BYTES);
+    if (tooBig) {
+      setError(
+        `File "${tooBig.name}" is ${(tooBig.size / (1024 * 1024)).toFixed(1)} MB — ` +
+        `too large for the entity-creation path. Create the entity with the ` +
+        `form first, then upload large files inside the entity's workspace.`,
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     setError(null);
 
