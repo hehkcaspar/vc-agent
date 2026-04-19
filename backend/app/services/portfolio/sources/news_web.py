@@ -17,16 +17,22 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from sqlalchemy import select
 
+from ...academic.sources._canonicalize import canonicalize_candidates
+from ...academic.sources._incremental import (
+    format_cutoff,
+    format_known_titles,
+    sort_items_recent_first,
+)
 from ..events_sync import log_event, news_significance
 from ..file_utils import (
     append_record,
-    dossier_path,
+    last_snapshot_for_source,
     read_records,
     record_snapshot,
 )
@@ -163,6 +169,8 @@ def _format_candidates_for_ranker(
     for grp_label, group in (("founder", founders), ("key_team", key_team)):
         for m in group:
             name = (m.get("name") or "").strip()
+            if not name:
+                continue
             role = (m.get("role") or m.get("title") or "").strip()
             bg = (m.get("background") or m.get("bio") or "").strip()
             equity = m.get("equity_pct") or m.get("equity") or ""
@@ -200,14 +208,15 @@ async def _rank_key_persons(
 
     # Cheap fallback when only 1-2 candidates exist — no ranker needed.
     if len(founders) + len(key_team) <= 2:
-        picks = []
+        picks: list[dict[str, Any]] = []
         for m in founders + key_team:
-            picks.append(
-                {
-                    "name": (m.get("name") or "").strip(),
-                    "role": (m.get("role") or m.get("title") or "").strip(),
-                }
-            )
+            name = (m.get("name") or "").strip()
+            if not name:
+                continue
+            picks.append({
+                "name": name,
+                "role": (m.get("role") or m.get("title") or "").strip(),
+            })
         return picks
 
     one_liner = (metadata.get("one_liner") or metadata.get("description") or "").strip()
@@ -243,13 +252,16 @@ async def _rank_key_persons(
             "news_web: key-person ranker failed; falling back to active founders",
             exc_info=True,
         )
-        return [
-            {
-                "name": (f.get("name") or "").strip(),
+        fallback: list[dict[str, Any]] = []
+        for f in founders:
+            name = (f.get("name") or "").strip()
+            if not name:
+                continue
+            fallback.append({
+                "name": name,
                 "role": (f.get("role") or f.get("title") or "").strip(),
-            }
-            for f in founders
-        ]
+            })
+        return fallback
 
     out: list[dict[str, Any]] = []
     for p in result.picks[:5]:
@@ -434,14 +446,24 @@ async def run(
         sid = await record_snapshot(
             entity_id, SOURCE_ID, detail={"mode": mode, "skipped": "no_entity"},
         )
-        return {"changed": False, "snapshot_id": sid, "error": "no_entity"}
+        return {
+            "changed": False,
+            "snapshot_id": sid,
+            "error": "no_entity",
+            "mode_used": mode,
+        }
 
     company = (ctx.get("name") or "").strip()
     if not company:
         sid = await record_snapshot(
             entity_id, SOURCE_ID, detail={"mode": mode, "skipped": "no_company_name"},
         )
-        return {"changed": False, "snapshot_id": sid, "error": "no_company_name"}
+        return {
+            "changed": False,
+            "snapshot_id": sid,
+            "error": "no_company_name",
+            "mode_used": mode,
+        }
 
     metadata = ctx.get("metadata") or {}
     tags = metadata.get("industry_tags") or []
@@ -462,18 +484,10 @@ async def run(
     # Existing ledger — used for incremental prompt context + post-search dedup.
     existing = read_records(entity_id, "news")
 
-    # Cutoff / bootstrap decision.
-    from ...academic.sources._incremental import (
-        format_cutoff,
-        format_known_titles,
-        sort_items_recent_first,
-    )
-    # ``incremental_cutoff`` is keyed to ``snapshot_log.jsonl``; the scholar
-    # helper reads via ``academic.fact_store.last_snapshot_for_source``
-    # which looks under the scholar dossier. For portfolio we use our
-    # own ``last_snapshot_for_source`` on the entity dossier.
-    from ..file_utils import last_snapshot_for_source
-
+    # Cutoff / bootstrap decision. We inline a thin version of the
+    # scholar ``incremental_cutoff`` helper because the scholar version
+    # reads scholar-side ``snapshot_log.jsonl`` via the academic
+    # fact_store; we need the portfolio-side dossier.
     cutoff: datetime | None = None
     snap = last_snapshot_for_source(entity_id, SOURCE_ID)
     if snap:
@@ -483,7 +497,6 @@ async def run(
                 dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
                 if dt.tzinfo is None:
                     dt = dt.replace(tzinfo=timezone.utc)
-                from datetime import timedelta
                 cutoff = dt - timedelta(hours=24)
             except ValueError:
                 cutoff = None
@@ -515,7 +528,12 @@ async def run(
         sid = await record_snapshot(
             entity_id, SOURCE_ID, detail={"mode": mode, "skipped": "no_llm_client"}
         )
-        return {"changed": False, "snapshot_id": sid, "skipped": True}
+        return {
+            "changed": False,
+            "snapshot_id": sid,
+            "skipped": True,
+            "mode_used": mode_used,
+        }
 
     try:
         items = await grounded_search_json(prompt)
@@ -524,7 +542,12 @@ async def run(
         sid = await record_snapshot(
             entity_id, SOURCE_ID, detail={"mode": mode, "error": str(e)},
         )
-        return {"changed": False, "snapshot_id": sid, "error": str(e)}
+        return {
+            "changed": False,
+            "snapshot_id": sid,
+            "error": str(e),
+            "mode_used": mode_used,
+        }
 
     if not isinstance(items, list):
         items = []
@@ -553,7 +576,12 @@ async def run(
                 "people_count": len(people),
             },
         )
-        return {"changed": False, "snapshot_id": sid, "new_items": 0}
+        return {
+            "changed": False,
+            "snapshot_id": sid,
+            "new_items": 0,
+            "mode_used": mode_used,
+        }
 
     existing_titles = [
         (r.get("title") or "").strip() for r in existing if r.get("title")
@@ -599,11 +627,14 @@ async def run(
                 "people_count": len(people),
             },
         )
-        return {"changed": False, "snapshot_id": sid, "new_items": 0}
+        return {
+            "changed": False,
+            "snapshot_id": sid,
+            "new_items": 0,
+            "mode_used": mode_used,
+        }
 
     # LLM canonicalization — reuses academic _canonicalize with Company labels.
-    from ...academic.sources._canonicalize import canonicalize_candidates
-
     canon_pool = sort_items_recent_first(existing, date_key="published_date")[
         :_CANON_POOL_SIZE
     ]
@@ -667,4 +698,9 @@ async def run(
             "people": [p.get("name") for p in people if p.get("name")],
         },
     )
-    return {"changed": count > 0, "snapshot_id": sid, "new_items": count}
+    return {
+        "changed": count > 0,
+        "snapshot_id": sid,
+        "new_items": count,
+        "mode_used": mode_used,
+    }
