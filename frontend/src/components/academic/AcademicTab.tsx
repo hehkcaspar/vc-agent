@@ -4,7 +4,7 @@ import { EventIcon } from '../../lib/eventIcons';
 import { TagMenu } from './TagMenu';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { useScholars, useSignalFeed, useDigests, useRanking, useCustomDimensions } from '../../hooks/useAcademic';
+import { useScholars, useSignalFeed, useDigests, useRanking } from '../../hooks/useAcademic';
 import { showToast } from '../../lib/appToast';
 import { academicApi } from '../../services/academicApi';
 import { AddScholarModal } from './AddScholarModal';
@@ -80,21 +80,10 @@ export function AcademicTab() {
   >([]);
   const [logLoading, setLogLoading] = useState(false);
 
-  const [showDimModal, setShowDimModal] = useState(false);
-  const [newDimName, setNewDimName] = useState('');
-  const [newDimKey, setNewDimKey] = useState('');
-  const [newDimPrompt, setNewDimPrompt] = useState('');
-  const [editingDimKey, setEditingDimKey] = useState<string | null>(null);
-  const [editDimName, setEditDimName] = useState('');
-  const [editDimKey, setEditDimKey] = useState('');
-  const [editDimPrompt, setEditDimPrompt] = useState('');
-  const [dimBusy, setDimBusy] = useState(false);
-
   const { scholars, isLoading, mutate } = useScholars();
   const { events: feedEvents, mutate: mutateFeed } = useSignalFeed();
   const { digests, mutate: mutateDigests } = useDigests();
   const { scholars: rankingScholars } = useRanking();
-  const { dimensions: customDims, mutate: mutateDims } = useCustomDimensions();
 
   // Stale scholars: no evaluation in >30 days
   const staleScholars = rankingScholars.filter((s) => {
@@ -123,68 +112,6 @@ export function AcademicTab() {
     try {
       await academicApi.scholars.delete(scholar.id);
       mutate();
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
-    }
-  };
-
-  const handleAddDimension = async () => {
-    if (dimBusy) return;
-    if (!newDimName.trim() || !newDimKey.trim() || !newDimPrompt.trim()) return;
-    setDimBusy(true);
-    try {
-      await academicApi.customDimensions.create({
-        name: newDimName.trim(),
-        key: newDimKey.trim(),
-        prompt: newDimPrompt.trim(),
-      });
-      mutateDims();
-      setNewDimName('');
-      setNewDimKey('');
-      setNewDimPrompt('');
-      showToast('Custom dimension added', 'success');
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Failed to add dimension', 'error');
-    } finally {
-      setDimBusy(false);
-    }
-  };
-
-  const startEditDimension = (d: { name: string; key: string; prompt: string }) => {
-    setEditingDimKey(d.key);
-    setEditDimName(d.name);
-    setEditDimKey(d.key);
-    setEditDimPrompt(d.prompt);
-  };
-
-  const cancelEditDimension = () => {
-    setEditingDimKey(null);
-  };
-
-  const handleSaveDimension = async () => {
-    if (dimBusy) return;
-    if (!editingDimKey || !editDimName.trim() || !editDimKey.trim() || !editDimPrompt.trim()) return;
-    setDimBusy(true);
-    try {
-      await academicApi.customDimensions.update(editingDimKey, {
-        name: editDimName.trim(),
-        key: editDimKey.trim(),
-        prompt: editDimPrompt.trim(),
-      });
-      mutateDims();
-      setEditingDimKey(null);
-      showToast('Dimension updated', 'success');
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Update failed', 'error');
-    } finally {
-      setDimBusy(false);
-    }
-  };
-
-  const handleDeleteDimension = async (key: string) => {
-    try {
-      await academicApi.customDimensions.delete(key);
-      mutateDims();
     } catch (err) {
       showToast(err instanceof Error ? err.message : 'Delete failed', 'error');
     }
@@ -345,9 +272,6 @@ export function AcademicTab() {
             <Activity size={14} />
             <span>Activity</span>
             {anyEvaluating && <span className="pulse-dot" />}
-          </button>
-          <button className="btn-secondary" onClick={() => setShowDimModal(true)}>
-            Dimensions
           </button>
           <button className="btn-secondary" onClick={handleGenerateDigest}>
             Digest
@@ -568,120 +492,6 @@ export function AcademicTab() {
           onCreated={() => mutate()}
         />
       )}
-
-      {/* Custom dimensions modal */}
-      <Modal
-        isOpen={showDimModal}
-        onClose={() => setShowDimModal(false)}
-        title="Custom Dimensions"
-      >
-            <div className="modal-body">
-              <p className="text-muted" style={{ marginTop: 0, fontSize: '0.85em' }}>
-                Dimensions define how scholars are scored. All are editable — changes apply to the next evaluation.
-              </p>
-              {customDims.length === 0 && (
-                <p className="text-muted" style={{ fontSize: '0.9em' }}>No dimensions defined.</p>
-              )}
-              {customDims.length > 0 && (
-                <div className="custom-dims-list">
-                  {customDims.map((d) =>
-                    editingDimKey === d.key ? (
-                      <div key={d.key} className="custom-dim-item custom-dim-editing">
-                        <div className="custom-dim-form">
-                          <input
-                            type="text"
-                            placeholder="Display name"
-                            value={editDimName}
-                            onChange={(e) => setEditDimName(e.target.value)}
-                          />
-                          <input
-                            type="text"
-                            placeholder="Key"
-                            value={editDimKey}
-                            onChange={(e) =>
-                              setEditDimKey(
-                                e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''),
-                              )
-                            }
-                          />
-                          <textarea
-                            placeholder="Guiding prompt"
-                            value={editDimPrompt}
-                            onChange={(e) => setEditDimPrompt(e.target.value)}
-                            rows={3}
-                          />
-                          <div style={{ display: 'flex', gap: 8 }}>
-                            <button
-                              className="btn-primary"
-                              onClick={handleSaveDimension}
-                              disabled={dimBusy || !editDimName.trim() || !editDimKey.trim() || !editDimPrompt.trim()}
-                            >
-                              {dimBusy ? 'Saving…' : 'Save'}
-                            </button>
-                            <button className="btn-secondary" onClick={cancelEditDimension} disabled={dimBusy}>
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div key={d.key} className="custom-dim-item">
-                        <div className="custom-dim-info">
-                          <span className="custom-dim-name">{d.name}</span>
-                          <span className="custom-dim-key">{d.key}</span>
-                          <span className="custom-dim-prompt">{d.prompt}</span>
-                        </div>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button
-                            className="btn-icon"
-                            onClick={() => startEditDimension(d)}
-                            title="Edit"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            className="btn-icon btn-icon-danger"
-                            onClick={() => handleDeleteDimension(d.key)}
-                            title="Delete"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    ),
-                  )}
-                </div>
-              )}
-              <div className="custom-dim-form">
-                <h4>Add New Dimension</h4>
-                <input
-                  type="text"
-                  placeholder="Display name (e.g. Teaching Impact)"
-                  value={newDimName}
-                  onChange={(e) => setNewDimName(e.target.value)}
-                />
-                <input
-                  type="text"
-                  placeholder="Key (e.g. teaching_impact)"
-                  value={newDimKey}
-                  onChange={(e) => setNewDimKey(e.target.value.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, ''))}
-                />
-                <textarea
-                  placeholder="Guiding prompt for the agent (e.g. Assess the scholar's teaching impact based on...)"
-                  value={newDimPrompt}
-                  onChange={(e) => setNewDimPrompt(e.target.value)}
-                  rows={3}
-                />
-                <button
-                  className="btn-primary"
-                  onClick={handleAddDimension}
-                  disabled={dimBusy || !newDimName.trim() || !newDimKey.trim() || !newDimPrompt.trim()}
-                >
-                  {dimBusy ? 'Adding…' : 'Add Dimension'}
-                </button>
-              </div>
-            </div>
-      </Modal>
 
       {/* Activity log modal */}
       <Modal

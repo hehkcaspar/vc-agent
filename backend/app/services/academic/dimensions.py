@@ -10,6 +10,7 @@ or editing a dimension requires no code changes.
 from __future__ import annotations
 
 import json
+import os
 from typing import TypedDict
 
 from ...config import settings
@@ -100,10 +101,19 @@ def read_dimensions() -> list[Dimension]:
 
 
 def write_dimensions(dims: list[Dimension]) -> None:
+    """Atomically replace ``dimensions.json``.
+
+    Concurrent readers (``dim_runner`` on every heartbeat tick) must
+    never see a half-written file. Write to a sibling ``.tmp`` and
+    ``os.replace`` — mirrors ``continuous_config.write_continuous_tasks``.
+    """
     DIMENSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    DIMENSIONS_PATH.write_text(
-        json.dumps({"dimensions": dims}, indent=2), encoding="utf-8"
+    tmp = DIMENSIONS_PATH.with_suffix(DIMENSIONS_PATH.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps({"dimensions": dims}, indent=2) + "\n",
+        encoding="utf-8",
     )
+    os.replace(tmp, DIMENSIONS_PATH)
 
 
     # NOTE: v1 had render_dimensions_schema_block() and

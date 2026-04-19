@@ -380,6 +380,64 @@
   margin-top: var(--space-2);
 }
 
+/* Custom Dimensions */
+.dim-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.dim-card {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  transition: border-color var(--transition-fast);
+}
+
+.dim-card:hover {
+  border-color: var(--color-border-hover);
+}
+
+.dim-card-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dim-card-name {
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.dim-card-key {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--color-text-tertiary);
+}
+
+.dim-card-prompt {
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  margin-top: var(--space-2);
+}
+
+.dim-card-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: var(--space-1);
+}
+
 /* Appearance radio group */
 .appearance-option {
   display: flex;
