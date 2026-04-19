@@ -45,11 +45,11 @@ _ITEM_TYPE_HINTS: dict[str, str] = {
 
 
 _PROMPT_TEMPLATE = """\
-You are a canonical-entity matcher for a scholar-tracking system.
+You are a canonical-entity matcher for a {system_label} system.
 You are matching {item_type_plural}.
 
-Scholar: **{name}**{affiliation_clause}
-Research areas: {research_areas}
+{subject_label}: **{name}**{affiliation_clause}
+{domain_label}: {research_areas}
 
 Context: {item_type_hint}
 
@@ -60,7 +60,7 @@ New candidates to classify:
 {candidates_block}
 
 For each candidate, decide whether it refers to the same real-world
-{item_type} as one of the known entries above. Use research-area
+{item_type} as one of the known entries above. Use domain-area
 alignment, URL overlap, team/founder continuity, product or event
 description — NOT just name-prefix similarity.
 
@@ -152,12 +152,19 @@ async def canonicalize_candidates(
     item_type: str,
     *,
     model: str | None = None,
+    subject_label: str = "Scholar",
+    system_label: str = "scholar-tracking",
+    domain_label: str = "Research areas",
 ) -> dict[int, int | None]:
     """Match each candidate to an existing entry, or mark as new.
 
     Returns ``{candidate_index: matching_existing_index | None}`` for
     EVERY input candidate. Missing indices mean "match was not
     decidable" → caller should treat as None (new entry).
+
+    ``subject_label`` / ``system_label`` / ``domain_label`` customise
+    the prompt so portfolio callers can pass "Company" /
+    "portfolio-tracking" / "Industry" without duplicating the module.
 
     Skips the LLM call and returns empty dict when:
     - `candidates` is empty (nothing to classify)
@@ -192,6 +199,9 @@ async def canonicalize_candidates(
         research_areas=research_areas,
         known_block=fmt_existing(existing),
         candidates_block=fmt_cands(candidates),
+        subject_label=subject_label,
+        system_label=system_label,
+        domain_label=domain_label,
     )
 
     try:

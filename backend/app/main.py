@@ -14,6 +14,7 @@ from app.routers import (
     chat,
     discrepancies,
     entities,
+    entity_news,
     fact_ledger,
     ingest,
     parkinglot,
@@ -199,14 +200,20 @@ async def lifespan(app: FastAPI):
     scheduler = HeartbeatScheduler()
     scheduler_task = asyncio.create_task(scheduler.run())
 
+    # Start portfolio news scheduler (per-entity cadence-driven news_web ticks)
+    from app.services.portfolio.news_scheduler import PortfolioNewsScheduler
+    news_scheduler = PortfolioNewsScheduler()
+    news_scheduler_task = asyncio.create_task(news_scheduler.run())
+
     yield
 
     # Shutdown
-    scheduler_task.cancel()
-    try:
-        await scheduler_task
-    except asyncio.CancelledError:
-        pass
+    for t in (scheduler_task, news_scheduler_task):
+        t.cancel()
+        try:
+            await t
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -235,6 +242,7 @@ app.include_router(academic.router)
 app.include_router(settings_router.router)
 app.include_router(discrepancies.router)
 app.include_router(fact_ledger.router)
+app.include_router(entity_news.router)
 
 
 @app.get("/")

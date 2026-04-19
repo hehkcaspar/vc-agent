@@ -1,6 +1,9 @@
 import {
   Entity,
   EntityUpdateData,
+  EntityNewsFeed,
+  EntityNewsRefreshResponse,
+  EntityNewsTracking,
   FactDiscrepancy,
   FactDiscrepancyStatus,
   FactProvenance,
@@ -406,6 +409,38 @@ export const api = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ reason: reason ?? null }),
+        },
+      ),
+  },
+
+  // Per-entity news feed (news_web tracking)
+  entityNews: {
+    get: (entityId: string, limit = 100) =>
+      fetchJson<EntityNewsFeed>(
+        `/entities/${entityId}/news?limit=${limit}`,
+      ),
+    refresh: (
+      entityId: string,
+      mode?: 'bootstrap' | 'incremental',
+    ) =>
+      fetchJson<EntityNewsRefreshResponse>(
+        `/entities/${entityId}/news/refresh`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(mode ? { mode } : {}),
+        },
+      ),
+    patchTracking: (
+      entityId: string,
+      patch: { enabled?: boolean; cadence_days?: number },
+    ) =>
+      fetchJson<EntityNewsTracking>(
+        `/entities/${entityId}/news/tracking`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
         },
       ),
   },
