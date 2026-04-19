@@ -60,6 +60,16 @@ def _sanitize_name(name: str) -> str:
     return name.replace("/", "_").replace("\\", "_").replace("\x00", "")
 
 
+def _make_storage_key(entity_id: str, node_id: str, name: str) -> str:
+    """Canonical blob key for a workspace file.
+
+    Stable across the signed-URL upload flow and the direct write path —
+    the upload-init endpoint mints a PUT URL targeting this exact key so
+    the client's bytes land where ``WorkspaceNode.storage_key`` will point.
+    """
+    return f"{entity_id}/workspace/blobs/{node_id}/{_sanitize_name(name)}"
+
+
 def _suggest_derivative_path(original_path: str) -> str:
     stem = PurePosixPath(original_path).stem
     return f"Deliverables/{stem}-analysis.md"
@@ -1170,7 +1180,12 @@ class WorkspaceService:
                          expected_checksum: Optional[str] = None,
                          metadata: Optional[dict] = None,
                          origin_type: Optional[str] = None) -> WorkspaceNode:
-        """Async write_file — delegates to storage async methods."""
+        """Write bytes to a workspace file (create or overwrite).
+
+        For creates the bytes are persisted via ``self.storage`` and the
+        new ``WorkspaceNode`` is registered via ``register_uploaded_blob``.
+        For overwrites the old blob is snapshotted and replaced in place.
+        """
         suffix = PurePosixPath(path).suffix.lower()
         validator = WRITE_VALIDATORS.get(suffix)
         if validator:
@@ -1232,31 +1247,85 @@ class WorkspaceService:
             self._log_op(db, entity_id, "overwrite", actor, node.id,
                          payload={"path": path, "version": node.version},
                          before_checksum=old_checksum, after_checksum=new_checksum)
-        else:
-            name = PurePosixPath(path).name
-            parent_id = await self._ensure_parents(db, entity_id, path, actor)
+            return node
 
-            node_id = generate_uuid()
-            storage_key = f"{entity_id}/workspace/blobs/{node_id}/{_sanitize_name(name)}"
-            await self.storage.write_file(storage_key, content)
-            if not mime_type:
-                mime_type = mimetypes.guess_type(name)[0]
+        # CREATE path — persist bytes, then register.
+        name = PurePosixPath(path).name
+        node_id = generate_uuid()
+        storage_key = _make_storage_key(entity_id, node_id, name)
+        await self.storage.write_file(storage_key, content)
+        return await self.register_uploaded_blob(
+            db, entity_id, path,
+            node_id=node_id,
+            storage_key=storage_key,
+            size=len(content),
+            checksum=new_checksum,
+            mime_type=mime_type,
+            actor=actor,
+            metadata=metadata,
+            origin_type=origin_type,
+        )
 
-            meta = metadata or {}
-            node = WorkspaceNode(
-                id=node_id, entity_id=entity_id, node_type="file",
-                name=name, path=path, parent_id=parent_id,
-                mime_type=mime_type, size_bytes=len(content), checksum=new_checksum,
-                storage_key=storage_key, version=1,
-                origin_type=origin_type or actor.type, origin_ref=actor.ref,
-                metadata_json=_dump_metadata(meta) if meta else None,
-            )
-            db.add(node)
-            await db.flush()
-            self._log_op(db, entity_id, "create_file", actor, node.id,
-                         payload={"path": path, "size": len(content)},
-                         after_checksum=new_checksum)
+    async def register_uploaded_blob(
+        self,
+        db,
+        entity_id: str,
+        path: str,
+        *,
+        node_id: str,
+        storage_key: str,
+        size: int,
+        checksum: str,
+        mime_type: Optional[str] = None,
+        actor: Actor,
+        metadata: Optional[dict] = None,
+        origin_type: Optional[str] = None,
+    ) -> WorkspaceNode:
+        """Register a blob that's already in storage as a new WorkspaceNode.
 
+        Caller is responsible for:
+          - Verifying the blob exists at ``storage_key`` with the claimed
+            ``size`` + ``checksum`` (we don't re-read for performance).
+          - Ensuring ``path`` is free (no existing node). This is a CREATE-only
+            path. Callers wanting overwrite semantics should use ``write_file``.
+
+        Used by ``write_file`` itself (after writing bytes) and by the
+        signed-URL upload flow (``POST /workspace/upload-commit``) where the
+        client has already PUT the bytes directly to storage.
+        """
+        name = PurePosixPath(path).name
+        parent_id = await self._ensure_parents(db, entity_id, path, actor)
+        if not mime_type:
+            mime_type = mimetypes.guess_type(name)[0]
+
+        meta = metadata or {}
+        node = WorkspaceNode(
+            id=node_id,
+            entity_id=entity_id,
+            node_type="file",
+            name=name,
+            path=path,
+            parent_id=parent_id,
+            mime_type=mime_type,
+            size_bytes=size,
+            checksum=checksum,
+            storage_key=storage_key,
+            version=1,
+            origin_type=origin_type or actor.type,
+            origin_ref=actor.ref,
+            metadata_json=_dump_metadata(meta) if meta else None,
+        )
+        db.add(node)
+        await db.flush()
+        self._log_op(
+            db,
+            entity_id,
+            "create_file",
+            actor,
+            node.id,
+            payload={"path": path, "size": size},
+            after_checksum=checksum,
+        )
         return node
 
     async def create_folder(self, db, entity_id: str, path: str, actor: Actor) -> WorkspaceNode:
