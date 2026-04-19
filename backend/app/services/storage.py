@@ -1,3 +1,4 @@
+import logging
 import os
 import aiofiles
 from abc import ABC, abstractmethod
@@ -5,6 +6,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Optional
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -277,16 +280,42 @@ class GcsSignedUrlAdapter(LocalFilesystemAdapter):
         content_type = content_type or "application/octet-stream"
         try:
             blob = self._client().bucket(self.bucket_name).blob(storage_key)
+
+            # Cloud Run's default compute-SA credentials don't carry a
+            # private key locally, so ``generate_signed_url`` on its own
+            # can't sign the URL — it would raise
+            # ``AttributeError: you need a private key to sign credentials``.
+            # Instead we ask IAM to sign on our behalf via the
+            # ``service_account_email`` + ``access_token`` path. The SA
+            # needs roles/iam.serviceAccountTokenCreator on itself
+            # (granted as part of the gc-deploy IAM setup).
+            from google.auth import default as google_auth_default
+            from google.auth.transport.requests import Request as AuthRequest
+
+            credentials, _ = google_auth_default()
+            if not getattr(credentials, "valid", False):
+                credentials.refresh(AuthRequest())
+
+            sa_email = getattr(credentials, "service_account_email", None)
+            access_token = getattr(credentials, "token", None)
+
             url = blob.generate_signed_url(
                 version="v4",
                 expiration=timedelta(seconds=ttl_seconds),
                 method="PUT",
                 content_type=content_type,
+                service_account_email=sa_email,
+                access_token=access_token,
             )
-        except Exception:
-            # Missing dep / IAM misconfig: fall back to direct-POST so
-            # small uploads keep working while the operator fixes the
-            # signed-URL path. Logged upstream by the router.
+        except Exception as e:
+            logger.warning(
+                "GcsSignedUrlAdapter.mint_upload failed (bucket=%s, key=%s): %s — "
+                "falling back to direct-POST upload",
+                self.bucket_name,
+                storage_key,
+                e,
+                exc_info=True,
+            )
             return super().mint_upload(
                 storage_key,
                 content_type=content_type,
