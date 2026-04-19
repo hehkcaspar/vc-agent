@@ -429,6 +429,56 @@ Bulk upload multiple files, preserving relative paths.
 }
 ```
 
+##### POST /entities/{entity_id}/workspace/upload-init
+Issue an upload plan for a new file. On prod (Cloud Run + GCS) returns a pre-signed PUT URL the client uploads directly to `storage.googleapis.com`, bypassing Cloud Run's 32 MB request-body ceiling. On local dev (LocalFilesystemAdapter) returns `use_direct_upload=true` so the client falls back to `POST /workspace/file`.
+
+**Request:**
+```json
+{
+  "path": "Inbox/deck.pdf",
+  "size": 91956224,
+  "mime_type": "application/pdf",
+  "metadata": { "description": "…" }
+}
+```
+
+**Response:**
+```json
+{
+  "upload_id": "uuid",
+  "storage_key": "{entity_id}/workspace/blobs/{upload_id}/deck.pdf",
+  "method": "PUT",
+  "upload_url": "https://storage.googleapis.com/.../deck.pdf?X-Goog-Signature=…",
+  "upload_headers": { "Content-Type": "application/pdf" },
+  "max_bytes": 1073741824,
+  "ttl_seconds": 1800,
+  "use_direct_upload": false
+}
+```
+
+**Errors:**
+- `413` — `size` exceeds `WORKSPACE_MAX_FILE_BYTES`
+- Pre-existing file at `path` — response has `use_direct_upload=true` (overwrite flows through `POST /workspace/file` to preserve version snapshots)
+
+##### POST /entities/{entity_id}/workspace/upload-commit
+Register a blob the client has already PUT to the signed URL. Reads the file's size + sha256 from storage, then calls `WorkspaceService.register_uploaded_blob` to create the `WorkspaceNode` + audit log entry.
+
+**Request:**
+```json
+{
+  "upload_id": "uuid-from-init",
+  "path": "Inbox/deck.pdf",
+  "mime_type": "application/pdf",
+  "metadata": null
+}
+```
+
+**Response:** `WorkspaceNodeResponse` for the registered file.
+
+**Errors:**
+- `404` — no blob found at the canonical storage_key (client never completed the PUT, or signed URL expired)
+- `409` — path already has a node (overwrite via signed URL is not supported)
+
 ##### POST /entities/{entity_id}/workspace/folder?path=...
 Create a new folder.
 

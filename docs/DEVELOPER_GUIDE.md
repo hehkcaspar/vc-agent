@@ -63,7 +63,9 @@ Optional: `GEMINI_MODEL` (default `gemini-3.1-pro-preview`), `GEMINI_METADATA_EX
 
 **Deep Agent harness (optional):** `CHAT_USE_DEEP_AGENT` (server default when the client omits `use_deep_agent`), `CHAT_DEFAULT_MODEL_PROFILE`, per-message `model_profile_id` / **`use_deep_agent`** body field, `CHAT_AGENT_RECURSION_LIMIT`, Moonshot / Kimi Code keys and URLs (`MOONSHOT_*`, `KIMI_CODE_*`, see `config.py`).
 
-**Workspace policy:** `WORKSPACE_MAX_FILE_BYTES` (default 50 MB per file), `WORKSPACE_VERSION_RETENTION_DAYS` (default 30 days). These govern upload size limits and how long old file versions are kept before cleanup.
+**Workspace policy:** `WORKSPACE_MAX_FILE_BYTES` (default 1 GB per file — bytes go direct to object storage via signed URLs on prod, so the cap is a sanity guard, not an infra constraint), `WORKSPACE_MAX_ZIP_BYTES` (default 1 GB), `WORKSPACE_VERSION_RETENTION_DAYS` (default 30 days).
+
+**Storage adapter:** `GCS_BUCKET` env var toggles between `LocalFilesystemAdapter` (default, local dev — falls back to legacy `POST /workspace/file`) and `GcsSignedUrlAdapter` (prod — issues v4 signed PUT URLs via IAM SignBlob). `GCS_OBJECT_PREFIX` (default `"entities/"`) aligns with the FUSE mount layout on Cloud Run. Frontend upload flow is in `frontend/src/services/upload.ts`; the two endpoints are `POST /workspace/upload-init` + `POST /workspace/upload-commit`. See `docs/ARCHITECTURE.md` and `docs/API_REFERENCE.md` for details.
 
 **Optional real-LLM E2E:** set `RUN_E2E_LLM=1` and a valid Gemini key, then from `backend` run `pytest tests/test_chat_e2e_llm.py` (isolated temp DB + `DATA_ROOT`; does not touch `data/vc_portfolio.db`). Documented in `tests/test_chat_e2e_llm.py` module docstring; marker `e2e_llm` registered in `backend/pytest.ini`.
 

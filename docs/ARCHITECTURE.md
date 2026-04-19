@@ -116,6 +116,7 @@ Each entity has one hierarchical workspace tree. No separate "resources" and "ar
 #### StorageAdapter (Abstract)
 ```python
 class StorageAdapter(ABC):
+    # blob I/O
     async def write_file(self, relative_path: str, content: bytes) -> str
     async def read_file(self, relative_path: str) -> bytes
     async def copy_file(self, source: str, dest: str) -> None
@@ -123,7 +124,28 @@ class StorageAdapter(ABC):
     async def delete_recursive(self, relative_path: str) -> None
     async def ensure_dir(self, relative_path: str) -> None
     async def exists(self, relative_path: str) -> bool
+    async def file_checksum(self, relative_path: str) -> str
+    async def file_size(self, relative_path: str) -> int
+    # upload strategy
+    def mint_upload(self, storage_key, *, content_type, size, ttl_seconds) -> UploadPlan
+    async def finalize_upload(self, storage_key: str) -> tuple[int, str]
 ```
+
+Two concrete adapters ship:
+
+- **`LocalFilesystemAdapter`** — default. Reads/writes under `DATA_ROOT`. `mint_upload` returns `use_direct_upload=True` so the browser falls back to `POST /workspace/file`; there's no body-size pressure locally.
+- **`GcsSignedUrlAdapter`** — activates on Cloud Run when `GCS_BUCKET` is set. Inherits all filesystem I/O from Local (the bucket is FUSE-mounted at `DATA_ROOT`), but `mint_upload` issues a v4 signed PUT URL via the GCS IAM SignBlob API so the browser uploads bytes directly to `storage.googleapis.com`, bypassing Cloud Run's 32 MB request-body ceiling.
+
+The same adapter protocol supports any future deploy variant (S3, Azure Blob, SharePoint) — subclass `LocalFilesystemAdapter`, override `mint_upload` + `finalize_upload`, swap the adapter at startup. Routers and services never branch on the strategy.
+
+**Signed-URL upload flow** (prod; local dev falls through to legacy direct-POST):
+```
+POST /workspace/upload-init        → {upload_id, upload_url, storage_key, use_direct_upload}
+PUT  storage.googleapis.com/...    → bytes direct to GCS (XHR, emits upload.onprogress)
+POST /workspace/upload-commit      → reads size + sha256 from GCS, calls
+                                      WorkspaceService.register_uploaded_blob
+```
+`register_uploaded_blob` was factored out of `write_file` so both the legacy direct-POST path and the new signed-URL commit path go through the same DB-registration + audit-log code.
 
 #### Workspace provenance enforcement
 
