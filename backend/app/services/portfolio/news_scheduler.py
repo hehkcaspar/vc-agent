@@ -27,6 +27,7 @@ from app.models import Entity
 from .file_utils import last_snapshot_for_source
 from .refresh_dispatcher import trigger_refresh
 from .sources.news_web import SOURCE_ID as NEWS_SOURCE_ID
+from .tracking import apply_run_result_to_tracking
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,7 @@ class PortfolioNewsScheduler:
             )
             entities = result.scalars().all()
 
+        due_count = 0
         for entity in entities:
             tracking = _read_tracking(entity)
             if not tracking or not tracking.get("enabled"):
@@ -94,17 +96,52 @@ class PortfolioNewsScheduler:
             )
             if not self._is_due(entity.id, cadence_days, now):
                 continue
+            due_count += 1
+            logger.info(
+                "portfolio news_web: refreshing %s (%s) — cadence=%sd",
+                entity.name,
+                entity.id,
+                cadence_days,
+            )
+            mode_used = "incremental"
+            error: str | None = None
             try:
-                await trigger_refresh(
+                run_result = await trigger_refresh(
                     entity.id,
                     NEWS_SOURCE_ID,
                     mode="incremental",
                     reason="heartbeat",
                 )
-            except Exception:
+                if isinstance(run_result, dict):
+                    mu = run_result.get("mode_used")
+                    if isinstance(mu, str) and mu:
+                        mode_used = mu
+                    src_err = run_result.get("error")
+                    if isinstance(src_err, str) and src_err:
+                        error = src_err
+            except Exception as e:  # noqa: BLE001
                 logger.exception(
                     "portfolio news: refresh failed for %s", entity.id
                 )
+                error = str(e)
+
+            try:
+                await apply_run_result_to_tracking(
+                    entity.id, mode_used=mode_used, error=error,
+                )
+            except Exception:
+                logger.warning(
+                    "portfolio news: tracking update failed for %s",
+                    entity.id,
+                    exc_info=True,
+                )
+
+        if due_count:
+            logger.info(
+                "portfolio news_web tick: %s/%s entities refreshed",
+                due_count,
+                len(entities),
+            )
 
     def _is_due(
         self, entity_id: str, cadence_days: int, now: datetime

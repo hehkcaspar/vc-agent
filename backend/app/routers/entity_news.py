@@ -14,9 +14,7 @@ existing metadata edit path.
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
@@ -32,45 +30,17 @@ from app.services.portfolio.file_utils import (
 )
 from app.services.portfolio.refresh_dispatcher import trigger_refresh
 from app.services.portfolio.sources.news_web import SOURCE_ID as NEWS_SOURCE_ID
+from app.services.portfolio.tracking import (
+    apply_run_result_to_tracking,
+    default_tracking,
+    get_tracking,
+    read_metadata,
+    write_metadata,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/entities/{entity_id}/news", tags=["entity-news"])
-
-
-# ── Tracking defaults ─────────────────────────────────────────────────
-
-_DEFAULT_CADENCE_DAYS = 3
-
-
-def _default_tracking(enabled: bool = True) -> dict[str, Any]:
-    return {
-        "enabled": enabled,
-        "cadence_days": _DEFAULT_CADENCE_DAYS,
-        "last_bootstrapped_at": None,
-        "last_run_at": None,
-        "last_error": None,
-    }
-
-
-def _read_metadata(entity: Entity) -> dict[str, Any]:
-    if not entity.metadata_json:
-        return {}
-    try:
-        return json.loads(entity.metadata_json) or {}
-    except (TypeError, ValueError):
-        return {}
-
-
-def _write_metadata(entity: Entity, metadata: dict[str, Any]) -> None:
-    entity.metadata_json = json.dumps(metadata, ensure_ascii=False, default=str)
-
-
-def _get_tracking(entity: Entity) -> dict[str, Any] | None:
-    """Return current ``_news_tracking`` dict or None if absent."""
-    metadata = _read_metadata(entity)
-    trk = metadata.get("_news_tracking")
-    return trk if isinstance(trk, dict) else None
 
 
 async def _ensure_tracking(
@@ -81,14 +51,14 @@ async def _ensure_tracking(
     cadence_days: int | None = None,
 ) -> dict[str, Any]:
     """Initialize ``_news_tracking`` if missing; return the current state."""
-    metadata = _read_metadata(entity)
+    metadata = read_metadata(entity)
     trk = metadata.get("_news_tracking")
     if not isinstance(trk, dict):
-        trk = _default_tracking(enabled=enabled)
+        trk = default_tracking(enabled=enabled)
         if cadence_days is not None:
             trk["cadence_days"] = cadence_days
         metadata["_news_tracking"] = trk
-        _write_metadata(entity, metadata)
+        write_metadata(entity, metadata)
         await db.commit()
     return trk
 
@@ -98,13 +68,13 @@ async def _update_tracking(
     entity: Entity,
     patch: dict[str, Any],
 ) -> dict[str, Any]:
-    metadata = _read_metadata(entity)
+    metadata = read_metadata(entity)
     trk = metadata.get("_news_tracking")
     if not isinstance(trk, dict):
-        trk = _default_tracking()
+        trk = default_tracking()
     trk = {**trk, **patch}
     metadata["_news_tracking"] = trk
-    _write_metadata(entity, metadata)
+    write_metadata(entity, metadata)
     await db.commit()
     return trk
 
@@ -186,38 +156,35 @@ async def _run_news_refresh(
     mode: str,
     reason: str,
 ) -> None:
-    """Kick trigger_refresh and update tracking timestamps."""
-    started_at = datetime.now(timezone.utc).isoformat()
+    """Kick trigger_refresh and update tracking timestamps.
+
+    Trusts the source's ``mode_used`` in the result to decide whether
+    to set ``last_bootstrapped_at`` — the source can flip requested
+    ``incremental`` to ``bootstrap`` internally when no prior snapshot
+    exists.
+    """
+    mode_used_final = mode  # fall-back if source never returns a dict
+    error: str | None = None
     try:
-        await trigger_refresh(
+        result = await trigger_refresh(
             entity_id, NEWS_SOURCE_ID, mode=mode, reason=reason or "manual",
         )
-        error: str | None = None
+        if isinstance(result, dict):
+            mu = result.get("mode_used")
+            if isinstance(mu, str) and mu:
+                mode_used_final = mu
+            src_err = result.get("error")
+            if isinstance(src_err, str) and src_err:
+                error = src_err
     except Exception as e:  # noqa: BLE001
         logger.exception(
             "news refresh failed for %s (mode=%s)", entity_id, mode
         )
         error = str(e)
 
-    from app.database import AsyncSessionLocal  # local to avoid cycle
-
-    async with AsyncSessionLocal() as db:
-        result = await db.execute(select(Entity).where(Entity.id == entity_id))
-        entity = result.scalar_one_or_none()
-        if entity is None:
-            return
-        metadata = _read_metadata(entity)
-        trk = metadata.get("_news_tracking")
-        if not isinstance(trk, dict):
-            trk = _default_tracking()
-        now_iso = datetime.now(timezone.utc).isoformat()
-        trk["last_run_at"] = now_iso
-        trk["last_error"] = error
-        if mode == "bootstrap" and not error:
-            trk["last_bootstrapped_at"] = now_iso
-        metadata["_news_tracking"] = trk
-        _write_metadata(entity, metadata)
-        await db.commit()
+    await apply_run_result_to_tracking(
+        entity_id, mode_used=mode_used_final, error=error,
+    )
 
 
 # ── GET feed ──────────────────────────────────────────────────────────
@@ -230,7 +197,7 @@ async def get_news_feed(
     db: AsyncSession = Depends(get_db),
 ) -> NewsFeedResponse:
     entity = await _get_entity_or_404(db, entity_id)
-    trk = _get_tracking(entity)
+    trk = get_tracking(entity)
 
     records = read_records(entity_id, "news")
     total = len(records)
@@ -354,13 +321,13 @@ async def maybe_bootstrap_after_preset(
             return
         if entity.status != "active":
             return
-        metadata = _read_metadata(entity)
+        metadata = read_metadata(entity)
         existing = metadata.get("_news_tracking")
         if isinstance(existing, dict):
             # Already initialized by a prior preset run — bootstrap once total.
             return
-        metadata["_news_tracking"] = _default_tracking(enabled=True)
-        _write_metadata(entity, metadata)
+        metadata["_news_tracking"] = default_tracking(enabled=True)
+        write_metadata(entity, metadata)
         await db.commit()
 
     logger.info(
