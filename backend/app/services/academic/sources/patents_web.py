@@ -4,8 +4,21 @@ Uses Path 2 (single-shot with google_search tool) to discover patents
 where the scholar is a named inventor, then Path 1 (generate_structured)
 to reject false positives (non-patents, cited-but-not-inventor) and
 dedupe patent families. Writes wholesale to `patents.json`; emits
-`log_event` rows for newly-discovered filings/grants and
-filed→granted transitions.
+`log_event` rows for newly-discovered filings/grants and filed→granted
+transitions.
+
+Two modes:
+
+- ``bootstrap`` — full-sweep "every patent where this scholar is a
+  named inventor". No time limit.
+- ``incremental`` — new patents filed OR granted since the last
+  snapshot PLUS an explicit grant re-check on known pending
+  applications (so we catch filed→granted transitions without
+  re-sweeping the entire corpus).
+
+Cross-batch dedup is rule-based (``_patent_key`` on normalised
+patent_number) — patent numbers are strong enough identifiers that the
+marginal quality of an LLM canonicalizer doesn't justify the call cost.
 """
 
 from __future__ import annotations
@@ -17,6 +30,12 @@ from typing import Any
 from ..events_sync import log_event
 from ..fact_store import record_snapshot
 from ..file_utils import dossier_path, read_json, write_json
+from ._incremental import (
+    format_cutoff,
+    format_known_pending_patents,
+    incremental_cutoff,
+    should_use_bootstrap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +64,7 @@ def _patent_key(item: dict[str, Any]) -> str:
     return "".join(c for c in num if c.isalnum())
 
 
-_PROMPT_TEMPLATE = (
-    "Find patents granted to or filed by inventor **{name}**"
-    "{affiliation_clause}. Only include patents where {name} is a "
-    "**named inventor**, not merely cited or referenced. Dedupe patent "
-    "families — return only one entry per invention, preferring the "
-    "granted version over the application. "
+_RETURN_SHAPE = (
     "Return a JSON array where each item has: "
     "`title`, `url` (link to the patent record — patents.google.com, "
     "lens.org, or the relevant national patent office), "
@@ -60,6 +74,31 @@ _PROMPT_TEMPLATE = (
     "`grant_date` (ISO 8601 if known, else null), "
     "`abstract` (1–2 sentences), "
     "`jurisdiction` (US | EP | WO | JP | CN | etc.)."
+)
+
+_BOOTSTRAP_PROMPT = (
+    "Find patents granted to or filed by inventor **{name}**"
+    "{affiliation_clause}. Only include patents where {name} is a "
+    "**named inventor**, not merely cited or referenced. Dedupe patent "
+    "families — return only one entry per invention, preferring the "
+    "granted version over the application. "
+    + _RETURN_SHAPE
+)
+
+_INCREMENTAL_PROMPT = (
+    "For inventor **{name}**{affiliation_clause}, return a JSON array "
+    "covering two concerns together: "
+    "(a) any patent FILED or GRANTED after {cutoff} where {name} is a "
+    "named inventor; "
+    "(b) grant re-check — for each pending application listed below "
+    "(already in our ledger without a grant_date), check if it has "
+    "since been granted; if yes, include an entry with the same "
+    "`patent_number` and the now-known `grant_date`; if still pending, "
+    "SKIP it (do not include in output).\n"
+    "Known pending applications to re-check:\n{known_pending_block}\n"
+    "Dedupe patent families — one entry per invention, preferring "
+    "granted over application. Return ONLY a JSON array — no prose, "
+    "no markdown, no section headers. " + _RETURN_SHAPE
 )
 
 
@@ -141,9 +180,30 @@ async def run(
 
     affiliation = ((profile.get("affiliation") or {}).get("current")) or ""
     affiliation_clause = f" at {affiliation}" if affiliation else ""
-    prompt = _PROMPT_TEMPLATE.format(
-        name=name, affiliation_clause=affiliation_clause
-    )
+
+    # Load existing ledger — needed for pending-patent re-check + merge.
+    path = dossier_path(scholar_id) / "patents.json"
+    existing = read_json(path) or {}
+    existing_items = [
+        it for it in (existing.get("items") or []) if isinstance(it, dict)
+    ]
+
+    cutoff = incremental_cutoff(scholar_id, SOURCE_ID)
+    use_bootstrap = should_use_bootstrap(mode, cutoff) or not existing_items
+
+    if use_bootstrap:
+        prompt = _BOOTSTRAP_PROMPT.format(
+            name=name, affiliation_clause=affiliation_clause
+        )
+        mode_used = "bootstrap"
+    else:
+        prompt = _INCREMENTAL_PROMPT.format(
+            name=name,
+            affiliation_clause=affiliation_clause,
+            cutoff=format_cutoff(cutoff),
+            known_pending_block=format_known_pending_patents(existing_items),
+        )
+        mode_used = "incremental"
 
     try:
         from ..llm_client import grounded_search_json  # type: ignore
@@ -177,6 +237,20 @@ async def run(
             continue
         valid.append(it)
 
+    # Early-exit: grounded search returned nothing usable.
+    if not valid:
+        snapshot_id = await record_snapshot(
+            scholar_id, SOURCE_ID,
+            detail={
+                "mode": mode, "mode_used": mode_used, "reason": reason,
+                "new_events": 0, "total": len(existing_items),
+            },
+        )
+        return {
+            "changed": False, "snapshot_id": snapshot_id,
+            "new_events": 0, "total": len(existing_items),
+        }
+
     try:
         filtered = await _filter_patents(valid, name, affiliation)
     except Exception:
@@ -186,11 +260,6 @@ async def run(
         )
         filtered = valid
 
-    path = dossier_path(scholar_id) / "patents.json"
-    existing = read_json(path) or {}
-    existing_items = [
-        it for it in (existing.get("items") or []) if isinstance(it, dict)
-    ]
     by_key: dict[str, dict[str, Any]] = {}
     for it in existing_items:
         k = _patent_key(it)
@@ -250,6 +319,7 @@ async def run(
         scholar_id, SOURCE_ID,
         detail={
             "mode": mode,
+            "mode_used": mode_used,
             "reason": reason,
             "new_events": len(transitions),
             "total": len(items),

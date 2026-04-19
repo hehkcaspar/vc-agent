@@ -1,16 +1,24 @@
 """Layer 2 source — scholar-founded startups via Gemini grounded search.
 
-Uses Path 2 (single-shot with google_search tool) to discover ventures
-founded or co-founded by the scholar, then Path 1 (generate_structured)
-to reject non-commercial entities (research consortia, academic
-networks, non-profits) and dedupe within-batch. Writes wholesale to
+Uses Path 2 (single-shot with google_search tool) to discover ventures,
+Path 1 (generate_structured) to filter for commercial relevance, and
+Path 1 again to canonicalize candidates against the existing ledger
+(fuzzy match beyond rule-based name keys). Writes wholesale to
 `startups.json`; emits `log_event` rows for newly-discovered ventures
 and status transitions (acquired / ipo / closed).
 
+Two modes:
+
+- ``bootstrap`` — full-sweep "find every venture this scholar founded"
+  query. Used for first evaluation or user-forced refresh.
+- ``incremental`` — status-check on known ventures since last tick +
+  scan for new ventures since last tick. Saves tokens, actively
+  surfaces status transitions (operating → acquired) that a plain
+  full-sweep query might miss if grounded search doesn't resurface
+  the known venture.
+
 Upstream of `news_web._collect_known_ventures`, which reads
-`startups.json` to enrich the news prompt with known venture names —
-so populating this file closes Gap 3 in the first-eval pipeline for
-free.
+`startups.json` to enrich the news prompt with known venture names.
 """
 
 from __future__ import annotations
@@ -22,6 +30,13 @@ from typing import Any
 from ..events_sync import log_event
 from ..fact_store import record_snapshot
 from ..file_utils import dossier_path, read_json, write_json
+from ._canonicalize import canonicalize_candidates
+from ._incremental import (
+    format_cutoff,
+    format_known_ventures,
+    incremental_cutoff,
+    should_use_bootstrap,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,18 +61,17 @@ def _parse_date(raw: str | None) -> datetime | None:
 
 
 def _venture_key(item: dict[str, Any]) -> str:
-    """Canonical dedup key for a venture — lowercase alphanumerics of name."""
+    """Tiebreaker key for a venture — lowercase alphanumerics of name.
+
+    Used only as a fallback when the LLM canonicalizer returns no
+    match for a candidate — catches obvious same-string cases if the
+    canon pass errored or skipped.
+    """
     name = (item.get("name") or "").strip().lower()
     return "".join(c for c in name if c.isalnum())
 
 
-_PROMPT_TEMPLATE = (
-    "Find startups or companies founded or co-founded by academic "
-    "researcher **{name}**{affiliation_clause}. Only include "
-    "**commercial** entities — for-profit companies or commercialisation "
-    "spin-outs. Do NOT include research consortia, academic networks, "
-    "non-profit foundations, grant-funded collaborations, or incubators. "
-    "Cover ventures that are active, acquired, closed, or went public. "
+_RETURN_SHAPE = (
     "Return a JSON array where each item has: "
     "`name`, `url`, `founded_year`, `one_liner` (≤ 2 sentences), "
     "`current_status` (one of: operating, acquired, closed, ipo), "
@@ -65,6 +79,38 @@ _PROMPT_TEMPLATE = (
     "`last_funding_type` (seed | series_a | series_b | series_c | ipo | "
     "acquired | null), `acquirer` (if acquired, else null), "
     "`acquisition_date` (ISO 8601 if known, else null), `notes`."
+)
+
+_COMMERCIAL_GUARD = (
+    "Only include **commercial** entities — for-profit companies or "
+    "commercialisation spin-outs. Do NOT include research consortia, "
+    "academic networks, non-profit foundations, grant-funded "
+    "collaborations, or incubators. "
+)
+
+_BOOTSTRAP_PROMPT = (
+    "Find startups or companies founded or co-founded by academic "
+    "researcher **{name}**{affiliation_clause}. " + _COMMERCIAL_GUARD +
+    "Cover ventures that are active, acquired, closed, or went public — "
+    "entire career, no time limit. " + _RETURN_SHAPE
+)
+
+
+_INCREMENTAL_PROMPT = (
+    "For researcher **{name}**{affiliation_clause}, return a JSON array "
+    "covering two concerns together: "
+    "(a) any known venture from the list below whose RECORDED state is "
+    "inaccurate — e.g. our ledger says 'operating' but the venture is in "
+    "fact acquired, closed, or public; or our recorded acquirer / "
+    "funding_total is materially out of date. Include such ventures "
+    "with the corrected values. If all recorded fields accurately match "
+    "current reality, SKIP the venture (do not include it in output); "
+    "(b) any new venture {name} has founded or co-founded since {cutoff} "
+    "that is NOT in the list below. " + _COMMERCIAL_GUARD +
+    "Known ventures (verify each; include only if recorded state is "
+    "stale or wrong):\n{known_block}\n"
+    "Return ONLY a JSON array — no prose, no markdown, no section "
+    "headers. " + _RETURN_SHAPE
 )
 
 
@@ -92,7 +138,7 @@ async def _filter_ventures(
     name: str,
     affiliation: str,
 ) -> list[dict[str, Any]]:
-    """Filter candidates for commercial-venture relevance + dedupe."""
+    """Filter candidates for commercial-venture relevance + within-batch dedupe."""
     if not candidates:
         return []
 
@@ -149,9 +195,32 @@ async def run(
 
     affiliation = ((profile.get("affiliation") or {}).get("current")) or ""
     affiliation_clause = f" at {affiliation}" if affiliation else ""
-    prompt = _PROMPT_TEMPLATE.format(
-        name=name, affiliation_clause=affiliation_clause
-    )
+
+    # Load existing ledger first — needed by the incremental prompt
+    # AND by the merge step later.
+    path = dossier_path(scholar_id) / "startups.json"
+    existing = read_json(path) or {}
+    existing_items = [
+        it for it in (existing.get("items") or []) if isinstance(it, dict)
+    ]
+
+    # Decide mode: fall back to bootstrap if no prior snapshot.
+    cutoff = incremental_cutoff(scholar_id, SOURCE_ID)
+    use_bootstrap = should_use_bootstrap(mode, cutoff) or not existing_items
+
+    if use_bootstrap:
+        prompt = _BOOTSTRAP_PROMPT.format(
+            name=name, affiliation_clause=affiliation_clause
+        )
+        mode_used = "bootstrap"
+    else:
+        prompt = _INCREMENTAL_PROMPT.format(
+            name=name,
+            affiliation_clause=affiliation_clause,
+            cutoff=format_cutoff(cutoff),
+            known_block=format_known_ventures(existing_items),
+        )
+        mode_used = "incremental"
 
     try:
         from ..llm_client import grounded_search_json  # type: ignore
@@ -184,6 +253,20 @@ async def run(
             continue
         valid.append(it)
 
+    # Early-exit: grounded search returned nothing usable.
+    if not valid:
+        snapshot_id = await record_snapshot(
+            scholar_id, SOURCE_ID,
+            detail={
+                "mode": mode, "mode_used": mode_used, "reason": reason,
+                "new_events": 0, "total": len(existing_items),
+            },
+        )
+        return {
+            "changed": False, "snapshot_id": snapshot_id,
+            "new_events": 0, "total": len(existing_items),
+        }
+
     try:
         filtered = await _filter_ventures(valid, name, affiliation)
     except Exception:
@@ -193,55 +276,81 @@ async def run(
         )
         filtered = valid
 
-    # Merge with existing startups.json — keyed by normalised name.
-    path = dossier_path(scholar_id) / "startups.json"
-    existing = read_json(path) or {}
-    # Drop scaffold sentinel on first real run.
-    existing_items = [
-        it for it in (existing.get("items") or []) if isinstance(it, dict)
-    ]
-    by_key: dict[str, dict[str, Any]] = {}
-    for it in existing_items:
-        k = _venture_key(it)
-        if k:
-            by_key[k] = it
+    if not filtered:
+        snapshot_id = await record_snapshot(
+            scholar_id, SOURCE_ID,
+            detail={
+                "mode": mode, "mode_used": mode_used, "reason": reason,
+                "new_events": 0, "total": len(existing_items),
+            },
+        )
+        return {
+            "changed": False, "snapshot_id": snapshot_id,
+            "new_events": 0, "total": len(existing_items),
+        }
 
-    # Emit one "startup_founded" event per newly-discovered venture, plus
-    # a terminal-transition event if its current status is non-operating.
-    # First discovery of an already-acquired venture therefore logs BOTH
-    # founding (at founded_year) and acquisition (at acquisition_date) —
-    # both are real timeline events we just didn't know about before.
+    # ── Canonicalize survivors against existing ledger ───────────
+    scholar_context = {
+        "name": name,
+        "affiliation": profile.get("affiliation"),
+        "research_areas": profile.get("research_areas"),
+    }
+    canon_map = await canonicalize_candidates(
+        filtered, existing_items, scholar_context, "venture",
+    )
+
+    # ── Merge loop: update matched existing, append new ──────────
     transitions: list[tuple[str, dict[str, Any]]] = []
-    for it in filtered:
-        k = _venture_key(it)
-        if not k:
-            continue
-        prev = by_key.get(k)
-        merged = {**(prev or {}), **it}
-        prev_status = (prev or {}).get("current_status")
-        new_status = it.get("current_status")
-        if prev is None:
+    modified_existing: dict[int, dict[str, Any]] = {}
+    new_items: list[dict[str, Any]] = []
+
+    for cand_idx, cand in enumerate(filtered):
+        existing_idx = canon_map.get(cand_idx)
+        # Fallback tiebreaker for when canon couldn't decide or skipped.
+        if existing_idx is None:
+            k = _venture_key(cand)
+            if k:
+                for ei, eit in enumerate(existing_items):
+                    if (
+                        _venture_key(eit) == k
+                        and ei not in modified_existing
+                    ):
+                        existing_idx = ei
+                        break
+
+        if existing_idx is not None:
+            prev = existing_items[existing_idx]
+            merged = {**prev, **cand}
+            prev_status = prev.get("current_status")
+            new_status = cand.get("current_status")
+            if (
+                prev_status != new_status
+                and new_status in _TRANSITION_STATUSES
+            ):
+                transitions.append((f"startup_{new_status}", merged))
+            modified_existing[existing_idx] = merged
+        else:
+            merged = dict(cand)
+            new_status = cand.get("current_status")
             transitions.append(("startup_founded", merged))
             if new_status in _TRANSITION_STATUSES:
                 transitions.append((f"startup_{new_status}", merged))
-        elif (
-            prev_status != new_status
-            and new_status in _TRANSITION_STATUSES
-        ):
-            transitions.append((f"startup_{new_status}", merged))
-        by_key[k] = merged
+            new_items.append(merged)
 
-    items = sorted(
-        by_key.values(),
+    # Rebuild items list preserving original order for untouched entries.
+    final_items: list[dict[str, Any]] = []
+    for i, it in enumerate(existing_items):
+        final_items.append(modified_existing.get(i, it))
+    final_items.extend(new_items)
+
+    final_items.sort(
         key=lambda r: int(r.get("founded_year") or 0),
         reverse=True,
     )
-    write_json(path, {"items": items, "count": len(items)})
+    write_json(path, {"items": final_items, "count": len(final_items)})
 
     for event_type, item in transitions:
         try:
-            # Founding uses founded_year; transitions use acquisition_date
-            # when present (falls back to None = unknown).
             if event_type == "startup_founded":
                 parsed_date = _parse_date(str(item.get("founded_year") or ""))
             else:
@@ -267,14 +376,15 @@ async def run(
         scholar_id, SOURCE_ID,
         detail={
             "mode": mode,
+            "mode_used": mode_used,
             "reason": reason,
             "new_events": len(transitions),
-            "total": len(items),
+            "total": len(final_items),
         },
     )
     return {
         "changed": len(transitions) > 0,
         "snapshot_id": snapshot_id,
         "new_events": len(transitions),
-        "total": len(items),
+        "total": len(final_items),
     }

@@ -1,14 +1,22 @@
 """Layer 2 source — targeted news search via Gemini grounded search.
 
 Uses Path 2 (single-shot with google_search tool). Appends each
-discovered news item as a record to `news.jsonl` and marks a snapshot.
+discovered news item as a record to ``news.jsonl`` and marks a
+snapshot.
 
-Post-search relevance filtering via Path 1 (generate_structured)
-removes tangential results (institutional news, colleague mentions,
-field trends) and deduplicates stories across different source URLs.
+Three-layer dedup:
 
-The Gemini client is imported lazily to avoid a hard dependency while
-Phase 2 ships without Phase 3's llm_client.
+1. **Pre-search scope control** — incremental mode passes a cutoff
+   date + the last 30 known headlines into the prompt so Gemini
+   focuses on genuinely new stories. Bootstrap does the full-career
+   sweep with no cutoff.
+2. **Rule-based post-search dedup** — normalised URL + (title,
+   published_date) tuple drops exact matches against the existing
+   ledger cheaply.
+3. **LLM canonicalization** — rule-dedup survivors are matched against
+   recent existing records via ``canonicalize_candidates`` so the
+   same story under a reworded headline / different aggregator / new
+   URL slug gets caught.
 """
 
 from __future__ import annotations
@@ -21,6 +29,14 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from ..events_sync import log_event, news_significance
 from ..fact_store import record_snapshot
 from ..file_utils import append_record, dossier_path, read_json, read_records
+from ._canonicalize import canonicalize_candidates
+from ._incremental import (
+    format_cutoff,
+    format_known_titles,
+    incremental_cutoff,
+    should_use_bootstrap,
+    sort_items_recent_first,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,22 +78,46 @@ def _normalize_url(url: str) -> str:
     return urlunparse(cleaned)
 
 
-_PROMPT_TEMPLATE = (
-    "Find recent (last 30 days) news, press releases, or blog posts related "
-    "to academic researcher **{name}**{affiliation_clause} — either they "
-    "are a named protagonist (quoted, awarded, appointed, or their "
-    "specific work is the subject), OR the story is primarily about a "
-    "commercial venture (startup, company, product) they have founded or "
-    "co-founded. "
-    "{ventures_clause}"
-    "Do NOT include: news about their university, institute, or lab that "
-    "doesn't name {name} or one of their ventures; news primarily about "
-    "colleagues, students, or co-workers; general field trends or blog "
-    "posts that don't feature {name} or a venture directly. "
+_COMMON_NEWS_SHAPE = (
     "Return a JSON array where each item has: "
     "`title`, `url`, `published_date` (ISO 8601 if known), `source`, "
     "`summary` (1-3 sentences), `category` (one of: funding, launch, "
     "partnership, award, appointment, acquisition, talk, other)."
+)
+
+_COMMON_EXCLUSIONS = (
+    "Do NOT include: news about their university, institute, or lab "
+    "that doesn't name {name} or one of their ventures; news "
+    "primarily about colleagues, students, or co-workers; general "
+    "field trends or blog posts that don't feature {name} or a "
+    "venture directly. "
+)
+
+_BOOTSTRAP_PROMPT = (
+    "Find news, press releases, or blog posts about academic researcher "
+    "**{name}**{affiliation_clause} — **entire career, no time limit**. "
+    "Include any story where they are a named protagonist (quoted, "
+    "awarded, appointed, or their specific work is the subject), OR "
+    "the story is primarily about a commercial venture (startup, "
+    "company, product) they have founded or co-founded. "
+    "{ventures_clause}"
+    + _COMMON_EXCLUSIONS
+    + _COMMON_NEWS_SHAPE
+)
+
+_INCREMENTAL_PROMPT = (
+    "Find news, press releases, or blog posts about academic researcher "
+    "**{name}**{affiliation_clause} published since {cutoff}. "
+    "Include any story where they are a named protagonist, OR the "
+    "story is primarily about a commercial venture they have founded "
+    "or co-founded. "
+    "{ventures_clause}"
+    + _COMMON_EXCLUSIONS +
+    "The following headlines are already in our ledger — skip reposts "
+    "and reworded versions of the same stories, only include fresh "
+    "developments:\n{known_titles_block}\n"
+    "Return ONLY a JSON array — no prose, no markdown, no section "
+    "headers. " + _COMMON_NEWS_SHAPE
 )
 
 
@@ -104,13 +144,10 @@ _FILTER_PROMPT = (
 def _collect_known_ventures(scholar_id: str) -> list[str]:
     """Best-effort list of venture names from prior source data.
 
-    Reads `startups.json` (written by ``startups_web``). Returns an empty list
-    on a fresh bootstrap where nothing has been discovered yet — the
-    search prompt then asks Gemini to discover ventures as part of its
-    grounded search. Venture enrichment closes a known blind spot:
-    headlines that mention only the company (e.g. "Viant Acquires
-    TVision") are otherwise filtered out because the scholar isn't
-    named as a protagonist.
+    Reads `startups.json` (written by ``startups_web``). Returns an
+    empty list on a fresh bootstrap where nothing has been discovered
+    yet — the search prompt then asks Gemini to discover ventures as
+    part of its grounded search.
     """
     startups = read_json(dossier_path(scholar_id) / "startups.json") or {}
     names: set[str] = set()
@@ -124,12 +161,7 @@ def _collect_known_ventures(scholar_id: str) -> list[str]:
 def _build_ventures_clauses(
     name: str, ventures: list[str]
 ) -> tuple[str, str]:
-    """Return (search_clause, filter_line) pair based on known ventures.
-
-    Search clause goes into `_PROMPT_TEMPLATE.ventures_clause`; filter
-    line goes into `_FILTER_PROMPT.ventures_line`. Keeping both pieces
-    here so the branching logic lives in one place.
-    """
+    """Return (search_clause, filter_line) pair based on known ventures."""
     if ventures:
         venture_list = ", ".join(ventures)
         search = (
@@ -157,7 +189,7 @@ async def _filter_news(
     ventures: list[str],
     existing_titles: list[str],
 ) -> list[dict]:
-    """Filter candidates for relevance and semantic dedup via structured LLM."""
+    """Filter candidates for relevance and within-batch dedup."""
     if not candidates:
         return []
 
@@ -168,7 +200,6 @@ async def _filter_news(
     affiliation_clause = f" at {affiliation}" if affiliation else ""
     _, ventures_line = _build_ventures_clauses(name, ventures)
 
-    # Build numbered candidate list
     candidate_lines = []
     for i, it in enumerate(candidates):
         title = (it.get("title") or "").strip()
@@ -176,7 +207,6 @@ async def _filter_news(
         source = (it.get("source") or "").strip()
         candidate_lines.append(f"[{i}] {title} — {source}: {summary}")
 
-    # Include last 15 existing titles for cross-batch dedup
     existing_block = "\n".join(
         f"- {t}" for t in existing_titles[-15:]
     ) if existing_titles else "(none)"
@@ -195,7 +225,6 @@ async def _filter_news(
         response_schema=NewsFilterResult,
     )
 
-    # Build set of accepted indices
     dominated = {it.duplicate_of for it in result.items if it.duplicate_of is not None}
     accepted = set()
     for it in result.items:
@@ -203,6 +232,12 @@ async def _filter_news(
             accepted.add(it.index)
 
     return [candidates[i] for i in sorted(accepted) if i < len(candidates)]
+
+
+# Canon pool size — how many recent existing records to expose to the
+# LLM matcher. Larger = better recall on reposts of older stories, but
+# longer prompt. 30 balances cost and dedup quality.
+_CANON_POOL_SIZE = 30
 
 
 async def run(
@@ -223,13 +258,34 @@ async def run(
     affiliation_clause = f" at {affiliation}" if affiliation else ""
     ventures = _collect_known_ventures(scholar_id)
     ventures_clause, _ = _build_ventures_clauses(name, ventures)
-    prompt = _PROMPT_TEMPLATE.format(
-        name=name,
-        affiliation_clause=affiliation_clause,
-        ventures_clause=ventures_clause,
-    )
 
-    # Lazy import — llm_client is built in Phase 3. Soft-fail if absent.
+    # Load existing news once — both for incremental prompt context
+    # and for post-search dedup.
+    existing = read_records(scholar_id, "news")
+
+    cutoff = incremental_cutoff(scholar_id, SOURCE_ID)
+    use_bootstrap = should_use_bootstrap(mode, cutoff) or not existing
+
+    if use_bootstrap:
+        prompt = _BOOTSTRAP_PROMPT.format(
+            name=name,
+            affiliation_clause=affiliation_clause,
+            ventures_clause=ventures_clause,
+        )
+        mode_used = "bootstrap"
+    else:
+        recent = sort_items_recent_first(existing, date_key="published_date")
+        prompt = _INCREMENTAL_PROMPT.format(
+            name=name,
+            affiliation_clause=affiliation_clause,
+            ventures_clause=ventures_clause,
+            cutoff=format_cutoff(cutoff),
+            known_titles_block=format_known_titles(
+                recent, max_items=_CANON_POOL_SIZE
+            ),
+        )
+        mode_used = "incremental"
+
     try:
         from ..llm_client import grounded_search_json  # type: ignore
     except ImportError:
@@ -251,7 +307,7 @@ async def run(
     if not isinstance(items, list):
         items = []
 
-    # ── Minimum-shape validation before filtering ────────────────────
+    # ── Minimum-shape validation ────────────────────────────────
     valid_items = []
     for it in items:
         if not isinstance(it, dict):
@@ -263,8 +319,19 @@ async def run(
             continue
         valid_items.append(it)
 
-    # ── Relevance + semantic dedup filter ────────────────────────────
-    existing = read_records(scholar_id, "news")
+    # Early-exit: nothing usable from grounded search.
+    if not valid_items:
+        snapshot_id = await record_snapshot(
+            scholar_id, SOURCE_ID,
+            detail={
+                "mode": mode, "mode_used": mode_used, "reason": reason,
+                "new_items": 0,
+            },
+        )
+        return {
+            "changed": False, "snapshot_id": snapshot_id, "new_items": 0,
+        }
+
     existing_titles = [
         (r.get("title") or "").strip() for r in existing if r.get("title")
     ]
@@ -277,7 +344,7 @@ async def run(
         logger.warning("news_web: relevance filter failed; using unfiltered items", exc_info=True)
         filtered = valid_items
 
-    # ── URL dedup against existing records ───────────────────────────
+    # ── Rule-based dedup (URL + title+date) ─────────────────────
     existing_urls: set[str] = set()
     existing_keys: set[tuple[str, str]] = set()
     for rec in existing:
@@ -289,21 +356,56 @@ async def run(
         if t:
             existing_keys.add((t, d))
 
-    count = 0
+    after_rule: list[dict[str, Any]] = []
     for it in filtered:
         title = (it.get("title") or "").strip()
-        # Dedupe against existing records.
         url_key = _normalize_url(it.get("url") or "")
         if url_key and url_key in existing_urls:
             continue
         tk_key = (title.lower(), (it.get("published_date") or "").strip())
         if tk_key in existing_keys:
             continue
+        after_rule.append(it)
+
+    if not after_rule:
+        snapshot_id = await record_snapshot(
+            scholar_id, SOURCE_ID,
+            detail={
+                "mode": mode, "mode_used": mode_used, "reason": reason,
+                "new_items": 0,
+            },
+        )
+        return {
+            "changed": False, "snapshot_id": snapshot_id, "new_items": 0,
+        }
+
+    # ── LLM canonicalization (catches reworded headlines) ───────
+    canon_pool = sort_items_recent_first(existing, date_key="published_date")[
+        :_CANON_POOL_SIZE
+    ]
+    scholar_context = {
+        "name": name,
+        "affiliation": profile.get("affiliation"),
+        "research_areas": profile.get("research_areas"),
+    }
+    canon_map = await canonicalize_candidates(
+        after_rule, canon_pool, scholar_context, "news",
+    )
+
+    # ── Append unmatched (truly new) stories ────────────────────
+    count = 0
+    for cand_idx, it in enumerate(after_rule):
+        if canon_map.get(cand_idx) is not None:
+            # Matched an existing story by LLM canon → skip append.
+            continue
+        title = (it.get("title") or "").strip()
+        url_key = _normalize_url(it.get("url") or "")
         await append_record(scholar_id, "news", it)
         if url_key:
             existing_urls.add(url_key)
-        existing_keys.add(tk_key)
-        # Mirror to timeline + signal feed.
+        existing_keys.add(
+            (title.lower(), (it.get("published_date") or "").strip())
+        )
         try:
             parsed_date = _parse_date(it.get("published_date"))
             await log_event(
@@ -325,8 +427,12 @@ async def run(
         count += 1
 
     snapshot_id = await record_snapshot(
-        scholar_id,
-        SOURCE_ID,
-        detail={"mode": mode, "reason": reason, "new_items": count},
+        scholar_id, SOURCE_ID,
+        detail={
+            "mode": mode, "mode_used": mode_used, "reason": reason,
+            "new_items": count,
+        },
     )
-    return {"changed": count > 0, "snapshot_id": snapshot_id, "new_items": count}
+    return {
+        "changed": count > 0, "snapshot_id": snapshot_id, "new_items": count,
+    }
