@@ -151,15 +151,25 @@ gcloud services enable orgpolicy.googleapis.com
 gcloud org-policies set-policy /tmp/orgpolicy_allow_all.yaml --project="$PROJECT_ID"
 ```
 
-Universal config files (`continuous_tasks.json`, `dimensions.json`,
-`field_archetypes.json`, `heartbeat.json`, `ranking_presets/*.json`,
-plus `legal_templates.json` + `legal_review_checklist.json`) self-seed on
-first boot via `ensure_*_seed()` calls in `main.py` lifespan — no deploy-
-time upload needed. Defaults ship in `backend/app/defaults/` and are
-copied into `/mnt/gcs/config/` only when missing (existing user edits
-are preserved). **Per-environment files (`funds.json`, `digests/*.md`)
-are intentionally NOT seeded** — `funds.json` comes from user action via
-the Settings UI, digests are generated on schedule.
+Universal config files self-seed on first boot — no deploy-time upload
+needed. Two mechanisms, both read-on-startup from the repo and both
+no-op when the runtime file already exists:
+
+- **Reader-module self-seed** (since 2026-04-20): `dimensions.json`
+  seeds from `backend/app/services/academic/dimensions_seed.json` via
+  `dimensions.read_dimensions()`; `continuous_tasks.json` seeds from
+  `backend/app/services/academic/continuous_tasks_seed.json` via
+  `continuous_config.load_continuous_tasks()`.
+- **Lifespan copy-on-startup** (`ensure_universal_configs_seeded()` +
+  `ensure_*_seed()` in `main.py`): `field_archetypes.json`,
+  `heartbeat.json`, `ranking_presets/*.json` copy from
+  `backend/app/defaults/` → `/mnt/gcs/config/`. `legal_templates.json`
+  and `legal_review_checklist.json` seed from Pydantic-validated inline
+  Python defaults in their config modules.
+
+**Per-environment files (`funds.json`, `digests/*.md`) are intentionally
+NOT seeded** — `funds.json` comes from user action via the Settings UI,
+digests are generated on schedule.
 
 ## 3. Deploy the backend
 
@@ -383,13 +393,19 @@ ACADEMIC_DATABASE_URL="postgresql+asyncpg://vc:${DB_PASSWORD}@127.0.0.1:5432/aca
   constraint "<x>_fkey"` on entity delete, add the offending FK to
   `_FK_CASCADE_SPEC` in `main.py`.
 - **Universal configs self-seed; never deploy-upload generated content.**
-  `continuous_tasks.json`, `dimensions.json`, `field_archetypes.json`,
-  `heartbeat.json`, and `ranking_presets/*.json` copy from
-  `backend/app/defaults/` → `/mnt/gcs/config/` on first boot via
-  `ensure_universal_configs_seeded()` in `services/config_seeding.py`
-  (wired into `main.py` lifespan). Existing files are never overwritten.
-  `legal_templates.json` + `legal_review_checklist.json` have their own
-  Pydantic-validated inline defaults.
+  Two seeding mechanisms (both no-op when target exists):
+  - Reader-module self-seed for `dimensions.json` (from
+    `backend/app/services/academic/dimensions_seed.json`) and
+    `continuous_tasks.json` (from `.../continuous_tasks_seed.json`) —
+    triggered lazily on first call to `read_dimensions()` /
+    `load_continuous_tasks()`.
+  - `ensure_universal_configs_seeded()` in
+    `services/config_seeding.py` (wired into `main.py` lifespan) —
+    copies `field_archetypes.json`, `heartbeat.json`,
+    `ranking_presets/*.json` from `backend/app/defaults/` →
+    `/mnt/gcs/config/`.
+  - `legal_templates.json` + `legal_review_checklist.json` seed from
+    Pydantic-validated inline Python defaults in their config modules.
   **Never `gsutil cp -r data/config/*`** — that's how a dev-machine
   weekly digest leaked into prod on 2026-04-18. If you must seed a
   per-environment file (e.g. `funds.json`), target the single file
@@ -398,11 +414,20 @@ ACADEMIC_DATABASE_URL="postgresql+asyncpg://vc:${DB_PASSWORD}@127.0.0.1:5432/aca
   prod config.** The seeder only writes when the target is missing, so
   any structural rename (e.g. `patents_lens` → `patents_web` when the
   scaffold became a real source) leaves the prod file pinned on the
-  old keys. Fix is an explicit `gsutil cp backend/app/defaults/<file>
-  gs://$GCS_BUCKET/config/<file>` timed just after the Cloud Run
-  revision swap (so the new container serves the freshly-aligned
-  config immediately; the old container's remaining seconds see
-  `Unknown source '<oldname>'` errors that `_run_source` swallows).
+  old keys. Two forcing-function patterns depending on which mechanism
+  owns the file:
+  - **Reader-module-seeded** (`dimensions.json`,
+    `continuous_tasks.json`): `gsutil rm
+    gs://$GCS_BUCKET/config/<file>` — next reader call self-seeds from
+    the freshly-shipped in-package JSON. Validated on 2026-04-19 for
+    `dimensions.json`.
+  - **`ensure_universal_configs_seeded`-seeded** (`field_archetypes`,
+    `heartbeat`, `ranking_presets`): `gsutil cp
+    backend/app/defaults/<file> gs://$GCS_BUCKET/config/<file>` timed
+    just after the Cloud Run revision swap (so the new container
+    serves the freshly-aligned config immediately; the old
+    container's remaining seconds see `Unknown source '<oldname>'`
+    errors that `_run_source` swallows).
   `_compose_data_gaps_context` will surface the mismatch as
   `missing_data` entries until the config is rewritten.
 - **Cloud Run's HTTP/1.1 request body ceiling is 32 MB — not configurable.** Every POST that transits Cloud Run (folder upload, zip upload, `/ingest/resources`) rejects bodies larger than 32 MB with HTTP 413. Firebase Hosting wraps the 413 as HTTP 500, which is what the browser sees. The fix is structural: don't route large bytes through Cloud Run. Files + Folder upload modes now use a **signed-URL flow** — `POST /workspace/upload-init` issues a GCS v4 signed PUT URL, the browser PUTs bytes directly to `storage.googleapis.com`, then `POST /workspace/upload-commit` registers the `WorkspaceNode` via `workspace_service.register_uploaded_blob`. See `backend/app/services/storage.py::GcsSignedUrlAdapter`. Deploy-time prerequisites that all bit on first rollout:

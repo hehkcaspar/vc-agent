@@ -1,6 +1,6 @@
 """Startup seed for universal config files.
 
-Files that ship with the code (schema, D1-D4 prompts, heartbeat schedule,
+Files that ship with the code (field archetypes, heartbeat schedule,
 starter ranking presets) live under `backend/app/defaults/` and are
 copied into `settings.ACADEMIC_CONFIG_DIR` on startup if the target is
 missing. Existing files are never overwritten — user customisations via
@@ -11,6 +11,14 @@ workaround that accidentally leaked a dev-machine weekly digest to prod.
 
 Per-environment files (`funds.json`, `digests/*.md`) are intentionally
 NOT seeded here — they must come from user action or runtime generation.
+
+`dimensions.json` and `continuous_tasks.json` used to live here too but
+migrated in 2026-04-20 to the in-package seed pattern
+(`backend/app/services/academic/*_seed.json`). Their reader modules
+(`dimensions.py`, `continuous_config.py`) self-seed the runtime file
+from the sibling seed JSON on first read. Keeping two parallel seeding
+mechanisms for the same file invited drift, so this module now only
+handles configs whose reader doesn't implement self-seeding.
 
 `legal_templates.json` and `legal_review_checklist.json` have their own
 `ensure_*_seed()` helpers in their config modules (Pydantic-validated
@@ -31,8 +39,6 @@ logger = logging.getLogger(__name__)
 _DEFAULTS_DIR = Path(__file__).resolve().parent.parent / "defaults"
 
 _FLAT_FILES: tuple[str, ...] = (
-    "continuous_tasks.json",
-    "dimensions.json",
     "field_archetypes.json",
     "heartbeat.json",
 )
