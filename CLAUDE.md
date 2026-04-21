@@ -170,7 +170,7 @@ Separate from portfolio. Own SQLite (`data/academic.db`, `AcademicBase`). All LL
 - **D3 Founder Potential** — future commercial success probability (founder-market fit, determination, team-attracting)
 - **D4 Growth Trajectory** — slope across scientific/commercial/operator axes
 
-Dimension prompts at `data/config/dimensions.json` (file-backed, runtime-editable, auto-seeded).
+Dimension prompts at `data/config/dimensions.json` — runtime-editable via Settings UI; auto-seeded on first read from the tracked `backend/app/services/academic/dimensions_seed.json`, which is the canonical source-of-truth (iterate prompts there and commit). The in-package seed ships via the existing `COPY backend/` in the Dockerfile, so every deploy carries the current prompts into the image.
 
 ### 3-layer architecture
 - **Layer 1 — Fact store**: per-scholar files at `data/scholars/{id}/`. Wholesale-rewritten current state (profile.json, etc.); append-only logs use the four JSONL primitives in `file_utils.py`. Events are SQL-only (`scholar_events`).
@@ -182,7 +182,7 @@ Dimension prompts at `data/config/dimensions.json` (file-backed, runtime-editabl
 - **Layer 3 — Dim eval + synthesis**: `dim_runner.py` (per-dim triage→scoring), `phase_classifier.py` (R1-R4), `narrative_synthesizer.py` (cross-dim report), `scholar_chat.py` (Interactions API + function tools).
   - **Data-gaps enforcement**: `_compose_data_gaps_context(scholar_id, dim_cfg, cfg)` in `dim_runner.py` classifies every entry in `dim_cfg.required_sources` from `cfg.sources[src_id]` + the source's last `snapshot.detail` as one of `OK / disabled / scaffold / errored / skipped / never-ran / undeclared`. The gap list is rendered as a `DATA GAPS` prompt block fed to the scoring LLM ("do NOT score as zero evidence when the truth is couldn't check") AND merged back into the eval record's `missing_data` so the gap is preserved even if the LLM forgets to echo it. Applies to both the score-0 and normal paths; triage skipped.
 
-All cadences/models/required_sources in `data/config/continuous_tasks.json`; `heartbeat.py` dispatches per tick. Module-level `get_heartbeat_status()` exposes liveness.
+All cadences/models/required_sources in `data/config/continuous_tasks.json` — auto-seeded on first read from the tracked `backend/app/services/academic/continuous_tasks_seed.json` (same seed-in-package pattern as dimensions). `heartbeat.py` dispatches per tick. Module-level `get_heartbeat_status()` exposes liveness.
 
 ### Identity resolution
 `identity_resolver.py` → homepage crawl → grounded LLM discovery → `classify_urls` → per-source LLM verification (`identity_verifier.py`):

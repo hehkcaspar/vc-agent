@@ -741,7 +741,7 @@ All goals use the same agent factory and toolkit. The goal prompt determines beh
 | `services/academic/evaluation_service.py` | Eval normalisation, delta computation, score extraction, background eval/refresh/comparative tasks |
 | `services/academic/chat_service.py` | Background chat job execution |
 | `services/academic/digest_service.py` | Weekly digest generation |
-| `services/academic/dimensions.py` | File-backed dimensions config (`data/config/dimensions.json`), `DEFAULT_DIMENSIONS` seed, `read/write_dimensions()`, and `render_dimensions_schema_block()` / `render_dimensions_rubric()` — consumed by `scholar_prompts.build_scholar_system_prompt()` at every agent invocation |
+| `services/academic/dimensions.py` | File-backed dimensions config. `DEFAULT_DIMENSIONS` is loaded at import time from the tracked sibling `dimensions_seed.json` (canonical prompts, shipped via `COPY backend/`). `read/write_dimensions()` manage the runtime `data/config/dimensions.json`; `read_dimensions()` seeds the runtime file from the in-package JSON on first read. `dim_runner.py` calls `read_dimensions()` per tick and passes each dim's prompt directly to `generate_structured()` — no schema/rubric interpolation. |
 | `services/academic/scholar_agent.py` | Deep Agents harness — `invoke_scholar_agent()`, `invoke_scholar_chat()`, `_extract_text()` for Gemini content normalisation |
 | `services/academic/domain_tools.py` | 12 tools built via `build_scholar_tools(scholar_id)` closure |
 | `services/academic/heartbeat.py` | Background scheduler (stale refresh, channel polling, scheduled digest) |
@@ -761,7 +761,7 @@ All goals use the same agent factory and toolkit. The goal prompt determines beh
 
 6. **Stuck-evaluating recovery**: Server startup resets all scholars with status "evaluating" back to "active" (handles server restart mid-background-task).
 
-7. **File-backed, modular dimensions**: Evaluation dimensions are **not** hardcoded in the prompt. `services/academic/dimensions.py` owns `data/config/dimensions.json`, seeded on first read with seven defaults (`research_impact`, `commercialization`, `career_trajectory`, `collaboration_strength`, `field_position`, `founder_potential`, `public_profile`). `scholar_prompts.build_scholar_system_prompt()` reads the current list and interpolates two rendered blocks into the base prompt — the JSON schema (`{dimensions_schema_block}`) and the scoring rubric (`{dimensions_rubric}`) — plus `{n_dimensions}` into goal text. CRUD over `/academic/custom-dimensions` modifies the file and takes effect on the next agent run with no code changes or restart.
+7. **JSON-seeded, modular dimensions**: Evaluation dimensions are not hardcoded. `services/academic/dimensions.py` ships a tracked sibling JSON (`dimensions_seed.json`) containing the four MECE defaults: `academic_excellence`, `tech_transfer_experience`, `founder_potential`, `growth_trajectory`. At import time `DEFAULT_DIMENSIONS` is loaded from that file; on first read the runtime `data/config/dimensions.json` is seeded from it (the runtime file is gitignored and holds per-environment user edits via the Settings UI). Each dim's prompt is passed directly to `generate_structured()` by `dim_runner.py` — there is no schema/rubric template interpolation. CRUD over `/academic/custom-dimensions` modifies the runtime file and takes effect on the next heartbeat tick with no restart.
 
 7. **Hard delete**: Deleting a scholar removes its dossier directory and cascades to all SQL rows (events, channels, chat sessions/messages/jobs).
 

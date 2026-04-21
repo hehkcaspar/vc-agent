@@ -4,6 +4,33 @@ Future-development items that are known but not yet scheduled. Newest first.
 
 ---
 
+## `docs/ARCHITECTURE.md` — full v1→v2 academic-module rewrite is outdated
+
+**Status:** not started · **Priority:** low (doc-drift) · **Filed:** 2026-04-20
+
+### Problem
+The academic-module section of `docs/ARCHITECTURE.md` (roughly the "Agent Goals" + "Backend Service Modules" + "Key Design Decisions" subsections, ~lines 720–770) still describes the pre-Apr-13 v1 architecture:
+
+- References `services/academic/scholar_agent.py` / `scholar_prompts.py` / `domain_tools.py` / `build_scholar_tools(scholar_id)` closure pattern — all **removed** in commit `f27ca6a` (Academic Tracking v2 rewrite, Apr 13).
+- Describes the "Deep Agents harness" + 12-tool closure model — v2 uses `google-genai` Interactions API with function tools (`services/academic/scholar_chat.py`) and a 3-layer fact-store / sources / dim-eval architecture (`dim_runner.py`, `narrative_synthesizer.py`, `phase_classifier.py`, `sources/*`).
+- "Agent Goals" table lists v1 endpoints (`POST /scholars/{id}/evaluate` with a monolithic Deep Agents run) that no longer exist as a single-shot agent invocation.
+- Design decisions 4 (`@tool` docstring rule), 5 (closure-bound tools), and parts of 9 (Gemini content-block normalisation via `_extract_text`) describe v1 code paths.
+
+Today's update (2026-04-20) fixed the dim-specific and seed-pattern lines (items 744, 764) but left the surrounding v1 text intact because rewriting the whole section was out of scope.
+
+### Fix
+Full section rewrite. Mirror the structure already in `CLAUDE.md`'s "Academic Tracking v2" block (the canonical up-to-date description) plus the cross-references already in `docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md`. Delete or re-target every v1 reference.
+
+Scope of rewrite (estimate):
+- Redo "Agent Goals" table for v2 dispatch model (heartbeat tick → sources → dim_runner → narrative_synthesizer).
+- Rewrite "Backend Service Modules" table to match actual files under `services/academic/`.
+- Delete v1-only decision entries; keep decisions that still hold (file-backed dims, stuck-evaluating recovery, event-vs-discovery date).
+
+### Effort
+Medium. One focused doc pass, cross-checked against CLAUDE.md + `docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md` (both already accurate). No code changes.
+
+---
+
 ## URL routing — restore browser back/forward + survive refresh
 
 **Status:** not started · **Priority:** high (UX-blocking) · **Filed:** 2026-04-19

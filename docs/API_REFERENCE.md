@@ -1148,7 +1148,7 @@ All scholars with latest evaluation dimension scores for ranking.
 List weight presets (seeded with "Balanced", "Impact Focused", "VC Commercialization").
 
 #### POST /academic/ranking/presets
-Create custom weight preset. `{ "name": "My Preset", "weights": { "research_impact": 0.3, ... } }`
+Create custom weight preset. `{ "name": "My Preset", "weights": { "academic_excellence": 0.3, ... } }` — keys must exist in the current dimension list (see `GET /academic/custom-dimensions`).
 
 #### DELETE /academic/ranking/presets/{name}
 Delete a weight preset.
@@ -1179,7 +1179,7 @@ List uploaded files with size and modification time.
 
 ### Evaluation Dimensions
 
-All evaluation dimensions — both the original defaults (`research_impact`, `commercialization`, `career_trajectory`, `collaboration_strength`, `field_position`, `founder_potential`, `public_profile`) and any user-added ones — live in a single file-backed config at `data/config/dimensions.json` and are treated uniformly by the CRUD endpoints below. The file is auto-seeded with the defaults on first read (see `backend/app/services/academic/dimensions.py`). The scholar agent prompt reads the list at runtime and interpolates it into the evaluation JSON schema and the scoring rubric, so adding, editing, or deleting a dimension takes effect on the next evaluation with no code changes.
+All evaluation dimensions — the four MECE defaults (`academic_excellence`, `tech_transfer_experience`, `founder_potential`, `growth_trajectory`) and any user-added ones — live in a single file-backed config at `data/config/dimensions.json` and are treated uniformly by the CRUD endpoints below. On first read the runtime file is auto-seeded from the tracked `backend/app/services/academic/dimensions_seed.json` (canonical prompts, committed to git, shipped with the backend image). The `dim_runner.py` evaluation loop reads each dim's prompt and passes it directly to the scoring LLM, so adding, editing, or deleting a dimension takes effect on the next tick with no code changes.
 
 > **Route name note**: the route path is still `/academic/custom-dimensions` for backwards compatibility, but the endpoint now manages the **full** dimension list, not just user-added ones. All dimensions are fully editable and deletable.
 
@@ -1195,7 +1195,7 @@ Update an existing dimension (including rename). Body matches POST. If `body.key
 #### DELETE /academic/custom-dimensions/{key}
 Delete a dimension. Returns `404` if the key doesn't exist.
 
-> **Operator warning**: ranking-preset weights in `backend/app/routers/academic.py` hardcode the default dimension keys. Deleting a default (e.g. `research_impact`) won't crash the API but will leave the built-in ranking presets referencing a missing key. Only delete defaults if you're aware of this.
+> **Operator warning**: ranking-preset weights in `backend/app/routers/academic.py` hardcode the default dimension keys. Deleting a default (e.g. `academic_excellence`) won't crash the API but will leave the built-in ranking presets referencing a missing key. Only delete defaults if you're aware of this.
 
 ### Academic Data Models
 
@@ -1218,7 +1218,7 @@ Delete a dimension. Returns `404` if the key doesn't exist.
 |-------|------|-------------|
 | id | string | Filename stem |
 | type | string | full, comparative, refresh |
-| dimensions | object | Map of `{dimension_key: { score, explanation, evidence }}` for every dimension defined in `data/config/dimensions.json`. Default keys: `research_impact`, `commercialization`, `career_trajectory`, `collaboration_strength`, `field_position`, `founder_potential`, `public_profile`. Users can add/remove/rename dimensions via the `/academic/custom-dimensions` endpoints, and the agent prompt updates accordingly on the next run. |
+| dimensions | object | Map of `{dimension_key: { score, explanation, evidence }}` for every dimension defined in `data/config/dimensions.json`. Default keys (the four MECE dims): `academic_excellence`, `tech_transfer_experience`, `founder_potential`, `growth_trajectory`. Users can add/remove/rename dimensions via the `/academic/custom-dimensions` endpoints, and the scoring loop picks up the new list on the next heartbeat tick. |
 | computed_metrics | object | Bibliometric data |
 | commercialization_signals | object | Patents, startups |
 | delta | object | Changes vs previous evaluation |
