@@ -74,7 +74,6 @@ def get_heartbeat_status() -> dict[str, Any]:
 
 class HeartbeatScheduler:
     def __init__(self) -> None:
-        self._legacy_last_tick: datetime | None = None
         self.last_tick_at: datetime | None = None
 
     async def run(self) -> None:

@@ -21,6 +21,7 @@ Three-layer dedup:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -29,6 +30,12 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 from ..events_sync import log_event, news_significance
 from ..fact_store import record_snapshot
 from ..file_utils import append_record, dossier_path, read_json, read_records
+from ..refinement import build_scholar_context, refine_pending_items
+from ..tombstones import (
+    format_for_prompt as format_tombstones_for_prompt,
+    load_tombstones,
+    matches_tombstone,
+)
 from ._canonicalize import canonicalize_candidates
 from ._incremental import (
     format_cutoff,
@@ -93,6 +100,12 @@ _COMMON_EXCLUSIONS = (
     "venture directly. "
 )
 
+_TOMBSTONES_SECTION = (
+    "\nThe following items were previously surfaced and REJECTED by our "
+    "verification layer — do NOT re-emit them, even under reworded "
+    "titles:\n{tombstones_block}\n"
+)
+
 _BOOTSTRAP_PROMPT = (
     "Find news, press releases, or blog posts about academic researcher "
     "**{name}**{affiliation_clause} — **entire career, no time limit**. "
@@ -102,6 +115,7 @@ _BOOTSTRAP_PROMPT = (
     "company, product) they have founded or co-founded. "
     "{ventures_clause}"
     + _COMMON_EXCLUSIONS
+    + _TOMBSTONES_SECTION
     + _COMMON_NEWS_SHAPE
 )
 
@@ -112,7 +126,8 @@ _INCREMENTAL_PROMPT = (
     "story is primarily about a commercial venture they have founded "
     "or co-founded. "
     "{ventures_clause}"
-    + _COMMON_EXCLUSIONS +
+    + _COMMON_EXCLUSIONS
+    + _TOMBSTONES_SECTION +
     "The following headlines are already in our ledger — skip reposts "
     "and reworded versions of the same stories, only include fresh "
     "developments:\n{known_titles_block}\n"
@@ -266,11 +281,16 @@ async def run(
     cutoff = incremental_cutoff(scholar_id, SOURCE_ID)
     use_bootstrap = should_use_bootstrap(mode, cutoff) or not existing
 
+    # Layer-1 dedup gains a "previously rejected" block from tombstones.
+    tombstones = load_tombstones(scholar_id, category="news")
+    tombstones_block = format_tombstones_for_prompt(tombstones)
+
     if use_bootstrap:
         prompt = _BOOTSTRAP_PROMPT.format(
             name=name,
             affiliation_clause=affiliation_clause,
             ventures_clause=ventures_clause,
+            tombstones_block=tombstones_block,
         )
         mode_used = "bootstrap"
     else:
@@ -283,6 +303,7 @@ async def run(
             known_titles_block=format_known_titles(
                 recent, max_items=_CANON_POOL_SIZE
             ),
+            tombstones_block=tombstones_block,
         )
         mode_used = "incremental"
 
@@ -365,6 +386,9 @@ async def run(
         tk_key = (title.lower(), (it.get("published_date") or "").strip())
         if tk_key in existing_keys:
             continue
+        # Tombstone guard — skip items we've previously rejected.
+        if matches_tombstone(title, tombstones, category="news"):
+            continue
         after_rule.append(it)
 
     if not after_rule:
@@ -400,6 +424,8 @@ async def run(
             continue
         title = (it.get("title") or "").strip()
         url_key = _normalize_url(it.get("url") or "")
+        # Mark for background refinement (verify → triage → url fallback).
+        it["_refinement_status"] = "pending"
         await append_record(scholar_id, "news", it)
         if url_key:
             existing_urls.add(url_key)
@@ -425,6 +451,14 @@ async def run(
         except Exception:
             logger.warning("news_web: log_event failed", exc_info=True)
         count += 1
+
+    # Fire-and-forget: verify → triage → 3-tier URL fallback, in the
+    # background. Writes finalized URLs / tombstones back to news.jsonl.
+    if count > 0:
+        ctx = await build_scholar_context(scholar_id)
+        asyncio.create_task(
+            refine_pending_items(scholar_id, "news", context=ctx)
+        )
 
     snapshot_id = await record_snapshot(
         scholar_id, SOURCE_ID,

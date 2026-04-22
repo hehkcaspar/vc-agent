@@ -23,6 +23,7 @@ marginal quality of an LLM canonicalizer doesn't justify the call cost.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -30,6 +31,12 @@ from typing import Any
 from ..events_sync import log_event
 from ..fact_store import record_snapshot
 from ..file_utils import dossier_path, read_json, write_json
+from ..refinement import build_scholar_context, refine_pending_items
+from ..tombstones import (
+    format_for_prompt as format_tombstones_for_prompt,
+    load_tombstones,
+    matches_tombstone,
+)
 from ._incremental import (
     format_cutoff,
     format_known_pending_patents,
@@ -76,12 +83,35 @@ _RETURN_SHAPE = (
     "`jurisdiction` (US | EP | WO | JP | CN | etc.)."
 )
 
+_TOMBSTONES_SECTION = (
+    "\nThe following entries were previously surfaced and REJECTED by "
+    "verification — most often because they were research papers "
+    "mislabeled as patents. Do NOT re-emit them under any form:\n"
+    "{tombstones_block}\n"
+)
+
+_PATENT_STRICTNESS = (
+    "\nIMPORTANT — what counts as a patent:\n"
+    "- A patent is a filing with a patent office (USPTO, EPO, WIPO, JPO, "
+    "  CNIPA, KIPO) that has a patent_number starting with a country/"
+    "  office prefix such as US, EP, WO, JP, CN, KR.\n"
+    "- Research papers (NeurIPS, ICML, ICLR, CVPR, ICCV, JACS, Nature, "
+    "  Science, arXiv, IEEE conference papers) are NOT patents, even if "
+    "  the underlying idea was patentable. Reject them.\n"
+    "- Product announcements, blog posts, or company press releases "
+    "  are NOT patents.\n"
+    "- If you are not certain the item has a real patent_number issued "
+    "  by a patent office, DO NOT include it.\n"
+)
+
 _BOOTSTRAP_PROMPT = (
     "Find patents granted to or filed by inventor **{name}**"
     "{affiliation_clause}. Only include patents where {name} is a "
     "**named inventor**, not merely cited or referenced. Dedupe patent "
     "families — return only one entry per invention, preferring the "
     "granted version over the application. "
+    + _PATENT_STRICTNESS
+    + _TOMBSTONES_SECTION
     + _RETURN_SHAPE
 )
 
@@ -97,8 +127,11 @@ _INCREMENTAL_PROMPT = (
     "SKIP it (do not include in output).\n"
     "Known pending applications to re-check:\n{known_pending_block}\n"
     "Dedupe patent families — one entry per invention, preferring "
-    "granted over application. Return ONLY a JSON array — no prose, "
-    "no markdown, no section headers. " + _RETURN_SHAPE
+    "granted over application. "
+    + _PATENT_STRICTNESS
+    + _TOMBSTONES_SECTION +
+    "Return ONLY a JSON array — no prose, no markdown, no section "
+    "headers. " + _RETURN_SHAPE
 )
 
 
@@ -191,9 +224,13 @@ async def run(
     cutoff = incremental_cutoff(scholar_id, SOURCE_ID)
     use_bootstrap = should_use_bootstrap(mode, cutoff) or not existing_items
 
+    tombstones = load_tombstones(scholar_id, category="patents")
+    tombstones_block = format_tombstones_for_prompt(tombstones)
+
     if use_bootstrap:
         prompt = _BOOTSTRAP_PROMPT.format(
-            name=name, affiliation_clause=affiliation_clause
+            name=name, affiliation_clause=affiliation_clause,
+            tombstones_block=tombstones_block,
         )
         mode_used = "bootstrap"
     else:
@@ -202,6 +239,7 @@ async def run(
             affiliation_clause=affiliation_clause,
             cutoff=format_cutoff(cutoff),
             known_pending_block=format_known_pending_patents(existing_items),
+            tombstones_block=tombstones_block,
         )
         mode_used = "incremental"
 
@@ -260,6 +298,12 @@ async def run(
         )
         filtered = valid
 
+    # Tombstone guard — drop anything previously rejected.
+    filtered = [
+        it for it in filtered
+        if not matches_tombstone(it.get("title") or "", tombstones, category="patents")
+    ]
+
     by_key: dict[str, dict[str, Any]] = {}
     for it in existing_items:
         k = _patent_key(it)
@@ -272,6 +316,9 @@ async def run(
         if not k:
             continue
         prev = by_key.get(k)
+        # Stamp for background refinement on new rows.
+        if "_refinement_status" not in it:
+            it["_refinement_status"] = "pending"
         merged = {**(prev or {}), **it}
         prev_grant = (prev or {}).get("grant_date")
         new_grant = it.get("grant_date")
@@ -288,6 +335,12 @@ async def run(
 
     items = sorted(by_key.values(), key=_sort_key, reverse=True)
     write_json(path, {"items": items, "count": len(items)})
+
+    if transitions:
+        ctx = await build_scholar_context(scholar_id)
+        asyncio.create_task(
+            refine_pending_items(scholar_id, "patents", context=ctx)
+        )
 
     for event_type, item in transitions:
         try:

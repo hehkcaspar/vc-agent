@@ -1227,11 +1227,18 @@ Delete a dimension. Returns `404` if the key doesn't exist.
 #### Paper (from papers.json)
 | Field | Type | Description |
 |-------|------|-------------|
-| id | string | Paper ID |
+| id | string | Paper ID (`ss-*` SS, `gs-*` GS, `stub-*` routed) |
 | title | string | Paper title |
 | authors | array | Author objects with name, id, position |
 | year | integer | Publication year |
 | citations | integer | Citation count |
+| influential_citations | integer | SS-sourced influence metric (0 if not enriched) |
 | venue | string | Journal/conference |
-| author_position | string | first, last, middle, sole |
+| author_position | string | first, last, middle, sole — authorId-resolved (SS) or name-heuristic (GS) |
 | fields_of_study | string[] | Research areas |
+| source | string | `"google_scholar"` or `"semantic_scholar"` — which primary source wrote this row |
+| is_stub | boolean | Live stub: row routed from a non-paper source, awaiting enrichment |
+| was_ss | boolean | SS has enriched this row at some point (authorId, DOI, s2_fields available) |
+| was_stub | boolean | Row started life as a routed stub (sticky audit flag) |
+
+papers.json is co-written by `google_scholar_papers` (primary, recency) and `semantic_scholar_papers` (enrichment), with routed stubs from `destinations.accept_into_papers`. See `docs/design/SCHOLAR_EVALUATION_FRAMEWORK.md` for the 3-way merge priority matrix.

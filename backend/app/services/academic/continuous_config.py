@@ -1,41 +1,45 @@
-"""Loader + validator for ``continuous_tasks.json``.
+"""Loader + validator for the continuous-tasks config.
 
-Heartbeat re-reads this on every tick (no caching) so changes take
-effect without restart. Validation is fail-loud per Concept 6 Rule 6:
-unknown keys are rejected.
-
-Two files are involved — same split as ``dimensions.py``:
+Architecture (post-2026-04-21 rewrite):
 
 - **Seed** (``continuous_tasks_seed.json``, sibling of this module):
-  canonical schedule tracked in git and shipped with the backend
-  package via ``COPY backend/`` in the Dockerfile.
-- **Runtime** (``ACADEMIC_CONFIG_DIR/continuous_tasks.json``):
-  per-environment override state, gitignored. On first read after a
-  deploy the runtime file is seeded from the shipped JSON so the
-  heartbeat loop never starts with a missing-file error.
+  canonical structure + defaults, tracked in git, ships with the
+  backend image via ``COPY backend/`` in the Dockerfile. Read-only at
+  runtime.
+- **Overrides** (``ACADEMIC_CONFIG_DIR/continuous_tasks_overrides.json``):
+  sparse dict of user deltas — the only mutable file. Managed by
+  :mod:`continuous_overrides`. Missing file = no overrides.
+- **Effective config** = ``deep_merge(seed, overrides)`` — computed
+  in-memory on every load. No caching, no write-on-read.
 
-Historical note: this module previously raised ``FileNotFoundError``
-and relied on ``ensure_universal_configs_seeded()`` (gc-deploy only)
-to provision the file. On fresh-clone dev, tests, or main-branch CI
-the heartbeat tick would spam a ``continuous_tasks.json failed to
-load`` error every tick. Fixed 2026-04-19 by mirroring the dim-seed
-pattern.
+Heartbeat re-reads on every tick (~60s); the merge is sub-millisecond.
+
+One-time migration from the legacy ``continuous_tasks.json`` full-copy
+format runs inside :func:`load_continuous_tasks` and
+:func:`load_raw_continuous_tasks`: if the overrides file is absent but
+the legacy file exists, the legacy values are diffed against the seed
+and the deltas are persisted as overrides (see
+:func:`continuous_overrides.migrate_legacy_runtime_if_needed`). The
+legacy file is renamed with a ``.pre-overrides.bak`` suffix so it's
+preserved but not re-read.
+
+Unknown keys still fail loud per Concept 6 Rule 6.
 """
 
 from __future__ import annotations
 
 import json
-import os
-import shutil
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ...config import settings
+from . import continuous_overrides
+
+logger = logging.getLogger(__name__)
 
 
-CONTINUOUS_TASKS_PATH = settings.ACADEMIC_CONFIG_DIR / "continuous_tasks.json"
 SEED_PATH = Path(__file__).parent / "continuous_tasks_seed.json"
 
 # Fail loud at import time if the shipped seed is missing — the whole
@@ -48,15 +52,7 @@ if not SEED_PATH.exists():
     )
 
 
-def _seed_runtime_config(path: Path) -> None:
-    """Copy the shipped seed to the runtime path on first read.
-
-    Parents are created as needed. Subsequent reads see the runtime
-    file as-is — user customisations (e.g. via the Tasks view or
-    ``PATCH /academic/continuous-tasks/...``) persist across restarts.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(SEED_PATH, path)
+# ── Pydantic schema (unchanged from prior version) ────────────────────
 
 
 class _Strict(BaseModel):
@@ -128,63 +124,93 @@ class ContinuousTasksConfig(_Strict):
                 )
 
 
-def load_continuous_tasks(path: Path | None = None) -> ContinuousTasksConfig:
-    """Read + validate the config file. Raises on malformed content.
+# ── Effective-config assembly ─────────────────────────────────────────
 
-    Seeds from the shipped ``continuous_tasks_seed.json`` if the
-    runtime file is missing. Always re-reads from disk; do not cache.
+
+def _read_seed() -> dict[str, Any]:
+    return json.loads(SEED_PATH.read_text(encoding="utf-8"))
+
+
+def _compute_effective(
+    *,
+    seed_path: Path | None = None,
+    overrides_path: Path | None = None,
+    legacy_path: Path | None = None,
+) -> dict[str, Any]:
+    """Seed + overrides merged in-memory. Pure read, apart from a
+    one-time migration that runs iff the new overrides file is absent
+    and a legacy runtime file is present.
     """
-    p = path or CONTINUOUS_TASKS_PATH
-    if not p.exists():
-        _seed_runtime_config(p)
-    raw = json.loads(p.read_text(encoding="utf-8"))
+    continuous_overrides.migrate_legacy_runtime_if_needed(
+        seed_path=seed_path or SEED_PATH,
+        overrides_path=overrides_path,
+        legacy_path=legacy_path,
+    )
+    seed = (
+        json.loads(seed_path.read_text(encoding="utf-8"))
+        if seed_path is not None else _read_seed()
+    )
+    overrides = continuous_overrides.load_overrides(overrides_path)
+    return continuous_overrides.deep_merge(seed, overrides)
+
+
+def load_continuous_tasks(
+    seed_path: Path | None = None,
+    *,
+    overrides_path: Path | None = None,
+) -> ContinuousTasksConfig:
+    """Return the validated effective config (seed + overrides).
+
+    Both ``seed_path`` and ``overrides_path`` default to the shipped /
+    runtime locations. They're exposed as test-injection points —
+    tests can point at tmp files to isolate config state.
+    """
+    raw = _compute_effective(
+        seed_path=seed_path,
+        overrides_path=overrides_path,
+    )
     try:
         cfg = ContinuousTasksConfig.model_validate(raw)
     except ValidationError as e:
-        raise ValueError(f"continuous_tasks.json is invalid:\n{e}") from e
+        raise ValueError(f"continuous_tasks config is invalid:\n{e}") from e
     cfg.validate_cross_refs()
     return cfg
 
 
-def load_raw_continuous_tasks(path: Path | None = None) -> dict[str, Any]:
-    """Return the raw JSON dict without Pydantic coercion.
-
-    Used by the router PATCH handler so we can mutate a single slot
-    in place and re-validate the whole file before writing. Keeping
-    raw dict shape (vs dumping the Pydantic model) avoids dropping
-    optional fields we didn't model explicitly.
-
-    Seeds from the shipped seed if the runtime file is missing, for
-    symmetry with ``load_continuous_tasks()``.
-    """
-    p = path or CONTINUOUS_TASKS_PATH
-    if not p.exists():
-        _seed_runtime_config(p)
-    return json.loads(p.read_text(encoding="utf-8"))
-
-
-def write_continuous_tasks(
-    data: dict[str, Any],
+def load_raw_continuous_tasks(
+    seed_path: Path | None = None,
     *,
-    path: Path | None = None,
-) -> None:
-    """Validate *data* against the schema, then write atomically.
-
-    The config file is never left in a broken state: if validation
-    fails, ``ValidationError`` bubbles up and the file on disk is
-    untouched. On success we write to a sibling ``.tmp`` file and
-    ``os.replace()`` so concurrent readers (heartbeat) always see a
-    consistent snapshot.
+    overrides_path: Path | None = None,
+) -> dict[str, Any]:
+    """Return the merged raw dict (seed + overrides) without Pydantic
+    coercion. Used by the router's GET/PATCH handlers so optional
+    fields not declared in the schema still round-trip.
     """
-    p = path or CONTINUOUS_TASKS_PATH
-    # Validation round-trip — raises on any issue.
+    return _compute_effective(
+        seed_path=seed_path,
+        overrides_path=overrides_path,
+    )
+
+
+def validate_merged(data: dict[str, Any]) -> ContinuousTasksConfig:
+    """Validate a merged-config dict against the schema + cross-refs.
+    Router uses this post-PATCH to reject overrides that produce an
+    invalid effective config BEFORE persisting the override.
+    """
     cfg = ContinuousTasksConfig.model_validate(data)
     cfg.validate_cross_refs()
+    return cfg
 
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(p.suffix + ".tmp")
-    tmp.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    os.replace(tmp, p)
+
+__all__ = [
+    "SEED_PATH",
+    "ContinuousTasksConfig",
+    "SourceConfig",
+    "DimensionTaskConfig",
+    "NarrativeSynthesizerConfig",
+    "PhaseClassifierConfig",
+    "PriorityOverrides",
+    "load_continuous_tasks",
+    "load_raw_continuous_tasks",
+    "validate_merged",
+]

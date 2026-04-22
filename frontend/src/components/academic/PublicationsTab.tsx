@@ -84,6 +84,25 @@ export function PublicationsTab({ papers, summary }: PublicationsTabProps) {
                 {(paper.influential_citations ?? 0) > 0 && (
                   <span className="influential-badge" title="Influential paper">*</span>
                 )}
+                {paper.source === 'google_scholar' && (
+                  <span
+                    className={`source-chip gs${paper.is_stub && !paper.was_ss ? ' unverified' : ''}`}
+                    title={
+                      paper.is_stub && !paper.was_ss
+                        ? 'Routed from another source; awaiting verification'
+                        : paper.was_ss
+                          ? 'Discovered via Google Scholar; enriched by Semantic Scholar'
+                          : 'Discovered via Google Scholar'
+                    }
+                  >
+                    {paper.was_ss ? 'GS→SS' : 'GS'}
+                  </span>
+                )}
+                {paper.source === 'semantic_scholar' && (
+                  <span className="source-chip ss" title="Fetched from Semantic Scholar">
+                    SS
+                  </span>
+                )}
               </span>
               <span className="col-role">
                 {paper.author_position && (

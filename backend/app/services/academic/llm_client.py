@@ -17,6 +17,7 @@ import json
 import logging
 import re
 from typing import Any, Sequence, Type, TypeVar
+from urllib.parse import quote_plus
 
 from google import genai
 from google.genai import types
@@ -25,6 +26,14 @@ from pydantic import BaseModel
 from ...config import settings
 
 logger = logging.getLogger(__name__)
+
+# Fields where a grounded-search item carries its citation URL. The
+# grounded_search_json post-processor rewrites whichever is present.
+URL_FIELDS = ("url", "source_url")
+
+# Fields searched (in order) to build a fallback Google search URL
+# when neither grounding nor the LLM's URL are usable.
+_ANCHOR_FIELDS = ("title", "name", "claim", "headline")
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -193,12 +202,23 @@ async def grounded_search_json(
     *,
     model: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Grounded-search single-shot call that returns a parsed JSON array.
+    """Grounded-search single-shot call returning a parsed JSON array.
 
-    Used by sources/news_web.py and sources/red_flags_watch.py where
-    the response schema is untyped list-of-dicts. We parse the text
-    directly because Gemini cannot always combine `response_schema`
-    with the google_search tool.
+    Synchronous, fast, no HTTP:
+
+    - Parses the model's JSON output.
+    - Attaches a first-pass URL per item from ``grounding_metadata.
+      grounding_chunks`` when an overlapping support exists. The URL
+      may be a Vertex redirect (``vertexaisearch...``) — it works now
+      but expires in ~30 days.
+    - For items with NO URL at all (no grounding, no LLM emit),
+      seeds a ``google.com/search?q=<title>`` fallback so every item
+      is clickable.
+
+    URL *quality* refinement (resolving redirects, validating LLM URLs,
+    per-item verification, category triage) is deliberately NOT done
+    here. It lives downstream in ``refinement.refine_pending_items``,
+    which runs as a background task against persisted records.
     """
     client = genai_client()
     model_id = model or settings.ACADEMIC_GEMINI_MODEL
@@ -218,15 +238,191 @@ async def grounded_search_json(
     text = _extract_text(response)
     if not text:
         return []
-    m = re.search(r"\[[\s\S]*\]", text)
-    if not m:
+
+    parsed, _array_start, item_spans = _parse_json_array_with_spans(text)
+    if not parsed:
         return []
+
+    grounding = _extract_grounding(response)
+    _attach_grounding_urls(parsed, text, item_spans, grounding)
+    seed_missing_url_fallbacks(parsed)
+    return parsed
+
+
+def seed_missing_url_fallbacks(items: list[Any]) -> None:
+    """For items with ZERO URL (neither grounding nor LLM emitted one),
+    seed the Google-search fallback synchronously so first-pass items
+    are always clickable. Exposed so downstream refinement can reuse
+    the same seed logic.
+    """
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        field = active_url_field(it)
+        if it.get(field):
+            continue
+        gs = google_search_url(it)
+        if gs:
+            it[field] = gs
+            it["_url_source"] = "google_search"
+
+
+# ── Grounding-URL helpers ──────────────────────────────────────────────
+
+
+def _parse_json_array_with_spans(
+    text: str,
+) -> tuple[list[Any], int, list[tuple[int, int]]]:
+    """Parse the first JSON array in ``text`` and return each item's
+    ``(start, end)`` character span within the source text. Spans are
+    needed to map `grounding_supports` (which reference text offsets)
+    onto individual items.
+    """
+    lbracket = text.find("[")
+    if lbracket < 0:
+        return [], 0, []
+
+    decoder = json.JSONDecoder()
     try:
-        data = json.loads(m.group(0))
+        _, total_len = decoder.raw_decode(text[lbracket:])
     except json.JSONDecodeError:
-        logger.warning("grounded_search_json: failed to parse JSON: %s", text[:200])
-        return []
-    return data if isinstance(data, list) else []
+        logger.warning(
+            "grounded_search_json: JSON array parse failed: %s",
+            text[lbracket : lbracket + 200],
+        )
+        return [], lbracket, []
+
+    array_end = lbracket + total_len
+    items: list[Any] = []
+    spans: list[tuple[int, int]] = []
+    i = lbracket + 1  # skip leading '['
+    while i < array_end - 1:
+        while i < array_end - 1 and text[i] in " \t\n\r,":
+            i += 1
+        if i >= array_end - 1 or text[i] == "]":
+            break
+        start = i
+        try:
+            obj, rel_end = decoder.raw_decode(text[i:array_end])
+        except json.JSONDecodeError:
+            break
+        end = i + rel_end
+        items.append(obj)
+        spans.append((start, end))
+        i = end
+    return items, lbracket, spans
+
+
+def _extract_grounding(response: Any) -> dict[str, Any]:
+    """Pull ``grounding_chunks`` + ``grounding_supports`` off the response.
+    Returns a dict the attach step can consume without touching the SDK.
+    """
+    candidates = getattr(response, "candidates", None) or []
+    if not candidates:
+        return {"chunks": [], "supports": []}
+    meta = getattr(candidates[0], "grounding_metadata", None)
+    if meta is None:
+        return {"chunks": [], "supports": []}
+
+    chunks_raw = getattr(meta, "grounding_chunks", None) or []
+    supports_raw = getattr(meta, "grounding_supports", None) or []
+
+    chunks: list[dict[str, Any]] = []
+    for ch in chunks_raw:
+        w = getattr(ch, "web", None)
+        if w is None:
+            chunks.append({"url": "", "title": "", "domain": ""})
+            continue
+        chunks.append({
+            "url": getattr(w, "uri", "") or "",
+            "title": getattr(w, "title", "") or "",
+            "domain": getattr(w, "domain", "") or "",
+        })
+
+    supports: list[dict[str, Any]] = []
+    for sup in supports_raw:
+        seg = getattr(sup, "segment", None)
+        if seg is None:
+            continue
+        # start_index may be None (= 0, start of text)
+        start = getattr(seg, "start_index", None)
+        end = getattr(seg, "end_index", None)
+        if end is None:
+            continue
+        supports.append({
+            "start": int(start or 0),
+            "end": int(end),
+            "chunk_indices": list(
+                getattr(sup, "grounding_chunk_indices", None) or []
+            ),
+        })
+    return {"chunks": chunks, "supports": supports}
+
+
+def _attach_grounding_urls(
+    items: list[Any],
+    text: str,
+    spans: list[tuple[int, int]],
+    grounding: dict[str, Any],
+) -> None:
+    """When an item has overlapping grounding support, overwrite its
+    URL with the real chunk URI. Otherwise leave the LLM's URL in place
+    and mark the item for post-processing fallback (HEAD-validate, then
+    Google search fallback).
+    """
+    chunks = grounding.get("chunks") or []
+    supports = grounding.get("supports") or []
+
+    for idx, it in enumerate(items):
+        if not isinstance(it, dict):
+            continue
+
+        urls: list[str] = []
+        if chunks and idx < len(spans):
+            span_start, span_end = spans[idx]
+            seen: set[int] = set()
+            for sup in supports:
+                if sup["start"] < span_end and sup["end"] > span_start:
+                    for ci in sup["chunk_indices"]:
+                        if ci in seen:
+                            continue
+                        seen.add(ci)
+                        if 0 <= ci < len(chunks):
+                            u = chunks[ci]["url"]
+                            if u:
+                                urls.append(u)
+
+        if urls:
+            field = active_url_field(it)
+            if it.get(field):
+                it["_llm_url"] = it.get(field)
+            it[field] = urls[0]
+            it["_url_source"] = "grounding"
+            if len(urls) > 1:
+                it["_all_grounding_urls"] = urls
+        else:
+            # Keep the LLM's URL (if any). Refinement handles validation
+            # and the 3-tier URL fallback against the persisted ledger.
+            it["_url_source"] = "no_grounding" if not chunks else "no_citation"
+
+
+def active_url_field(item: dict[str, Any]) -> str:
+    """Which URL field this item already carries; default to ``url``."""
+    for f in URL_FIELDS:
+        if f in item:
+            return f
+    return "url"
+
+
+def google_search_url(item: dict[str, Any]) -> str:
+    """Build a `google.com/search?q=<anchor>` URL as a guaranteed-
+    clickable fallback when no real URL is usable.
+    """
+    for key in _ANCHOR_FIELDS:
+        v = item.get(key)
+        if isinstance(v, str) and v.strip():
+            return "https://www.google.com/search?q=" + quote_plus(v.strip())
+    return ""
 
 
 # ── Path 3 — Interactions API (chat) ──────────────────────────────────

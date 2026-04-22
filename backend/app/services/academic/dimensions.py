@@ -95,7 +95,7 @@ def write_dimensions(dims: list[Dimension]) -> None:
 
     Concurrent readers (``dim_runner`` on every heartbeat tick) must
     never see a half-written file. Write to a sibling ``.tmp`` and
-    ``os.replace`` — mirrors ``continuous_config.write_continuous_tasks``.
+    ``os.replace``.
     """
     DIMENSIONS_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = DIMENSIONS_PATH.with_suffix(DIMENSIONS_PATH.suffix + ".tmp")

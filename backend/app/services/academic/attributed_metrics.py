@@ -25,10 +25,9 @@ CONCENTRATION_FLAG_RATIO = 0.40
 
 
 def _position_of(paper: dict[str, Any], scholar_ss_id: str | None) -> int | None:
-    """Return 0-indexed position of the scholar in the paper's author list.
-
-    Match by `authorId` if we know the scholar's SS id; fall back to a
-    case-insensitive name match if we don't (best effort).
+    """Return 0-indexed position of the scholar in the paper's author
+    list, using authorId match. Returns None when authorId cannot be
+    resolved — callers should fall back to ``_author_position``.
     """
     authors = paper.get("authors") or []
     if not authors:
@@ -115,21 +114,41 @@ def compute_attributed_metrics(
     last_author_cites = 0
     first_or_last_cites: list[int] = []
     per_paper_contrib: list[tuple[dict[str, Any], float, str]] = []
+    position_unknown_papers = 0
 
     for p in papers:
         cites = int(p.get("citations") or 0)
         authors = p.get("authors") or []
         n = len(authors)
+
+        # Path 1: authorId-based position (authoritative).
         pos = _position_of(p, scholar_ss_id)
-        if pos is None or n == 0:
-            # Scholar's author id not found on this paper — skip it
-            # entirely rather than counting it as middle-author. With
-            # a known SS id, "not found" means the paper really
-            # doesn't involve the scholar (noise in the feed) or the
-            # authors list is empty.
-            per_paper_contrib.append((p, 0.0, "not_present"))
+
+        # Path 2: GS rows lack authorId; fall back to the row-level
+        # `_author_position` that google_scholar_papers.py inferred via
+        # name-match heuristic. Confidence is lower but still useful.
+        heuristic_role = None
+        if pos is None:
+            heuristic_role = p.get("_author_position")
+
+        if pos is not None and n > 0:
+            weight, role = _weight_for(pos, n)
+        elif heuristic_role in ("first", "last", "middle"):
+            # Heuristic-only: emulate _weight_for for the three
+            # coarse buckets without requiring n.
+            if heuristic_role == "first":
+                weight, role = FIRST_OR_LAST, "first"
+            elif heuristic_role == "last":
+                weight, role = FIRST_OR_LAST, "last"
+            else:
+                weight, role = MIDDLE, "middle"
+        else:
+            # No authorId AND no heuristic → count toward raw totals
+            # only; exclude from first/last attribution.
+            per_paper_contrib.append((p, 0.0, "position_unknown"))
+            position_unknown_papers += 1
             continue
-        weight, role = _weight_for(pos, n)
+
         contrib = weight * cites
         attributed += contrib
         per_paper_contrib.append((p, contrib, role))
@@ -183,4 +202,5 @@ def compute_attributed_metrics(
         "inflation_flags": inflation_flags,
         "scholar_ss_id_used": scholar_ss_id,
         "paper_count_considered": len(papers),
+        "position_unknown_papers": position_unknown_papers,
     }

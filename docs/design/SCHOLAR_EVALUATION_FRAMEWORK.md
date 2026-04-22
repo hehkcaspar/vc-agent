@@ -2,8 +2,9 @@
 
 Design doc for the scholar evaluation system. Source of truth for
 per-dimension prompts and the continuous-monitoring architecture.
-Runtime configs (`dimensions.json`, `continuous_tasks.json`) are
-derived from this doc.
+Runtime configs (`dimensions.json`, `continuous_tasks_seed.json` in
+the backend package plus a sparse `continuous_tasks_overrides.json`
+in `data/config/`) are derived from this doc.
 
 Status: **implemented**. 4 MECE dimensions (D1 Academic Excellence,
 D2 Tech-transfer Experience, D3 Founder Potential, D4 Growth
@@ -792,8 +793,15 @@ re-scoring cost.
 fetchers and Layer 3 dim evaluators are declared in the same config, and
 heartbeat reads it on every tick. No hardcoded cadences anywhere.
 
-**Location:** `data/config/continuous_tasks.json` (sits alongside
-`dimensions.json`, `heartbeat.json`, `field_archetypes.json`).
+**Location (since 2026-04-22):** shipped seed at
+`backend/app/services/academic/continuous_tasks_seed.json` (read-only,
+canonical structure + defaults) + sparse user deltas at
+`data/config/continuous_tasks_overrides.json`. Effective config =
+`deep_merge(seed, overrides)` computed in memory on every read by
+`continuous_config.load_continuous_tasks()`; no write-on-read.
+PATCH endpoint writes one override leaf at a time via
+`continuous_overrides.set_override(...)` after dry-running the
+Pydantic schema against the prospective merged result.
 
 **Shape:**
 

@@ -1,5 +1,17 @@
 {
   "sources": {
+    "google_scholar_papers": {
+      "layer": 2,
+      "enabled": true,
+      "default_cadence_days": 7,
+      "priority_overrides": {
+        "high": 3,
+        "low": 14
+      },
+      "rate_limit_per_minute": 30,
+      "on_failure": "retry_next_tick",
+      "description": "Primary papers source — Google Scholar via SerpAPI google_scholar_author (sort=pubdate); direct HTML scrape fallback. Semantic Scholar enriches matched titles."
+    },
     "semantic_scholar_papers": {
       "layer": 2,
       "enabled": true,
@@ -10,7 +22,7 @@
       },
       "rate_limit_per_minute": 60,
       "on_failure": "retry_next_tick",
-      "description": "Fetch papers + citation counts from Semantic Scholar"
+      "description": "Enrichment pass — adds authorId/DOI/s2_fields/influential_citations to matched titles; appends SS-only rows for older papers GS hasn't surfaced."
     },
     "google_scholar_stats": {
       "layer": 2,
@@ -53,6 +65,7 @@
       "enabled": true,
       "default_cadence_days": 14,
       "required_sources": [
+        "google_scholar_papers",
         "semantic_scholar_papers",
         "google_scholar_stats",
         "news_web"
@@ -79,6 +92,7 @@
       "required_sources": [
         "news_web",
         "startups_web",
+        "google_scholar_papers",
         "semantic_scholar_papers"
       ],
       "triage_model": "gemini-3-flash-preview",
@@ -89,6 +103,7 @@
       "enabled": true,
       "default_cadence_days": 30,
       "required_sources": [
+        "google_scholar_papers",
         "semantic_scholar_papers",
         "google_scholar_stats",
         "news_web"
