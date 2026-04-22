@@ -128,12 +128,34 @@ function NodeIcon({ node }: { node: WorkspaceTreeNode }) {
 // Main component
 // ---------------------------------------------------------------------------
 
+export const CONTENT_TABS = [
+  'workroom',
+  'facts',
+  'screening_v1',
+  'screening_v2',
+  'news',
+] as const;
+export type ContentTab = (typeof CONTENT_TABS)[number];
+
 interface EntityDetailProps {
   entity: Entity;
+  contentTab: ContentTab;
+  onContentTabChange: (tab: ContentTab) => void;
   onBack: () => void;
+  editModalOpen: boolean;
+  onOpenEditModal: () => void;
+  onCloseEditModal: () => void;
 }
 
-export function EntityDetail({ entity, onBack }: EntityDetailProps) {
+export function EntityDetail({
+  entity,
+  contentTab,
+  onContentTabChange,
+  onBack,
+  editModalOpen,
+  onOpenEditModal,
+  onCloseEditModal,
+}: EntityDetailProps) {
   const { tree, isLoading: treeLoading, mutate: mutateTree } = useWorkspaceTree(entity.id);
   // Load the detail-endpoint response so last_content_at + fresh metadata are available.
   const { entity: entityDetail, mutate: mutateEntity } = useEntity(entity.id);
@@ -141,11 +163,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   const { funds, mutate: mutateFunds } = useFunds();
   const [selectedNodeIds, setSelectedNodeIds] = useState<Set<string>>(() => new Set());
   const [previewNode, setPreviewNode] = useState<WorkspaceTreeNode | null>(null);
-  const [editModalOpen, setEditModalOpen] = useState(false);
   const [discrepancyPanelOpen, setDiscrepancyPanelOpen] = useState(false);
-  const [contentTab, setContentTab] = useState<
-    'workroom' | 'facts' | 'screening_v1' | 'screening_v2' | 'news'
-  >('workroom');
   const [agentMode, setAgentMode] = useState<AgentMode>('react'); // default unlimited until child reports
 
   const handleDealStageChange = useCallback(async (stage: DealStage) => {
@@ -225,10 +243,10 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
   // If the active screening tab's underlying memo disappears (deleted, tree
   // refresh), fall back to workroom so the tablist stays coherent.
   useEffect(() => {
-    if (contentTab === 'screening_v1' && !showScreeningV1) setContentTab('workroom');
-    if (contentTab === 'screening_v2' && !showScreeningV2) setContentTab('workroom');
-    if (contentTab === 'news' && !showNews) setContentTab('workroom');
-  }, [contentTab, showScreeningV1, showScreeningV2, showNews]);
+    if (contentTab === 'screening_v1' && !showScreeningV1) onContentTabChange('workroom');
+    if (contentTab === 'screening_v2' && !showScreeningV2) onContentTabChange('workroom');
+    if (contentTab === 'news' && !showNews) onContentTabChange('workroom');
+  }, [contentTab, showScreeningV1, showScreeningV2, showNews, onContentTabChange]);
 
   // Reconcile `selectedNodeIds` against the live tree on every refresh: drop
   // any ids no longer present so a stale selection (e.g. after Process Inbox
@@ -285,7 +303,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
         entity={liveEntity}
         funds={funds}
         onBack={onBack}
-        onEdit={() => setEditModalOpen(true)}
+        onEdit={onOpenEditModal}
         onDealStageChange={handleDealStageChange}
         onToggleDiscrepancies={() => setDiscrepancyPanelOpen((v) => !v)}
         discrepancyPanelOpen={discrepancyPanelOpen}
@@ -309,7 +327,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
           entity={liveEntity}
           funds={funds}
           isOpen={editModalOpen}
-          onClose={() => setEditModalOpen(false)}
+          onClose={onCloseEditModal}
           onSaved={() => { void mutateEntity(); void mutateFunds(); }}
         />
       )}
@@ -325,7 +343,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
           aria-selected={contentTab === 'workroom'}
           aria-controls="entity-tab-workroom"
           className={`content-tab ${contentTab === 'workroom' ? 'active' : ''}`}
-          onClick={() => setContentTab('workroom')}
+          onClick={() => onContentTabChange('workroom')}
         >
           Workroom
         </button>
@@ -335,7 +353,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
           aria-selected={contentTab === 'facts'}
           aria-controls="entity-tab-facts"
           className={`content-tab ${contentTab === 'facts' ? 'active' : ''}`}
-          onClick={() => setContentTab('facts')}
+          onClick={() => onContentTabChange('facts')}
         >
           Facts
         </button>
@@ -346,7 +364,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             aria-selected={contentTab === 'screening_v1'}
             aria-controls="entity-tab-screening-v1"
             className={`content-tab ${contentTab === 'screening_v1' ? 'active' : ''}`}
-            onClick={() => setContentTab('screening_v1')}
+            onClick={() => onContentTabChange('screening_v1')}
           >
             {showScreeningV2 ? 'Screening v1' : 'Initial Screening'}
           </button>
@@ -358,7 +376,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             aria-selected={contentTab === 'screening_v2'}
             aria-controls="entity-tab-screening-v2"
             className={`content-tab ${contentTab === 'screening_v2' ? 'active' : ''}`}
-            onClick={() => setContentTab('screening_v2')}
+            onClick={() => onContentTabChange('screening_v2')}
           >
             {showScreeningV1 ? 'Screening v2' : 'Initial Screening'}
           </button>
@@ -370,7 +388,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             aria-selected={contentTab === 'news'}
             aria-controls="entity-tab-news"
             className={`content-tab ${contentTab === 'news' ? 'active' : ''}`}
-            onClick={() => setContentTab('news')}
+            onClick={() => onContentTabChange('news')}
           >
             News
           </button>
@@ -382,7 +400,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
           <EntityFactsTab
             entity={liveEntity}
             funds={funds}
-            onOpenEdit={() => setEditModalOpen(true)}
+            onOpenEdit={onOpenEditModal}
             onOpenDiscrepancyPanel={() => setDiscrepancyPanelOpen(true)}
           />
         </div>
@@ -398,7 +416,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             onOpenPreview={(node) => {
               // Switch back to Workroom so the preview panel is visible.
               setPreviewNode(node);
-              setContentTab('workroom');
+              onContentTabChange('workroom');
             }}
           />
         </div>
@@ -413,7 +431,7 @@ export function EntityDetail({ entity, onBack }: EntityDetailProps) {
             reviewPath="Deliverables/Memos/initial_screening_v2_review_notes.md"
             onOpenPreview={(node) => {
               setPreviewNode(node);
-              setContentTab('workroom');
+              onContentTabChange('workroom');
             }}
           />
         </div>

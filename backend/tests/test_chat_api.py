@@ -80,17 +80,19 @@ def test_post_message_deep_agent_override_off_uses_direct(
 def test_post_message_deep_agent_override_on_uses_harness(
     client: TestClient, monkeypatch
 ):
-    monkeypatch.setattr(settings, "CHAT_USE_DEEP_AGENT", False)
-
-    class _FakeAgent:
-        def invoke(self, *args, **kwargs):
-            from langchain_core.messages import AIMessage
-
-            return {"messages": [AIMessage(content="Harness from override")]}
+    """Client `use_deep_agent=True` routes to the react harness (202 + job)."""
+    monkeypatch.setattr(settings, "CHAT_DEFAULT_AGENT_MODE", "one_shot")
 
     monkeypatch.setattr(
-        "app.routers.chat.create_portfolio_agent",
-        lambda **kw: _FakeAgent(),
+        "app.routers.chat.create_react_portfolio_agent",
+        lambda **kw: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.chat.invoke_react_portfolio_agent",
+        lambda agent, lc, on_status=None, recursion_limit=None: (
+            "Harness from override",
+            {"messages": []},
+        ),
     )
     r = client.post("/entities", json={"name": "Override Harness Co"})
     entity_id = r.json()["id"]
@@ -117,22 +119,24 @@ def test_post_message_deep_agent_override_on_uses_harness(
         if st["status"] in ("succeeded", "failed"):
             break
         time.sleep(0.02)
-    assert st["status"] == "succeeded"
+    assert st["status"] == "succeeded", st
     assert st["assistant_message"]["content"] == "Harness from override"
 
 
 def test_post_message_uses_deep_agent_when_enabled(client: TestClient, monkeypatch):
-    monkeypatch.setattr(settings, "CHAT_USE_DEEP_AGENT", True)
-
-    class _FakeAgent:
-        def invoke(self, *args, **kwargs):
-            from langchain_core.messages import AIMessage
-
-            return {"messages": [AIMessage(content="Harness reply")]}
+    """Server-default react mode dispatches 202 + react harness."""
+    monkeypatch.setattr(settings, "CHAT_DEFAULT_AGENT_MODE", "react")
 
     monkeypatch.setattr(
-        "app.routers.chat.create_portfolio_agent",
-        lambda **kw: _FakeAgent(),
+        "app.routers.chat.create_react_portfolio_agent",
+        lambda **kw: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.chat.invoke_react_portfolio_agent",
+        lambda agent, lc, on_status=None, recursion_limit=None: (
+            "Harness reply",
+            {"messages": []},
+        ),
     )
     r = client.post("/entities", json={"name": "Deep Co"})
     assert r.status_code == 200
@@ -157,7 +161,7 @@ def test_post_message_uses_deep_agent_when_enabled(client: TestClient, monkeypat
         if st["status"] in ("succeeded", "failed"):
             break
         time.sleep(0.02)
-    assert st["status"] == "succeeded"
+    assert st["status"] == "succeeded", st
     assert st["assistant_message"]["content"] == "Harness reply"
     assert st.get("run_id")
     assert st.get("tool_trace")
@@ -267,20 +271,84 @@ def test_workspace_file_upload_and_download(client: TestClient):
     assert body["a"] == 1
 
 
-def test_extract_info_preset_creates_json_deliverable(client: TestClient):
-    r = client.post("/entities", json={"name": "Delta LLC", "website": "https://delta.test"})
+def test_extract_info_preset_requires_session_id(client: TestClient):
+    """extract_info is force-routed to react mode, which requires a session."""
+    r = client.post(
+        "/entities",
+        json={"name": "Delta LLC", "website": "https://delta.test"},
+    )
     entity_id = r.json()["id"]
 
     r = client.post(
         f"/entities/{entity_id}/chat/presets/extract_info/run",
         json={"node_ids": []},
     )
-    assert r.status_code == 200
-    nid = r.json()["node_id"]
+    assert r.status_code == 400
+    assert "session_id" in r.json().get("detail", "")
+
+
+def test_extract_info_preset_creates_json_deliverable(
+    client: TestClient, monkeypatch,
+):
+    """End-to-end: react harness emits JSON reply → server salvages it into
+    ``Company Profile.json`` and syncs to ``Entity.metadata_json``."""
+    stub_payload = json.dumps(
+        {
+            "company_name": {"value": "StubCo", "confidence": "high"},
+            "founders": [],
+        }
+    )
+
+    monkeypatch.setattr(
+        "app.routers.chat.create_react_portfolio_agent",
+        lambda **kw: object(),
+    )
+    monkeypatch.setattr(
+        "app.routers.chat.invoke_react_portfolio_agent",
+        lambda agent, lc, on_status=None, recursion_limit=None: (
+            stub_payload,
+            {"messages": []},
+        ),
+    )
+
+    r = client.post(
+        "/entities",
+        json={"name": "Delta LLC", "website": "https://delta.test"},
+    )
+    entity_id = r.json()["id"]
+    r = client.post(f"/entities/{entity_id}/chat/sessions", json={})
+    session_id = r.json()["id"]
+
+    r = client.post(
+        f"/entities/{entity_id}/chat/presets/extract_info/run",
+        json={"node_ids": [], "session_id": session_id},
+    )
+    assert r.status_code == 202, r.text
+    job_id = r.json()["job_id"]
+
+    st = {"status": "pending"}
+    for _ in range(200):
+        jr = client.get(
+            f"/entities/{entity_id}/chat/sessions/{session_id}/jobs/{job_id}"
+        )
+        assert jr.status_code == 200
+        st = jr.json()
+        if st["status"] in ("succeeded", "failed"):
+            break
+        time.sleep(0.02)
+    assert st["status"] == "succeeded", st
+
+    detail = client.get(
+        f"/entities/{entity_id}/chat/sessions/{session_id}"
+    ).json()
+    assistant = [m for m in detail["messages"] if m["role"] == "assistant"]
+    assert assistant, detail
+    card = json.loads(assistant[-1]["content"])
+    assert card["_vc_chat"] == "artifact_card"
+    nid = card["node_id"]
 
     node = client.get(f"/entities/{entity_id}/workspace/node/{nid}").json()
-    assert node["name"].endswith(".json")
-    assert node["path"].startswith("Deliverables/")
+    assert node["name"] == "Company Profile.json"
 
     r = client.get(f"/entities/{entity_id}/workspace/file/{nid}")
     assert r.status_code == 200

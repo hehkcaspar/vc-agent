@@ -2,6 +2,100 @@
 
 Future-development items that are known but not yet scheduled. Newest first.
 
+**Current priority order (2026-04-22 audit):**
+1. ~~`test_chat_api.py` — 3 red tests~~ — **✅ resolved 2026-04-22**: all 3 were test-code drift against evolved production (use_deep_agent→react, CHAT_USE_DEEP_AGENT→CHAT_DEFAULT_AGENT_MODE, preset session-id requirement). Tests realigned; full suite 250/250 (excluding pre-existing `test_three_paths_e2e.py` fixture bug, see below).
+2. ~~URL routing — restore browser back/forward + survive refresh~~ — **✅ resolved 2026-04-22**: 6-commit rollout wired BrowserRouter + detail routes (`/portfolio/entities/:id/:subTab?`, `/academic/scholars/:id/:subTab?`) + search-param filters + modal routes (`/portfolio/new`, `/portfolio/parking-lot`, `/portfolio/entities/:id/edit`, `/academic/new`) + settings section path param + `?chat=<sid>` for session reattach + 404 catch-all. Job reattach already worked via backend `active_job_id` — no new endpoint needed. Two polish items deferred (see below).
+3. Backfill grounding-sourced URLs — **medium** (live scholar data, 58% broken)
+4. `test_three_paths_e2e.py` missing `r` fixture — **medium** (28 collection errors hide pre-existing e2e coverage)
+5. URL routing follow-ups (preview deep-link + scroll restoration) — **low** (see below)
+6. `early_break` Tasks-view aggregation — low (quick obs win)
+7. `_MAX_PAPERS` config override — low
+8. Legal config → JSON-seed migration — low (ergonomics)
+9. `docs/ARCHITECTURE.md` v2 rewrite — low (doc-drift)
+10. Dim-seed collapse — **n/a on main**; move to `gc-deploy` branch's own backlog (`backend/app/defaults/` does not exist on `main`)
+
+---
+
+## URL routing follow-ups — preview deep-link + scroll restoration
+
+**Status:** not started · **Priority:** low · **Filed:** 2026-04-22 (deferred from main URL-routing PR)
+
+### Problem
+The URL-routing refactor (shipped 2026-04-22) deferred two polish items flagged in its plan:
+
+1. **`?preview=<nodeId>` file-preview deep link** — `EntityDetail.previewNode` is a `WorkspaceTreeNode` object (not just an ID) that's mutated from ~6 call sites (click handler, discrepancy-panel open-in-preview, fact-provenance callback, etc.). Making it URL-controlled requires either (a) derive from URL on every render with a tree lookup or (b) sync via useEffect. Both add complexity beyond the routing PR's scope.
+
+2. **Scroll restoration** — React Router v6's `<ScrollRestoration>` requires a data router (`createBrowserRouter`), but the routing PR uses declarative `<BrowserRouter>`. Additionally, PortfolioTab/AcademicTab use container-level overflow scroll (not window scroll), which `<ScrollRestoration>` doesn't handle. Would need a custom scroll manager keyed by route.
+
+### Fix
+- **Preview deep-link**: add `?preview=<nodeId>` search param in EntityDetail. Derive `previewNode` via `tree.find(n => n.id === previewId)`. All 6 `setPreviewNode(x)` sites become `setSearchParams({ preview: x.id })`. Handle the case where the target node is no longer in the tree (stale link) by gracefully falling back to no-preview.
+- **Scroll restoration**: two-part. (1) Migrate to `createBrowserRouter` + `<ScrollRestoration>` for window scroll. (2) For container scroll, extend TabContext to key `scrollPosition` on route pathname instead of tabId, save on route-change, restore on matching-route mount.
+
+### Effort
+Each small-medium. Preview deep-link ~1h if done cleanly. Scroll restoration ~2-3h (bigger because of the router migration).
+
+---
+
+## `test_three_paths_e2e.py` — 28 collection errors from missing `r` fixture
+
+**Status:** not started · **Priority:** medium (test-coverage gap) · **Filed:** 2026-04-22
+
+### Problem
+All 28 tests in `backend/tests/test_three_paths_e2e.py` error at collection with `fixture 'r' not found`. The tests reference `r` (a `TestResult` dataclass) as if it were a pytest fixture, but no `@pytest.fixture def r()` is defined. Surfaced while verifying the chat_api test fixes (2026-04-22) — the full backend suite shows `250 passed, 28 errors`, all errors concentrated here.
+
+This is orthogonal to the chat_api fixes; the file likely broke in an earlier refactor (possibly when `TestResult` was extracted to a class) and nobody noticed because the 28 "errors" look superficially like they could be env-gated e2e skips.
+
+### Fix
+Either define a `pytest.fixture` that yields a fresh `TestResult` instance per test, or refactor the pattern to construct `r` inline in each test body. The dataclass is likely meant to be a per-test state holder; fixture is cleaner.
+
+### Effort
+Small. One fixture definition, ~10 lines.
+
+---
+
+## Tasks-view aggregation of `early_break` stat
+
+**Status:** not started · **Priority:** low (observability) · **Filed:** 2026-04-21
+
+### Problem
+`google_scholar_papers.run()` writes `"early_break": true/false` into its snapshot detail whenever incremental pagination stopped early because the current page's GS ids were all in the ledger. The Tasks view (`GET /academic/continuous-tasks`) aggregates snapshots into per-task health (7d runs, success rate, avg duration) but doesn't surface how often early-break fires. Operators can't see "we saved N SerpAPI calls this week" without greping logs.
+
+### Fix
+Extend the per-task health aggregator in the Continuous Tasks endpoint to count `snapshot.detail.early_break == true` across the 7d window, expose as `early_break_saves_7d` alongside the existing health fields. Frontend tasks tile shows it as a muted sub-line ("early-break: 12/14 runs this week"). Purely observability — no runtime behaviour change.
+
+### Effort
+Small. One aggregator field; one frontend line.
+
+---
+
+## Lift `_MAX_PAPERS` ceiling for 1000+ paper scholars
+
+**Status:** not started · **Priority:** low · **Filed:** 2026-04-21
+
+### Problem
+Both `google_scholar_papers._MAX_PAPERS` and `semantic_scholar_papers._DEFAULT_LIMIT` cap at 500 papers per run. Long-tail scholars (Bengio-scale, 1000+ papers) are silently truncated — older papers that sit past page 5 never reach `papers.json`. Not a pressing issue for the current 15 tracked scholars, but will surface as the roster grows.
+
+### Fix
+Make the cap per-scholar overridable from `continuous_tasks_seed.json` (new optional `max_papers_override` field). Default stays 500; scholars flagged as high-volume get 2000. Both sources read the same override.
+
+### Effort
+Small. Two constants become config lookups; one seed-schema field.
+
+---
+
+## Backfill grounding-sourced URLs into existing scholar dossiers
+
+**Status:** not started · **Priority:** medium · **Filed:** 2026-04-21
+
+### Problem
+The 2026-04-21 grounded-search URL fix only affects new writes. Existing records in `data/scholars/*/news.jsonl`, `patents.json`, `startups.json`, `red_flags.jsonl` still carry ~58% broken LLM-fabricated URLs (audit report at `data/audits/source_urls_report.json` — 221 hard 404s + 16 DNS failures out of 539 URLs).
+
+### Fix
+One-shot CLI that re-runs the now-fixed `grounded_search_json` on each record's title (tight "find the canonical URL for this story about <scholar>" prompt), swaps in the grounding URL when one comes back, falls through to `llm_validated` / `google_search` otherwise. Respects the same 3-tier semantics used on fresh writes. Run scholar-by-scholar with pacing so we don't burn the Gemini quota.
+
+### Effort
+Small. Reuses the fixed helper. Main work is the CLI wrapper + idempotent re-write of each JSONL/JSON file (preserve ids, only overwrite the URL fields + `_url_source`).
+
 ---
 
 ## `docs/ARCHITECTURE.md` — full v1→v2 academic-module rewrite is outdated
@@ -33,6 +127,23 @@ Medium. One focused doc pass, cross-checked against CLAUDE.md + `docs/design/SCH
 
 ## URL routing — restore browser back/forward + survive refresh
 
+**Status:** ✅ **resolved 2026-04-22** · **Priority:** high (UX-blocking) · **Filed:** 2026-04-19
+
+### Resolution (2026-04-22)
+Six-commit rollout in one session:
+
+1. **Router shell** — `<BrowserRouter>` in `main.tsx`; `Layout` reads active tab from `useLocation()`; `/`, `/portfolio`, `/academic`, `/settings` wired.
+2. **Detail routes** — `/portfolio/entities/:entityId/:subTab?` + `/academic/scholars/:scholarId/:subTab?` via new `EntityDetailRoute` / `ScholarDetailRoute` wrappers. `EntityDetail` / `ScholarDetail` made controlled (`contentTab` + `onContentTabChange` props replace internal `useState`).
+3. **Search-param filters** — PortfolioTab / AcademicTab filters (`view`, `stage`, `status`) now live in URL via `useSearchParams()`. Default values omitted from URL (clean URLs). SettingsPage section = path param (`/settings/:section`).
+4. **Modal routes** — `/portfolio/new`, `/portfolio/parking-lot`, `/portfolio/entities/:id/edit`, `/academic/new` promoted to routes. Delete confirms, upload modal, list-row quick-edit, digest/feed/activity-log dialogs stay local.
+5. **Session preservation** — `?chat=<sessionId>` in entity detail URL. Job reattach already worked via backend `active_job_id` on session-detail GET; no new endpoint needed. `localStorage` approach originally proposed was unnecessary.
+6. **404 catch-all** — `*` route → `NotFound` component with "Back to portfolio" link.
+
+Verified each commit with Playwright headed. `npm run build` clean at every step. Two polish items deferred (see "URL routing follow-ups" above).
+
+---
+
+## URL routing — ORIGINAL BACKLOG ENTRY (kept below for historical reference)
 **Status:** not started · **Priority:** high (UX-blocking) · **Filed:** 2026-04-19
 
 ### Problem
@@ -101,30 +212,9 @@ Medium. The router library is already installed; the work is mechanical (wire ro
 
 ---
 
-## `continuous_tasks.json` has no in-code default — fragile on fresh clones + noisy in tests
-
-**Status:** not started · **Priority:** medium · **Filed:** 2026-04-19
-
-### Problem
-`backend/app/services/academic/continuous_config.py::load_continuous_tasks()` raises `FileNotFoundError` when `ACADEMIC_CONFIG_DIR/continuous_tasks.json` is missing — no Python fallback. Consequences:
-
-- The academic heartbeat tick fires every ~60 s and logs `heartbeat: continuous_tasks.json failed to load` if the file isn't there.
-- Pytest fixtures using a tmpdir as `ACADEMIC_CONFIG_DIR` hit the error every run (visible in `test_chat_api.py` setup logs as of today).
-- Production on Cloud Run is only saved by `backend/app/defaults/continuous_tasks.json` (gc-deploy-only) being copied to the bucket by `ensure_universal_configs_seeded()` in lifespan. A fresh-clone `pytest` / `python run.py` on main has no such copy.
-
-Every sibling config has an in-code default: `dimensions` (new seed JSON, 3092789), `legal_review_checklist._default_checklist()`, `legal_templates._default_config()`, `funds` (no default but pure user data). `continuous_tasks` is the outlier.
-
-### Fix
-Same JSON-seed-in-package pattern as today's dimensions fix: add `backend/app/services/academic/continuous_tasks_seed.json`, load + Pydantic-validate at import, use as fallback when the runtime file is missing. Drops `continuous_tasks.json` from `config_seeding._FLAT_FILES` (and eventually makes the whole `backend/app/defaults/` + `config_seeding.py` path dead; see next entry).
-
-### Effort
-Low. ~20 LOC in `continuous_config.py` + a small seed file.
-
----
-
 ## Collapse redundant dim-seed mechanism on `gc-deploy`
 
-**Status:** not started · **Priority:** low (cleanup after today's fix) · **Filed:** 2026-04-19
+**Status:** not started · **Scope:** `gc-deploy` branch only — not applicable on `main` (`backend/app/defaults/` does not exist here) · **Priority:** low (cleanup after today's fix) · **Filed:** 2026-04-19
 
 ### Problem
 After commit `e14e69a` on `gc-deploy`, the 4 MECE dim prompts ship via **two parallel mechanisms**:
@@ -135,37 +225,48 @@ After commit `e14e69a` on `gc-deploy`, the 4 MECE dim prompts ship via **two par
 Both carry semantically identical content (diff is pure JSON escaping). On fresh Cloud Run boot, lifespan wins the race and seeds from `defaults/`; on every other path (local dev, tests, a bucket-deleted re-seed like today's prod fix) the in-package seed takes over. Belt-and-suspenders, but risks drift if someone edits one and not the other, and diverges from `main` which has only the in-package seed.
 
 ### Fix
-Delete `backend/app/defaults/dimensions.json` and drop `"dimensions.json"` from `config_seeding._FLAT_FILES`. The in-package `_load_seed()` + `read_dimensions()` writeback fully covers the fresh-boot case (validated in prod today after `gsutil rm`). Once `continuous_tasks.json` migrates too (see entry above), `config_seeding.py` + the whole `backend/app/defaults/` tree can go.
+Delete `backend/app/defaults/dimensions.json` and drop `"dimensions.json"` from `config_seeding._FLAT_FILES`. The in-package `_load_seed()` + `read_dimensions()` writeback fully covers the fresh-boot case (validated in prod after `gsutil rm`). `continuous_tasks` already uses the in-package seed + sparse overrides (shipped 2026-04-22), so with `dimensions.json` collapsed too, `config_seeding.py` + the whole `backend/app/defaults/` tree can go.
 
 While collapsing, normalise JSON encoding (pick one of `ensure_ascii=True` vs raw UTF-8 — `write_dimensions()` currently uses default, my seed was generated raw — minor, cosmetic).
 
 ### Effort
-Very low. Blocked until `continuous_tasks.json` migrates (else `config_seeding.py` still has to exist).
+Very low. No longer blocked — `continuous_tasks` has already migrated to the seed + overrides architecture.
 
 ---
 
-## `test_chat_api.py` — 3 deep-agent tests red on pristine `main`
+## `test_chat_api.py` — 3 red tests on pristine `main`
 
-**Status:** not started · **Priority:** medium (test-suite red) · **Filed:** 2026-04-19
+**Status:** ✅ **resolved 2026-04-22** · **Priority:** high (test-suite red, masks regressions) · **Filed:** 2026-04-19 · **Re-audited:** 2026-04-22
+
+### Resolution (2026-04-22)
+Three separate test-code drifts, all fixed by realigning tests to current production semantics (no product changes):
+
+- `uses_deep_agent_when_enabled` — test monkeypatched retired `CHAT_USE_DEEP_AGENT` flag; swapped to `CHAT_DEFAULT_AGENT_MODE="react"` and patched `create_react_portfolio_agent` / `invoke_react_portfolio_agent`.
+- `override_on_uses_harness` — test patched `create_portfolio_agent`, but `use_deep_agent=True` now maps to react mode; swapped patch targets to the react factories.
+- `extract_info_preset_creates_json_deliverable` — test sent `{node_ids: []}` with no `session_id`; preset endpoint now requires one (extract_info is force-routed to react). Split into `test_extract_info_preset_requires_session_id` (400 dispatch check) + end-to-end test that stubs the react harness and verifies the salvage path writes `Company Profile.json`.
+
+Full backend suite passes 250/250 after the fix (excluding pre-existing `test_three_paths_e2e.py` fixture bug tracked separately above).
+
+---
 
 ### Problem
-On pristine `main` (confirmed today via `git stash` → run → stash pop), three tests fail:
+Confirmed red on current `main` (2026-04-22). The original filing described all three as "assert 202, got 200" — that's wrong. Actual failure shapes differ and likely represent **three separate regressions**, not one dispatch-gate issue:
 
-- `test_post_message_deep_agent_override_on_uses_harness`
-- `test_post_message_uses_deep_agent_when_enabled`
-- `test_extract_info_preset_creates_json_deliverable`
+| Test | Line | Failure | Inferred root |
+|---|---|---|---|
+| `test_post_message_deep_agent_override_on_uses_harness` | 120 | job status ends `failed` (not `succeeded`) — dispatch works, harness errors mid-run | Harness-side exception — likely tool schema / import / missing fixture |
+| `test_post_message_uses_deep_agent_when_enabled` | 146 | `assert r.status_code == 202` but got **200** — sync one-shot dispatched when deep_agent enabled | Config-gate or flag regression in `routers/chat.py` dispatch branch |
+| `test_extract_info_preset_creates_json_deliverable` | 278 | `assert r.status_code == 200` but got **400 Bad Request** — request validation fails at the preset endpoint | Schema drift after the facts/signals split (preset payload now fails Pydantic) |
 
-All three assert the endpoint returns `202 Accepted` (async dispatch path for `agent_mode=react` / `deep_agent`) but get `200 OK` (sync one-shot path). Pytest setup log also shows `heartbeat: continuous_tasks.json failed to load` each run — may or may not be related (that's the academic heartbeat, not the chat path directly).
-
-Noise in the signal: 119/122 tests pass; only the deep-agent dispatch branch is wrong. None of it is related to today's dimensions work.
+Other 119/122 tests pass, so scope is isolated to these three code paths.
 
 ### Investigation order
-1. Reproduce one failure with `--tb=long` + `caplog` + actual response body — does it 200 because the agent ran synchronously, because of a config gate, or because job enqueue silently fails?
-2. Grep `routers/chat.py` for the branch that picks 202 vs 200 and which env/config gates drive it (`CHAT_DEFAULT_AGENT_MODE`?).
-3. Fix the `continuous_tasks.json` noise first (previous entry) to eliminate it as a variable.
+1. `test_post_message_uses_deep_agent_when_enabled` first — it's the cleanest dispatch-gate failure; read `routers/chat.py` 200-vs-202 branch and the env/default it consults.
+2. `test_extract_info_preset_creates_json_deliverable` — read response body for the validation detail; cross-check against the preset request schema post facts/signals split.
+3. `test_post_message_deep_agent_override_on_uses_harness` last — surface the real `error_message` from the job record (test currently only checks `status`); may unblock itself once #1/#2 are understood.
 
 ### Effort
-Low-medium. Likely a small dispatch/config fix, not architectural.
+Low-medium per test, done serially. Probably 3 small fixes, not one architectural change.
 
 ---
 

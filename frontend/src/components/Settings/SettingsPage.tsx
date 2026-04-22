@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
   Landmark,
   FileText,
@@ -30,6 +30,17 @@ export type SettingsSectionId =
   | 'academic-ranking'
   | 'appearance'
   | 'about';
+
+const VALID_SECTIONS: SettingsSectionId[] = [
+  'funds',
+  'legal-checklist',
+  'legal-templates',
+  'academic-tasks',
+  'academic-dimensions',
+  'academic-ranking',
+  'appearance',
+  'about',
+];
 
 export interface SettingsNavItem {
   id: SettingsSectionId;
@@ -79,7 +90,15 @@ export function SettingsPage({
   onThemeChange,
   onNavigateTab,
 }: SettingsPageProps) {
-  const [active, setActive] = useState<SettingsSectionId>('funds');
+  const navigate = useNavigate();
+  const { section } = useParams<{ section: string }>();
+  const active: SettingsSectionId = VALID_SECTIONS.includes(section as SettingsSectionId)
+    ? (section as SettingsSectionId)
+    : 'funds';
+
+  const handleSelect = (id: SettingsSectionId) => {
+    navigate(`/settings/${id}`, { replace: true });
+  };
 
   const renderSection = () => {
     switch (active) {
@@ -106,7 +125,7 @@ export function SettingsPage({
 
   return (
     <div className="settings-root">
-      <SettingsNav groups={GROUPS} active={active} onSelect={setActive} />
+      <SettingsNav groups={GROUPS} active={active} onSelect={handleSelect} />
       <main className="settings-content">{renderSection()}</main>
     </div>
   );

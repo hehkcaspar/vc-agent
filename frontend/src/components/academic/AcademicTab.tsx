@@ -1,21 +1,26 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ChevronUp, ChevronDown, AlertTriangle, Play, Square, Pencil, Trash2, Activity } from 'lucide-react';
 import { EventIcon } from '../../lib/eventIcons';
 import { TagMenu } from './TagMenu';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useScholars, useSignalFeed, useDigests, useRanking } from '../../hooks/useAcademic';
+import { useSetSearchParam } from '../../hooks/useSetSearchParam';
 import { showToast } from '../../lib/appToast';
 import { academicApi } from '../../services/academicApi';
 import { AddScholarModal } from './AddScholarModal';
 import { Modal } from '../ui/Modal';
 import { RankingView } from './RankingView';
-import { ScholarDetail, type ContentTab } from './ScholarDetail';
+import { type ContentTab } from './ScholarDetail';
 import { TasksView } from './TasksView';
 import type { Scholar, UserSettableStatus } from '../../types/academic';
 import { SCHOLAR_STATUS_LABELS, PRIORITY_LABELS, lifecycleOptionsFor } from '../../types/academic';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'archived';
+const VALID_STATUS_FILTERS: StatusFilter[] = ['all', 'active', 'paused', 'archived'];
+const VALID_VIEW_MODES = ['list', 'ranking', 'tasks'] as const;
+type AcademicViewMode = (typeof VALID_VIEW_MODES)[number];
 
 function StatusMenu({
   scholar,
@@ -52,17 +57,37 @@ function timeAgo(dateStr: string): string {
 }
 
 export function AcademicTab() {
-  const [selectedScholar, setSelectedScholar] = useState<Scholar | null>(null);
-  const [detailInitialTab, setDetailInitialTab] = useState<ContentTab>('report');
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const setSearchParam = useSetSearchParam();
+
+  const isCreateOpen = location.pathname === '/academic/new';
+
+  const rawView = searchParams.get('view');
+  const viewMode: AcademicViewMode = (VALID_VIEW_MODES as readonly string[]).includes(
+    rawView ?? '',
+  )
+    ? (rawView as AcademicViewMode)
+    : 'list';
+
+  const rawStatus = searchParams.get('status');
+  const statusFilter: StatusFilter = VALID_STATUS_FILTERS.includes(
+    rawStatus as StatusFilter,
+  )
+    ? (rawStatus as StatusFilter)
+    : 'all';
+
+  const setViewMode = (mode: AcademicViewMode) =>
+    setSearchParam('view', mode, 'list');
+  const setStatusFilter = (s: StatusFilter) =>
+    setSearchParam('status', s, 'all');
+
   const openScholar = (s: Scholar, tab: ContentTab = 'report') => {
-    setDetailInitialTab(tab);
-    setSelectedScholar(s);
+    navigate(`/academic/scholars/${s.id}/${tab}`);
   };
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingScholar, setEditingScholar] = useState<Scholar | null>(null);
   const [feedOpen, setFeedOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<'list' | 'ranking' | 'tasks'>('list');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [digestOpen, setDigestOpen] = useState(false);
   const [digestContent, setDigestContent] = useState<string | null>(null);
 
@@ -227,17 +252,6 @@ export function AcademicTab() {
     }
   };
 
-  // Detail view
-  if (selectedScholar) {
-    return (
-      <ScholarDetail
-        scholar={selectedScholar}
-        initialTab={detailInitialTab}
-        onBack={() => { setSelectedScholar(null); mutate(); }}
-      />
-    );
-  }
-
   // List view
   return (
     <div className="academic-tab">
@@ -276,7 +290,7 @@ export function AcademicTab() {
           <button className="btn-secondary" onClick={handleGenerateDigest}>
             Digest
           </button>
-          <button className="btn-primary" onClick={() => setIsCreateOpen(true)}>
+          <button className="btn-primary" onClick={() => navigate('/academic/new')}>
             + Add Scholar
           </button>
         </div>
@@ -480,7 +494,7 @@ export function AcademicTab() {
 
       {isCreateOpen && (
         <AddScholarModal
-          onClose={() => setIsCreateOpen(false)}
+          onClose={() => navigate('/academic')}
           onCreated={() => mutate()}
         />
       )}

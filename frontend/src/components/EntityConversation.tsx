@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Plus, Trash2, ArrowUp, ChevronDown, FileText, ArrowUpRight } from 'lucide-react';
@@ -78,6 +79,8 @@ export function EntityConversation({
   onEntityChanged,
 }: EntityConversationProps) {
   const { profileId, setProfileId } = useChatModelProfile();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlChatSessionId = searchParams.get('chat');
   const sessionIdRef = useRef<string | null>(null);
   const sessionMenuRef = useRef<HTMLDivElement | null>(null);
   const onArtifactsChangedRef = useRef(onArtifactsChanged);
@@ -154,7 +157,15 @@ export function EntityConversation({
           setSessions([s]);
           setSessionId(s.id);
         } else {
-          setSessionId((prev) => prev ?? list[0].id);
+          // Prefer URL-provided session when it matches one we own; else
+          // keep any in-memory pick; else fall back to first-in-list.
+          setSessionId((prev) => {
+            if (prev) return prev;
+            if (urlChatSessionId && list.some((s) => s.id === urlChatSessionId)) {
+              return urlChatSessionId;
+            }
+            return list[0].id;
+          });
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -196,6 +207,19 @@ export function EntityConversation({
     setAgentJob(null);
     setAgentStatus('');
   }, [entityId]);
+
+  // Reflect active session in URL as ?chat=<sid> so refresh + deep-link
+  // preserve which conversation is open (and therefore which active_job_id
+  // gets reattached by the session-detail fetch above). Guard outside
+  // setSearchParams — otherwise react-router still calls history.replaceState
+  // on no-op writes, re-rendering every useLocation consumer.
+  useEffect(() => {
+    if (!sessionId) return;
+    if (searchParams.get('chat') === sessionId) return;
+    const next = new URLSearchParams(searchParams);
+    next.set('chat', sessionId);
+    setSearchParams(next, { replace: true });
+  }, [sessionId, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!agentJob) return undefined;

@@ -1,0 +1,12 @@
+.route-message {
+  padding: var(--space-6, 24px);
+}
+
+.route-message--center {
+  text-align: center;
+  padding: var(--space-10, 48px) var(--space-6, 24px);
+}
+
+.route-message--center .btn-secondary {
+  margin-top: var(--space-4, 16px);
+}

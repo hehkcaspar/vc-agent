@@ -1,18 +1,35 @@
 import { useState, useEffect } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { Menu, ChevronLeft, ChevronRight, Briefcase, GraduationCap, Moon, Sun, Settings as SettingsIcon } from 'lucide-react';
 import { ChatModelProfileProvider } from '../context/ChatModelProfileContext';
 import { PortfolioTab } from './PortfolioTab';
 import { AcademicTab } from './academic/AcademicTab';
 import { SettingsPage } from './Settings/SettingsPage';
+import { EntityDetailRoute } from './routing/EntityDetailRoute';
+import { ScholarDetailRoute } from './routing/ScholarDetailRoute';
+import { NotFound } from './routing/NotFound';
 import './Layout.css';
 
 type TabId = 'portfolio' | 'academic' | 'settings';
 type Theme = 'light' | 'dark';
 
+function resolveActiveTab(pathname: string): TabId {
+  if (pathname.startsWith('/academic')) return 'academic';
+  if (pathname.startsWith('/settings')) return 'settings';
+  return 'portfolio';
+}
+
 function LayoutShell() {
-  const [activeTab, setActiveTab] = useState<TabId>('portfolio');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const activeTab = resolveActiveTab(location.pathname);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const goToTab = (tab: TabId) => {
+    navigate(`/${tab}`);
+    setIsMobileMenuOpen(false);
+  };
   
   // Theme state logic
   const [theme, setTheme] = useState<Theme>(() => {
@@ -53,24 +70,6 @@ function LayoutShell() {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
   };
 
-  const renderTab = () => {
-    switch (activeTab) {
-      case 'portfolio':
-        return <PortfolioTab />;
-      case 'academic':
-        return <AcademicTab />;
-      case 'settings':
-        return (
-          <SettingsPage
-            theme={theme}
-            onThemeChange={setTheme}
-            onNavigateTab={(tab) => setActiveTab(tab)}
-          />
-        );
-      default:
-        return <PortfolioTab />;
-    }
-  };
 
   return (
     <div className="layout">
@@ -109,20 +108,14 @@ function LayoutShell() {
         <nav className="sidebar-nav">
           <button
             className={`nav-item ${activeTab === 'portfolio' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('portfolio');
-              setIsMobileMenuOpen(false);
-            }}
+            onClick={() => goToTab('portfolio')}
           >
             <span className="nav-icon"><Briefcase size={18} /></span>
             <span className="nav-text">Portfolio</span>
           </button>
           <button
             className={`nav-item ${activeTab === 'academic' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('academic');
-              setIsMobileMenuOpen(false);
-            }}
+            onClick={() => goToTab('academic')}
           >
             <span className="nav-icon"><GraduationCap size={18} /></span>
             <span className="nav-text">Academic</span>
@@ -131,10 +124,7 @@ function LayoutShell() {
         <div className="sidebar-footer">
           <button
             className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('settings');
-              setIsMobileMenuOpen(false);
-            }}
+            onClick={() => goToTab('settings')}
           >
             <span className="nav-icon"><SettingsIcon size={18} /></span>
             <span className="nav-text">Settings</span>
@@ -148,7 +138,49 @@ function LayoutShell() {
 
       {/* Main Content */}
       <main className={`main-content ${isSidebarCollapsed ? 'expanded' : ''}`}>
-        {renderTab()}
+        <Routes>
+          <Route path="/" element={<Navigate to="/portfolio" replace />} />
+          <Route path="/portfolio" element={<PortfolioTab />} />
+          <Route path="/portfolio/new" element={<PortfolioTab />} />
+          <Route path="/portfolio/parking-lot" element={<PortfolioTab />} />
+          <Route
+            path="/portfolio/entities/:entityId"
+            element={<EntityDetailRoute />}
+          />
+          <Route
+            path="/portfolio/entities/:entityId/edit"
+            element={<EntityDetailRoute />}
+          />
+          <Route
+            path="/portfolio/entities/:entityId/:subTab"
+            element={<EntityDetailRoute />}
+          />
+          <Route path="/academic" element={<AcademicTab />} />
+          <Route path="/academic/new" element={<AcademicTab />} />
+          <Route
+            path="/academic/scholars/:scholarId"
+            element={<ScholarDetailRoute />}
+          />
+          <Route
+            path="/academic/scholars/:scholarId/:subTab"
+            element={<ScholarDetailRoute />}
+          />
+          <Route
+            path="/settings"
+            element={<Navigate to="/settings/funds" replace />}
+          />
+          <Route
+            path="/settings/:section"
+            element={
+              <SettingsPage
+                theme={theme}
+                onThemeChange={setTheme}
+                onNavigateTab={(tab) => navigate(`/${tab}`)}
+              />
+            }
+          />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
       </main>
     </div>
   );

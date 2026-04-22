@@ -1,17 +1,15 @@
 import { useMemo, useState } from 'react';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ParkingSquare, Building2, Pencil, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
 import { useEntities } from '../hooks/useEntities';
-import { useTabContext } from '../store/TabContext';
+import { useSetSearchParam } from '../hooks/useSetSearchParam';
 import { DealStage, Entity, StageFilter, StatusFilter } from '../types';
 import { api } from '../services/api';
-import { EntityDetail } from './EntityDetail';
 import { CreateEntityModal } from './CreateEntityModal';
 import { EditEntityModal } from './EditEntityModal';
 import { ParkingLotModal } from './ParkingLotModal';
 import { useParkingLotCount } from '../hooks/useParkingLot';
 import './PortfolioTab.css';
-
-const TAB_ID = 'portfolio';
 
 const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   prospect: 'Prospect',
@@ -56,26 +54,37 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   all: 'All',
 };
 
-/** Back-compat for stage filter values persisted before we redesigned the bar. */
-function normaliseStageFilter(value: StageFilter | undefined): StageFilter {
-  // 'active' was renamed to 'funnel' when the archive dim split out.
-  if ((value as string) === 'active') return 'funnel';
-  // 'all' was removed from the UI because it was visually redundant with
-  // 'funnel' for small portfolios; fall back to 'funnel' when loading.
-  if (value === 'all') return 'funnel';
-  return value ?? 'funnel';
+/** Normalise any inbound stage filter value (URL, legacy sessionStorage) to a
+ *  supported option. Legacy 'active' is migrated to 'funnel'; 'all' and any
+ *  unknown values also fall back to 'funnel'. */
+function normaliseStageFilter(value: string | null | undefined): StageFilter {
+  if (value === 'active') return 'funnel';
+  if (value && STAGE_FILTER_ORDER.includes(value as StageFilter) && value !== 'all') {
+    return value as StageFilter;
+  }
+  return 'funnel';
 }
 
 export function PortfolioTab() {
-  const { getTabState, setTabState } = useTabContext();
-  const savedState = getTabState(TAB_ID);
-  
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>(savedState?.viewMode ?? 'grid');
-  const [stageFilter, setStageFilter] = useState<StageFilter>(normaliseStageFilter(savedState?.stageFilter));
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedState?.statusFilter ?? 'active');
-  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isParkingLotOpen, setIsParkingLotOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const setSearchParam = useSetSearchParam();
+
+  const isCreateModalOpen = location.pathname === '/portfolio/new';
+  const isParkingLotOpen = location.pathname === '/portfolio/parking-lot';
+
+  const viewMode: 'list' | 'grid' =
+    searchParams.get('view') === 'list' ? 'list' : 'grid';
+  const stageFilter = normaliseStageFilter(searchParams.get('stage'));
+  const rawStatus = searchParams.get('status');
+  const statusFilter: StatusFilter = STATUS_FILTER_ORDER.includes(
+    rawStatus as StatusFilter,
+  )
+    ? (rawStatus as StatusFilter)
+    : 'active';
+
+
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Entity | null>(null);
   const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
@@ -124,34 +133,22 @@ export function PortfolioTab() {
     });
   }, [entities, stageFilter, statusFilter]);
 
-  const handleViewModeChange = (mode: 'list' | 'grid') => {
-    setViewMode(mode);
-    setTabState(TAB_ID, { viewMode: mode });
-  };
+  const handleViewModeChange = (mode: 'list' | 'grid') =>
+    setSearchParam('view', mode, 'grid');
 
-  const handleStageFilterChange = (next: StageFilter) => {
-    setStageFilter(next);
-    setTabState(TAB_ID, { stageFilter: next });
-  };
+  const handleStageFilterChange = (next: StageFilter) =>
+    setSearchParam('stage', next, 'funnel');
 
-  const handleStatusFilterChange = (next: StatusFilter) => {
-    setStatusFilter(next);
-    setTabState(TAB_ID, { statusFilter: next });
-  };
+  const handleStatusFilterChange = (next: StatusFilter) =>
+    setSearchParam('status', next, 'active');
 
   const handleEntitySelect = (entity: Entity) => {
-    setSelectedEntity(entity);
-    setTabState(TAB_ID, { selectedEntityId: entity.id });
-  };
-
-  const handleBack = () => {
-    setSelectedEntity(null);
-    setTabState(TAB_ID, { selectedEntityId: undefined });
+    navigate(`/portfolio/entities/${entity.id}`);
   };
 
   const handleEntityCreated = (entity: Entity) => {
     mutate();
-    setSelectedEntity(entity);
+    navigate(`/portfolio/entities/${entity.id}`);
   };
 
   const handleEntityUpdated = () => {
@@ -186,9 +183,6 @@ export function PortfolioTab() {
     setIsDeletingEntity(true);
     try {
       await api.entities.delete(deleteTarget.id);
-      if (selectedEntity?.id === deleteTarget.id) {
-        setSelectedEntity(null);
-      }
       setDeleteTarget(null);
       setDeleteStep(1);
       mutate();
@@ -199,15 +193,6 @@ export function PortfolioTab() {
     }
   };
 
-  if (selectedEntity) {
-    return (
-      <EntityDetail 
-        entity={selectedEntity} 
-        onBack={handleBack}
-      />
-    );
-  }
-
   return (
     <div className="portfolio-tab">
       <div className="portfolio-header">
@@ -215,7 +200,7 @@ export function PortfolioTab() {
         <div className="header-actions">
           <button 
             className={`parking-lot-button ${parkingLotCount > 0 ? 'has-items' : ''}`}
-            onClick={() => setIsParkingLotOpen(true)}
+            onClick={() => navigate('/portfolio/parking-lot')}
           >
             <ParkingSquare size={16} />
             Parking Lot
@@ -225,7 +210,7 @@ export function PortfolioTab() {
           </button>
           <button 
             className="btn-primary"
-            onClick={() => setIsCreateModalOpen(true)}
+            onClick={() => navigate('/portfolio/new')}
           >
             + Create Entity
           </button>
@@ -333,14 +318,14 @@ export function PortfolioTab() {
 
       {isCreateModalOpen && (
         <CreateEntityModal
-          onClose={() => setIsCreateModalOpen(false)}
+          onClose={() => navigate('/portfolio')}
           onSuccess={handleEntityCreated}
         />
       )}
 
       {isParkingLotOpen && (
         <ParkingLotModal
-          onClose={() => setIsParkingLotOpen(false)}
+          onClose={() => navigate('/portfolio')}
           onResolved={() => {
             mutate();
           }}
