@@ -19,6 +19,11 @@ ENV/
 .env
 **/.env
 backend/.env
+*.secret
+**/.secret
+
+# Firebase Hosting local cache (per-machine, not project state)
+**/.firebase/
 
 # Node
 node_modules/
