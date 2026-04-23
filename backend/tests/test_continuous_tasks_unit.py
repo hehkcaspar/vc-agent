@@ -1,11 +1,13 @@
 """Unit tests for the continuous-tasks management surface.
 
-Covers the two pieces of new logic:
+Covers two pieces of logic:
 
-1. `_health_from_log` — aggregate recent eval-log entries into
+1. ``_health_from_log`` — aggregate recent eval-log entries into
    per-task health metrics. Pure function, no I/O.
-2. `write_continuous_tasks` — validate-then-write helper. Uses a
-   tmpdir; verifies that a broken patch leaves the file untouched.
+2. Overrides-backed read/write path — exercise the seed + sparse
+   overrides architecture end-to-end: ``set_override`` writes,
+   ``load_continuous_tasks`` merges, ``validate_merged`` rejects
+   invalid patches before they'd hit disk.
 """
 
 from __future__ import annotations
@@ -19,9 +21,10 @@ import pytest
 from pydantic import ValidationError
 
 from app.routers.academic import _health_from_log
+from app.services.academic import continuous_overrides as co
 from app.services.academic.continuous_config import (
     load_continuous_tasks,
-    write_continuous_tasks,
+    validate_merged,
 )
 
 
@@ -152,52 +155,68 @@ _MINIMAL_CONFIG: dict = {
 }
 
 
-class TestWriteContinuousTasks:
-    """Validate-then-write helper must leave the file untouched on error."""
+class TestOverridesBackedRoundTrip:
+    """Exercise the seed + sparse-overrides architecture end-to-end.
+
+    Setup: a tmp seed file (full valid config) + a tmp overrides file
+    that starts empty. ``set_override`` writes deltas; reloads merge;
+    ``validate_merged`` is the gate that catches bad values before
+    they'd ever get persisted (the router uses the same gate).
+    """
 
     @pytest.fixture
-    def sample_config(self) -> dict:
-        return copy.deepcopy(_MINIMAL_CONFIG)
+    def seed_and_overrides(self, tmp_path: Path) -> tuple[Path, Path]:
+        seed = tmp_path / "seed.json"
+        seed.write_text(
+            json.dumps(copy.deepcopy(_MINIMAL_CONFIG)), encoding="utf-8",
+        )
+        overrides = tmp_path / "continuous_tasks_overrides.json"
+        return seed, overrides
 
-    def test_write_and_reload_round_trip(
-        self, tmp_path: Path, sample_config: dict
+    def test_override_round_trip(
+        self, seed_and_overrides: tuple[Path, Path]
     ) -> None:
-        target = tmp_path / "continuous_tasks.json"
-        target.write_text(json.dumps(sample_config))
-        mutated = copy.deepcopy(sample_config)
-        mutated["sources"]["news_web"]["default_cadence_days"] = 3
-
-        write_continuous_tasks(mutated, path=target)
-        reloaded = load_continuous_tasks(path=target)
+        seed, overrides = seed_and_overrides
+        co.set_override(
+            "source", "news_web", "default_cadence_days", 3,
+            path=overrides,
+        )
+        reloaded = load_continuous_tasks(
+            seed_path=seed, overrides_path=overrides,
+        )
         assert reloaded.sources["news_web"].default_cadence_days == 3
+        # Seed sibling fields survive
+        assert reloaded.sources["news_web"].enabled is True
 
-    def test_invalid_patch_is_rejected_and_file_untouched(
-        self, tmp_path: Path, sample_config: dict
+    def test_invalid_merged_config_rejected_without_persist(
+        self, seed_and_overrides: tuple[Path, Path]
     ) -> None:
-        target = tmp_path / "continuous_tasks.json"
-        original_text = json.dumps(sample_config, indent=2)
-        target.write_text(original_text)
-
-        broken = copy.deepcopy(sample_config)
-        broken["sources"]["news_web"]["default_cadence_days"] = 0  # ge=1 fails
-
+        seed, overrides = seed_and_overrides
+        # Build what the merged config WOULD look like after a bad
+        # patch. The router calls validate_merged BEFORE set_override,
+        # so an invalid patch never hits disk.
+        seed_raw = json.loads(seed.read_text())
+        pending_overrides = {
+            "sources": {"news_web": {"default_cadence_days": 0}}  # ge=1 fails
+        }
+        merged = co.deep_merge(seed_raw, pending_overrides)
         with pytest.raises(ValidationError):
-            write_continuous_tasks(broken, path=target)
-
-        # File on disk is unchanged.
-        assert target.read_text() == original_text
+            validate_merged(merged)
+        # Overrides file untouched (validator is called before write).
+        assert not overrides.exists()
 
     def test_broken_cross_ref_rejected(
-        self, tmp_path: Path, sample_config: dict
+        self, seed_and_overrides: tuple[Path, Path]
     ) -> None:
-        target = tmp_path / "continuous_tasks.json"
-        target.write_text(json.dumps(sample_config))
-
-        broken = copy.deepcopy(sample_config)
-        # Point an existing dim at a nonexistent source.
-        broken["dimensions"]["academic_excellence"]["required_sources"] = [
-            "this_source_does_not_exist"
-        ]
-
+        seed, _overrides = seed_and_overrides
+        seed_raw = json.loads(seed.read_text())
+        pending_overrides = {
+            "dimensions": {
+                "academic_excellence": {
+                    "required_sources": ["this_source_does_not_exist"],
+                }
+            }
+        }
+        merged = co.deep_merge(seed_raw, pending_overrides)
         with pytest.raises(ValueError, match="unknown source"):
-            write_continuous_tasks(broken, path=target)
+            validate_merged(merged)

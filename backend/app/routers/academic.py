@@ -461,10 +461,21 @@ async def refresh_scholar(
 
 
 def _normalize_paper(raw: dict, ss_author_id: str | None) -> dict:
-    """Map raw SS API paper dict to PaperResponse-compatible shape."""
-    # Author position
-    position = None
-    if ss_author_id:
+    """Map raw paper dict (SS / GS / stub shape) to PaperResponse shape.
+
+    Author position resolution order:
+        1. Row-level ``_author_position`` (set by google_scholar_papers
+           via name-match heuristic — present on GS-primary rows).
+        2. authorId match against ``ss_author_id`` (authoritative; set
+           after SS enrichment).
+        3. None.
+    """
+    # Prefer the row-level `_author_position` when present (GS path).
+    position = raw.get("_author_position")
+    if position not in ("first", "last", "middle", "sole"):
+        position = None
+
+    if position is None and ss_author_id:
         authors = raw.get("authors") or []
         n = len(authors)
         for i, a in enumerate(authors):
@@ -502,6 +513,14 @@ def _normalize_paper(raw: dict, ss_author_id: str | None) -> dict:
         "fields_of_study": fos,
         "ss_paper_id": raw.get("id"),
         "author_position": position,
+        # Provenance passthroughs for the frontend badge logic.
+        # `is_stub` is the live state; `was_stub` is sticky — once a
+        # row started life as a routed stub, that remains part of its
+        # audit trail even after GS/SS enrich it away.
+        "source": raw.get("_source"),
+        "is_stub": bool(raw.get("_stub")),
+        "was_ss": bool(raw.get("_was_ss")),
+        "was_stub": bool(raw.get("_was_stub") or raw.get("_stub")),
     }
 
 
@@ -1242,7 +1261,12 @@ from pydantic import ValidationError
 from ..services.academic.continuous_config import (
     load_continuous_tasks,
     load_raw_continuous_tasks,
-    write_continuous_tasks,
+    validate_merged,
+)
+from ..services.academic.continuous_overrides import (
+    load_overrides,
+    save_overrides,
+    set_override,
 )
 from ..services.academic.eval_log import log_eval, log_step
 from ..services.academic.evaluation_service import (
@@ -1418,64 +1442,74 @@ async def patch_continuous_task(
 ):
     """Update one task's enabled / cadence / priority overrides.
 
-    Validates the whole config against the Pydantic schema before
-    writing, so the file is never left in a broken state. Emits an
-    audit entry to the eval log with the diff.
+    Writes ONLY the delta to ``continuous_tasks_overrides.json``.
+    The effective config (seed + overrides, merged in memory) is
+    re-validated against the Pydantic schema BEFORE the override is
+    persisted, so we reject bad patches without ever touching disk.
+    Emits an audit entry to the eval log with the diff.
     """
     if kind not in _VALID_KINDS:
         raise HTTPException(
             422, f"Unknown kind '{kind}'. Expected one of: {sorted(_VALID_KINDS)}"
         )
 
-    raw = load_raw_continuous_tasks()
+    # Current effective (pre-patch) — used to compute the diff for
+    # the audit log AND to validate that the task actually exists in
+    # the seed.
+    effective_before = load_raw_continuous_tasks()
 
-    # Locate the target slot. Sources and dimensions are keyed maps;
-    # phase_classifier and narrative_synthesizer are fixed singletons
-    # (the `task_id` path param must match the slot name for those).
     if kind == "source":
-        bucket = raw.get("sources") or {}
-        if task_id not in bucket:
+        if task_id not in (effective_before.get("sources") or {}):
             raise HTTPException(404, f"Source '{task_id}' not found")
-        target = bucket[task_id]
+        pre_state = effective_before["sources"][task_id]
     elif kind == "dimension":
-        bucket = raw.get("dimensions") or {}
-        if task_id not in bucket:
+        if task_id not in (effective_before.get("dimensions") or {}):
             raise HTTPException(404, f"Dimension '{task_id}' not found")
-        target = bucket[task_id]
+        pre_state = effective_before["dimensions"][task_id]
     elif kind == "phase_classifier":
         if task_id != "phase_classifier":
             raise HTTPException(
                 422, "For kind=phase_classifier the task_id must be 'phase_classifier'"
             )
-        target = raw.setdefault("phase_classifier", {})
+        pre_state = effective_before.get("phase_classifier") or {}
     else:  # narrative_synthesizer
         if task_id != "narrative_synthesizer":
             raise HTTPException(
                 422,
                 "For kind=narrative_synthesizer the task_id must be 'narrative_synthesizer'",
             )
-        target = raw.setdefault("narrative_synthesizer", {})
+        pre_state = effective_before.get("narrative_synthesizer") or {}
 
     patch = body.model_dump(exclude_unset=True)
     if not patch:
         raise HTTPException(422, "No fields to update")
     changes: dict = {}
     for k, v in patch.items():
-        if target.get(k) != v:
-            changes[k] = {"from": target.get(k), "to": v}
-        target[k] = v
+        if pre_state.get(k) != v:
+            changes[k] = {"from": pre_state.get(k), "to": v}
 
-    # Validate + atomic write. `ValidationError` comes from the
-    # Pydantic schema (e.g. `default_cadence_days=0`); `ValueError`
-    # comes from `validate_cross_refs` (e.g. a dim referencing a
-    # source the patch just disabled — doesn't apply here today but
-    # future patches might). Both are caller-fixable → 422.
+    # Dry-run validation: assemble what the overrides-file WOULD look
+    # like after persisting, merge with the seed, and Pydantic-validate
+    # the result before touching disk. Rejects invalid patches
+    # (bad cadence, deleted source, ...) without leaving mutable state.
+    import json as _json
+    from ..services.academic.continuous_config import SEED_PATH
+    from ..services.academic.continuous_overrides import deep_merge
+
+    pending_overrides = load_overrides()
+    _apply_patch_to_overrides(pending_overrides, kind, task_id, patch)
     try:
-        write_continuous_tasks(raw)
-    except ValidationError as e:
+        seed_raw = _json.loads(SEED_PATH.read_text(encoding="utf-8"))
+        merged = deep_merge(seed_raw, pending_overrides)
+        validate_merged(merged)
+    except (ValidationError, ValueError) as e:
         raise HTTPException(422, f"Invalid config after patch: {e}")
-    except ValueError as e:
-        raise HTTPException(422, f"Invalid config after patch: {e}")
+
+    # Persist one leaf at a time through the public helper so file
+    # contention stays minimal and the audit in the overrides module
+    # kicks in per write.
+    for k, v in patch.items():
+        set_override(kind, task_id, k, v)
 
     # Audit entry — scholar_id sentinel keeps it out of per-scholar
     # filters but still visible in the global Activity Log.
@@ -1488,6 +1522,20 @@ async def patch_continuous_task(
     )
 
     return _build_tasks_response()
+
+
+def _apply_patch_to_overrides(
+    overrides: dict, kind: str, task_id: str, patch: dict,
+) -> None:
+    """Mutate the overrides dict in-place the same way ``set_override``
+    would — used for dry-run validation BEFORE we touch disk.
+    """
+    if kind == "source":
+        overrides.setdefault("sources", {}).setdefault(task_id, {}).update(patch)
+    elif kind == "dimension":
+        overrides.setdefault("dimensions", {}).setdefault(task_id, {}).update(patch)
+    elif kind in ("phase_classifier", "narrative_synthesizer"):
+        overrides.setdefault(kind, {}).update(patch)
 
 
 @router.post("/continuous-tasks/{kind}/{task_id}/run-now")

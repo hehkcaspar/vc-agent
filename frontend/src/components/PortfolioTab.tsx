@@ -1,17 +1,15 @@
 import { useMemo, useState } from 'react';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ParkingSquare, Building2, Pencil, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
 import { useEntities } from '../hooks/useEntities';
-import { useTabContext } from '../store/TabContext';
+import { useSetSearchParam } from '../hooks/useSetSearchParam';
 import { DealStage, Entity, StageFilter, StatusFilter } from '../types';
 import { api } from '../services/api';
-import { EntityDetail } from './EntityDetail';
 import { CreateEntityModal } from './CreateEntityModal';
 import { EditEntityModal } from './EditEntityModal';
 import { ParkingLotModal } from './ParkingLotModal';
 import { useParkingLotCount } from '../hooks/useParkingLot';
 import './PortfolioTab.css';
-
-const TAB_ID = 'portfolio';
 
 const DEAL_STAGE_LABELS: Record<DealStage, string> = {
   prospect: 'Prospect',
@@ -56,26 +54,37 @@ const STATUS_FILTER_LABELS: Record<StatusFilter, string> = {
   all: 'All',
 };
 
-/** Back-compat for stage filter values persisted before we redesigned the bar. */
-function normaliseStageFilter(value: StageFilter | undefined): StageFilter {
-  // 'active' was renamed to 'funnel' when the archive dim split out.
-  if ((value as string) === 'active') return 'funnel';
-  // 'all' was removed from the UI because it was visually redundant with
-  // 'funnel' for small portfolios; fall back to 'funnel' when loading.
-  if (value === 'all') return 'funnel';
-  return value ?? 'funnel';
+/** Normalise any inbound stage filter value (URL, legacy sessionStorage) to a
+ *  supported option. Legacy 'active' is migrated to 'funnel'; 'all' and any
+ *  unknown values also fall back to 'funnel'. */
+function normaliseStageFilter(value: string | null | undefined): StageFilter {
+  if (value === 'active') return 'funnel';
+  if (value && STAGE_FILTER_ORDER.includes(value as StageFilter) && value !== 'all') {
+    return value as StageFilter;
+  }
+  return 'funnel';
 }
 
 export function PortfolioTab() {
-  const { getTabState, setTabState } = useTabContext();
-  const savedState = getTabState(TAB_ID);
-  
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>(savedState?.viewMode ?? 'grid');
-  const [stageFilter, setStageFilter] = useState<StageFilter>(normaliseStageFilter(savedState?.stageFilter));
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>(savedState?.statusFilter ?? 'active');
-  const [selectedEntity, setSelectedEntity] = useState<Entity | null>(null);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isParkingLotOpen, setIsParkingLotOpen] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const setSearchParam = useSetSearchParam();
+
+  const isCreateModalOpen = location.pathname === '/portfolio/new';
+  const isParkingLotOpen = location.pathname === '/portfolio/parking-lot';
+
+  const viewMode: 'list' | 'grid' =
+    searchParams.get('view') === 'list' ? 'list' : 'grid';
+  const stageFilter = normaliseStageFilter(searchParams.get('stage'));
+  const rawStatus = searchParams.get('status');
+  const statusFilter: StatusFilter = STATUS_FILTER_ORDER.includes(
+    rawStatus as StatusFilter,
+  )
+    ? (rawStatus as StatusFilter)
+    : 'active';
+
+
   const [editingEntity, setEditingEntity] = useState<Entity | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Entity | null>(null);
   const [deleteStep, setDeleteStep] = useState<1 | 2>(1);
@@ -124,34 +133,18 @@ export function PortfolioTab() {
     });
   }, [entities, stageFilter, statusFilter]);
 
-  const handleViewModeChange = (mode: 'list' | 'grid') => {
-    setViewMode(mode);
-    setTabState(TAB_ID, { viewMode: mode });
-  };
+  const handleViewModeChange = (mode: 'list' | 'grid') =>
+    setSearchParam('view', mode, 'grid');
 
-  const handleStageFilterChange = (next: StageFilter) => {
-    setStageFilter(next);
-    setTabState(TAB_ID, { stageFilter: next });
-  };
+  const handleStageFilterChange = (next: StageFilter) =>
+    setSearchParam('stage', next, 'funnel');
 
-  const handleStatusFilterChange = (next: StatusFilter) => {
-    setStatusFilter(next);
-    setTabState(TAB_ID, { statusFilter: next });
-  };
-
-  const handleEntitySelect = (entity: Entity) => {
-    setSelectedEntity(entity);
-    setTabState(TAB_ID, { selectedEntityId: entity.id });
-  };
-
-  const handleBack = () => {
-    setSelectedEntity(null);
-    setTabState(TAB_ID, { selectedEntityId: undefined });
-  };
+  const handleStatusFilterChange = (next: StatusFilter) =>
+    setSearchParam('status', next, 'active');
 
   const handleEntityCreated = (entity: Entity) => {
     mutate();
-    setSelectedEntity(entity);
+    navigate(`/portfolio/entities/${entity.id}`);
   };
 
   const handleEntityUpdated = () => {
@@ -186,9 +179,6 @@ export function PortfolioTab() {
     setIsDeletingEntity(true);
     try {
       await api.entities.delete(deleteTarget.id);
-      if (selectedEntity?.id === deleteTarget.id) {
-        setSelectedEntity(null);
-      }
       setDeleteTarget(null);
       setDeleteStep(1);
       mutate();
@@ -199,23 +189,14 @@ export function PortfolioTab() {
     }
   };
 
-  if (selectedEntity) {
-    return (
-      <EntityDetail 
-        entity={selectedEntity} 
-        onBack={handleBack}
-      />
-    );
-  }
-
   return (
     <div className="portfolio-tab">
       <div className="portfolio-header">
-        <h2>Portfolio</h2>
+        <h1>Portfolio</h1>
         <div className="header-actions">
           <button 
             className={`parking-lot-button ${parkingLotCount > 0 ? 'has-items' : ''}`}
-            onClick={() => setIsParkingLotOpen(true)}
+            onClick={() => navigate('/portfolio/parking-lot')}
           >
             <ParkingSquare size={16} />
             Parking Lot
@@ -225,7 +206,7 @@ export function PortfolioTab() {
           </button>
           <button 
             className="btn-primary"
-            onClick={() => setIsCreateModalOpen(true)}
+            onClick={() => navigate('/portfolio/new')}
           >
             + Create Entity
           </button>
@@ -306,7 +287,6 @@ export function PortfolioTab() {
               <EntityRow
                 key={entity.id}
                 entity={entity}
-                onClick={() => handleEntitySelect(entity)}
                 onEdit={(e) => {
                   e.stopPropagation();
                   setEditingEntity(entity);
@@ -318,7 +298,6 @@ export function PortfolioTab() {
               <EntityCard
                 key={entity.id}
                 entity={entity}
-                onClick={() => handleEntitySelect(entity)}
                 onEdit={(e) => {
                   e.stopPropagation();
                   setEditingEntity(entity);
@@ -333,14 +312,14 @@ export function PortfolioTab() {
 
       {isCreateModalOpen && (
         <CreateEntityModal
-          onClose={() => setIsCreateModalOpen(false)}
+          onClose={() => navigate('/portfolio')}
           onSuccess={handleEntityCreated}
         />
       )}
 
       {isParkingLotOpen && (
         <ParkingLotModal
-          onClose={() => setIsParkingLotOpen(false)}
+          onClose={() => navigate('/portfolio')}
           onResolved={() => {
             mutate();
           }}
@@ -426,10 +405,20 @@ function StageChip({ stage }: { stage: DealStage }) {
   );
 }
 
-function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
+function EntityRow({ entity, onEdit, onArchive, onDelete }: { entity: Entity; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   const isArchived = entity.status === 'archived';
+  // Action buttons cancel the Link's navigation so clicking Edit/Archive/Delete
+  // does not also open the entity detail page.
+  const wrap = (fn: (e: React.MouseEvent) => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    fn(e);
+  };
   return (
-    <div className={`entity-row ${isArchived ? 'archived' : ''}`} onClick={onClick}>
+    <Link
+      to={`/portfolio/entities/${entity.id}`}
+      className={`entity-row ${isArchived ? 'archived' : ''}`}
+      aria-label={`Open ${entity.name}`}
+    >
       <div className="entity-row-icon"><Building2 size={20} /></div>
       <div className="entity-row-info">
         <div className="entity-row-name">
@@ -443,54 +432,74 @@ function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: E
       <StageChip stage={entity.deal_stage} />
       <div className="entity-row-actions">
         <button
+          type="button"
           className="btn-icon"
-          onClick={onEdit}
+          onClick={wrap(onEdit)}
           title="Edit entity"
+          aria-label={`Edit ${entity.name}`}
         >
           <Pencil size={14} />
         </button>
         <button
+          type="button"
           className="btn-icon archive-btn"
-          onClick={onArchive}
+          onClick={wrap(onArchive)}
           title={isArchived ? 'Unarchive entity' : 'Archive entity'}
+          aria-label={`${isArchived ? 'Unarchive' : 'Archive'} ${entity.name}`}
         >
           {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </button>
         <button
+          type="button"
           className="btn-icon delete-btn"
-          onClick={onDelete}
+          onClick={wrap(onDelete)}
           title="Delete entity"
+          aria-label={`Delete ${entity.name}`}
         >
           <Trash2 size={14} />
         </button>
       </div>
-    </div>
+    </Link>
   );
 }
 
-function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
+function EntityCard({ entity, onEdit, onArchive, onDelete }: { entity: Entity; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   const isArchived = entity.status === 'archived';
+  const wrap = (fn: (e: React.MouseEvent) => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    fn(e);
+  };
   return (
-    <div className={`entity-card ${isArchived ? 'archived' : ''}`} onClick={onClick}>
+    <Link
+      to={`/portfolio/entities/${entity.id}`}
+      className={`entity-card ${isArchived ? 'archived' : ''}`}
+      aria-label={`Open ${entity.name}`}
+    >
       <div className="card-actions">
         <button
+          type="button"
           className="btn-icon card-edit-btn"
-          onClick={onEdit}
+          onClick={wrap(onEdit)}
           title="Edit entity"
+          aria-label={`Edit ${entity.name}`}
         >
           <Pencil size={14} />
         </button>
         <button
+          type="button"
           className="btn-icon card-archive-btn"
-          onClick={onArchive}
+          onClick={wrap(onArchive)}
           title={isArchived ? 'Unarchive entity' : 'Archive entity'}
+          aria-label={`${isArchived ? 'Unarchive' : 'Archive'} ${entity.name}`}
         >
           {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </button>
         <button
+          type="button"
           className="btn-icon card-delete-btn"
-          onClick={onDelete}
+          onClick={wrap(onDelete)}
           title="Delete entity"
+          aria-label={`Delete ${entity.name}`}
         >
           <Trash2 size={14} />
         </button>
@@ -507,6 +516,6 @@ function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: 
         {entity.website || 'No website'}<br />
         Updated {new Date(entity.updated_at).toLocaleDateString()}
       </div>
-    </div>
+    </Link>
   );
 }

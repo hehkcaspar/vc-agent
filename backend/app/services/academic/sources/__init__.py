@@ -6,6 +6,7 @@ API. `refresh_dispatcher.trigger_refresh` routes by module name.
 """
 
 from . import (
+    google_scholar_papers,
     google_scholar_stats,
     news_web,
     patents_web,
@@ -15,6 +16,7 @@ from . import (
 )
 
 __all__ = [
+    "google_scholar_papers",
     "semantic_scholar_papers",
     "google_scholar_stats",
     "patents_web",

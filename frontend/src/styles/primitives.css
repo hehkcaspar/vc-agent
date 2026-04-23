@@ -4,6 +4,30 @@
  * Keyframes fadeIn / slideUp live in global.css.
  * ──────────────────────────────────────────────────────────── */
 
+/* ── Global keyboard focus ring ─────────────────────────────
+ * Applied only with :focus-visible so mouse clicks don't show the
+ * ring. Uses the gold accent so it's clearly distinguishable from
+ * the slate active state on form inputs / primary buttons.
+ * Individual components can still opt out with their own
+ * `&:focus-visible { outline: ...; }` override.
+ * ──────────────────────────────────────────────────────────── */
+:where(
+  a,
+  button,
+  input,
+  select,
+  textarea,
+  summary,
+  [role="button"],
+  [role="tab"],
+  [role="link"],
+  [tabindex]:not([tabindex="-1"])
+):focus-visible {
+  outline: 2px solid var(--color-accent-gold);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
 /* ── Modal ─────────────────────────────────────────────────── */
 
 .modal-overlay {

@@ -16,6 +16,7 @@ from ..attributed_metrics import compute_attributed_metrics
 from ..events_sync import log_event, paper_significance
 from ..fact_store import record_snapshot
 from ..file_utils import dossier_path, read_json, write_json
+from ..papers_merge import _merge_papers_by_priority, normalize_ledger_row
 from ..semantic_scholar import SemanticScholarService
 
 logger = logging.getLogger(__name__)
@@ -62,13 +63,31 @@ async def run(
 
     papers_path = dossier_path(scholar_id) / "papers.json"
     prev = read_json(papers_path)
-    prev_ids = {p.get("id") for p in (prev.get("items") or []) if isinstance(p, dict)}
+    prev_items = [
+        normalize_ledger_row(p)
+        for p in (prev.get("items") or []) if isinstance(p, dict)
+    ]
+    prev_ids = {p.get("id") for p in prev_items if p.get("id")}
     new_ids = {p.get("id") for p in papers if p.get("id")}
-    changed = prev_ids != new_ids
 
-    write_json(papers_path, {"items": papers, "count": len(papers)})
+    # Enrichment pass — SS runs alongside google_scholar_papers as a
+    # co-primary. GS owns recency; SS enriches matched titles with
+    # authorId / DOI / s2_fields / influential_citations. Merge logic
+    # (papers_merge.py) encodes the priority matrix.
+    merged_items = _merge_papers_by_priority(
+        papers, prev_items, incoming_source="semantic_scholar",
+    )
+    changed = (
+        prev_ids != new_ids
+        or len(merged_items) != len(prev_items)
+    )
 
-    metrics = compute_attributed_metrics(papers, ss_id)
+    write_json(papers_path, {"items": merged_items, "count": len(merged_items)})
+
+    # Attributed metrics draw on the MERGED ledger so GS-only papers
+    # participate via their _author_position heuristic; SS-enriched
+    # papers use their authorId.
+    metrics = compute_attributed_metrics(merged_items, ss_id)
     write_json(dossier_path(scholar_id) / "attributed_metrics.json", metrics)
 
     # Mirror newly-discovered papers to the timeline + signal feed.
@@ -117,7 +136,8 @@ async def run(
         detail={
             "mode": mode,
             "reason": reason,
-            "paper_count": len(papers),
+            "paper_count": len(papers),          # what SS returned
+            "merged_count": len(merged_items),   # size of the ledger after merge
             "changed": changed,
             "events_logged": newly_added_events,
         },
@@ -127,6 +147,7 @@ async def run(
         "changed": changed,
         "snapshot_id": snapshot_id,
         "paper_count": len(papers),
+        "merged_count": len(merged_items),
         "events_logged": newly_added_events,
     }
 

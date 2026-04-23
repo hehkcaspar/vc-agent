@@ -171,8 +171,11 @@ export interface Paper {
   fields_of_study: string[];
   ss_paper_id?: string | null;
   url?: string | null;
-  source?: string | null;
+  source?: string | null;             // "google_scholar" | "semantic_scholar"
   author_position?: string | null;
+  is_stub?: boolean;                  // currently a routed-stub record
+  was_ss?: boolean;                   // SS has enriched this row
+  was_stub?: boolean;                 // row originated as a routed stub
 }
 
 export interface PapersSummary {

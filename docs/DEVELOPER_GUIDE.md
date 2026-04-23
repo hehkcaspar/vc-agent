@@ -258,13 +258,20 @@ Single source of truth for modal chrome, buttons, and form controls lives in `fr
     </form>
   </Modal>
   ```
-  Does **not** implement a focus trap. If you need one, wrap children with a focus-trap library.
+  Implements a **focus trap** (see `getFocusables` helper + two `useEffect`s in `Modal.tsx`):
+  - On open: remembers `document.activeElement`; after paint, focuses the first non-close focusable inside `.modal` (or respects a child's `autoFocus`).
+  - Tab / Shift+Tab cycle forward/backward within the modal; reaching the last/first element wraps.
+  - On close: restores focus to the remembered trigger element, provided focus is still inside the modal at that moment (so post-close UX that moves focus elsewhere isn't overridden).
+  No external library needed.
 - **Buttons** — `.btn-primary`, `.btn-secondary`, `.btn-text`, `.btn-icon`, `.btn-icon-danger`, plus `.btn-sm` size modifier. All in `primitives.css`. Primary and secondary share an uppercase, letter-spaced editorial style.
 - **Form controls** — `primitives.css` supports both conventions side by side:
   - `.form-group > label` / `.form-group > input` (nested selector style) — used by `CreateEntityModal`, `EditEntityModal`, `FileUploadModal`
   - `.form-label` + `.form-input` classes — used by `AddScholarModal`, `AcademicTab` Custom Dimensions
   Use whichever fits; don't mix in a single form.
 - **Icons** — all UI chrome uses [`lucide-react`](https://lucide.dev). No emoji or HTML-entity glyphs (▶ ✏ 🗑 ▼ × ← →) in JSX. Emoji is reserved for content (user text, LLM output, persisted event payloads). Sizes 12–20 px typical; match nearby usage.
+- **Focus ring** — `primitives.css` ships a global `:focus-visible` outline (2 px `--color-accent-gold`, 2 px offset) on `a, button, input, select, textarea, summary, [role="button"], [role="tab"], [role="link"], [tabindex]:not([tabindex="-1"])`. Applied via `:where(...)` so component-scoped `:focus-visible` rules can override without specificity wars. Keyboard-only — `:focus-visible` (not `:focus`) so mouse clicks don't show the ring.
+- **Tablist keyboard pattern** — follow W3C APG: only the active tab has `tabIndex=0`, others are `-1`; `ArrowLeft`/`ArrowRight`/`Home`/`End` on the `[role="tablist"]` container cycle focus and activation. Reference implementation: `EntityDetail.tsx` (handler `handleTablistKeyDown` + `pendingTabFocusRef` + post-commit `useEffect` that pulls focus to the new active tab after React commits the `aria-selected` flip).
+- **Semantic navigation** — clickable rows/cards that navigate must be `<Link>` (or `<a>`), not `<div onClick>`. Nested action buttons use `e.preventDefault()` to cancel the anchor navigation while keeping their own handler. Reference: `EntityCard` / `EntityRow` in `PortfolioTab.tsx`.
 - **Shared event icon map** — `frontend/src/lib/eventIcons.tsx` exports `EVENT_ICONS` and `<EventIcon type={…} />`, used by both the academic `AcademicTab` signal feed and `TimelineTab`.
 
 ### State Management

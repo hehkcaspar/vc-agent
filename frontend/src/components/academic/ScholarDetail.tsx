@@ -28,21 +28,35 @@ import {
 } from '../../types/academic';
 import { useScholars } from '../../hooks/useAcademic';
 
-export type ContentTab = 'report' | 'timeline' | 'evaluation' | 'publications' | 'profiles' | 'chat';
+export const CONTENT_TABS = [
+  'report',
+  'timeline',
+  'evaluation',
+  'publications',
+  'profiles',
+  'chat',
+] as const;
+export type ContentTab = (typeof CONTENT_TABS)[number];
 
 interface ScholarDetailProps {
   scholar: Scholar;
   onBack: () => void;
-  initialTab?: ContentTab;
+  contentTab: ContentTab;
+  onContentTabChange: (tab: ContentTab) => void;
 }
 
-export function ScholarDetail({ scholar: scholarProp, onBack, initialTab = 'report' }: ScholarDetailProps) {
+export function ScholarDetail({
+  scholar: scholarProp,
+  onBack,
+  contentTab,
+  onContentTabChange,
+}: ScholarDetailProps) {
   const { scholars: allScholars, mutate: mutateScholars } = useScholars();
   const scholar = allScholars.find((s) => s.id === scholarProp.id) ?? scholarProp;
   const { narratives, mutate: mutateNarratives } = useScholarNarratives(scholar.id);
   const { papersData, mutate: mutatePapers } = useScholarPapers(scholar.id);
   const { evalData, mutate: mutateEvaluations } = useScholarEvaluations(scholar.id);
-  const [eventSortBy, setEventSortBy] = useState<'discovered' | 'event_date'>('discovered');
+  const [eventSortBy, setEventSortBy] = useState<'discovered' | 'event_date'>('event_date');
   const { events, mutate: mutateEvents } = useScholarEvents(scholar.id, eventSortBy);
   const { channels, mutate: mutateChannels } = useScholarChannels(scholar.id);
 
@@ -60,7 +74,6 @@ export function ScholarDetail({ scholar: scholarProp, onBack, initialTab = 'repo
 
   const [selectedNarrativeIdx, setSelectedNarrativeIdx] = useState(0);
   const [isEvaluating, setIsEvaluating] = useState(false);
-  const [contentTab, setContentTab] = useState<ContentTab>(initialTab);
   const [versionDropdownOpen, setVersionDropdownOpen] = useState(false);
   const [showConfirmEval, setShowConfirmEval] = useState(false);
   const versionSelectorRef = useRef<HTMLDivElement>(null);
@@ -190,7 +203,7 @@ export function ScholarDetail({ scholar: scholarProp, onBack, initialTab = 'repo
         <button className="btn-back" onClick={onBack}><ArrowLeft size={14} /> Back</button>
         <div className="academic-detail-title">
           <div className="header-top-row">
-            <h2>{scholar.name}</h2>
+            <h1>{scholar.name}</h1>
             <TagMenu<UserSettableStatus>
               label={SCHOLAR_STATUS_LABELS[scholar.status] ?? scholar.status}
               toneClass={`status-${scholar.status}`}
@@ -307,7 +320,7 @@ export function ScholarDetail({ scholar: scholarProp, onBack, initialTab = 'repo
             <button
               key={tab}
               className={`content-tab ${contentTab === tab ? 'active' : ''}`}
-              onClick={() => setContentTab(tab)}
+              onClick={() => onContentTabChange(tab)}
             >
               {tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
@@ -450,18 +463,20 @@ export function ScholarDetail({ scholar: scholarProp, onBack, initialTab = 'repo
 function NarrativeReportView({ narrative }: { narrative: NarrativeReport }) {
   // Compose the narrative as a markdown document so the existing
   // ReactMarkdown renderer in the report panel does the layout.
+  // Scholar's name is the page h1 (rendered in the detail header). The
+  // narrative's headline is the h2; its subsections are h3s.
   const md = [
-    `# ${narrative.headline}`,
+    `## ${narrative.headline}`,
     '',
     narrative.summary,
     '',
     narrative.red_flag_banner ? `> ⚠ **Red flags**\n>\n> ${narrative.red_flag_banner}` : '',
-    narrative.per_dim_highlights.length > 0 ? '## Dimension highlights' : '',
+    narrative.per_dim_highlights.length > 0 ? '### Dimension highlights' : '',
     ...narrative.per_dim_highlights.map(
       (h) => `- **${DIMENSION_LABELS[h.dimension_id] ?? h.dimension_id}** — ${h.highlight}`,
     ),
     '',
-    narrative.open_questions.length > 0 ? '## Open questions' : '',
+    narrative.open_questions.length > 0 ? '### Open questions' : '',
     ...narrative.open_questions.map((q) => `- ${q}`),
   ]
     .filter(Boolean)

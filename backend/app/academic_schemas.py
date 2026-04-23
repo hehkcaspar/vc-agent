@@ -208,8 +208,11 @@ class PaperResponse(BaseModel):
     fields_of_study: list[str] = []
     ss_paper_id: Optional[str] = None
     url: Optional[str] = None
-    source: Optional[str] = None
+    source: Optional[str] = None       # "google_scholar" | "semantic_scholar" | None
     author_position: Optional[str] = None
+    is_stub: bool = False              # destination-routed stub, still unverified
+    was_ss: bool = False               # SS enriched this row at some point
+    was_stub: bool = False             # row started life as a routed stub
 
     @model_validator(mode="before")
     @classmethod

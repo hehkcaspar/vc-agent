@@ -19,7 +19,15 @@ ENV/
 .env
 **/.env
 backend/.env
-.deploy_*.secret
+*.secret
+**/.secret
+
+# Firebase Hosting local cache (per-machine, not project state)
+**/.firebase/
+
+# Confidential portfolio-company samples — referenced by CLAUDE.md as
+# template reference but never meant for version control.
+reference-project/
 
 # Node
 node_modules/

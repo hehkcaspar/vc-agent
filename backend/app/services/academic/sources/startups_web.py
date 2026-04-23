@@ -23,6 +23,7 @@ Upstream of `news_web._collect_known_ventures`, which reads
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -30,6 +31,12 @@ from typing import Any
 from ..events_sync import log_event
 from ..fact_store import record_snapshot
 from ..file_utils import dossier_path, read_json, write_json
+from ..refinement import build_scholar_context, refine_pending_items
+from ..tombstones import (
+    format_for_prompt as format_tombstones_for_prompt,
+    load_tombstones,
+    matches_tombstone,
+)
 from ._canonicalize import canonicalize_candidates
 from ._incremental import (
     format_cutoff,
@@ -88,11 +95,17 @@ _COMMERCIAL_GUARD = (
     "collaborations, or incubators. "
 )
 
+_TOMBSTONES_SECTION = (
+    "\nThe following items were previously surfaced and REJECTED by "
+    "verification — do NOT re-emit them:\n{tombstones_block}\n"
+)
+
 _BOOTSTRAP_PROMPT = (
     "Find startups or companies founded or co-founded by academic "
     "researcher **{name}**{affiliation_clause}. " + _COMMERCIAL_GUARD +
     "Cover ventures that are active, acquired, closed, or went public — "
-    "entire career, no time limit. " + _RETURN_SHAPE
+    "entire career, no time limit. "
+    + _TOMBSTONES_SECTION + _RETURN_SHAPE
 )
 
 
@@ -109,6 +122,7 @@ _INCREMENTAL_PROMPT = (
     "that is NOT in the list below. " + _COMMERCIAL_GUARD +
     "Known ventures (verify each; include only if recorded state is "
     "stale or wrong):\n{known_block}\n"
+    + _TOMBSTONES_SECTION +
     "Return ONLY a JSON array — no prose, no markdown, no section "
     "headers. " + _RETURN_SHAPE
 )
@@ -208,9 +222,13 @@ async def run(
     cutoff = incremental_cutoff(scholar_id, SOURCE_ID)
     use_bootstrap = should_use_bootstrap(mode, cutoff) or not existing_items
 
+    tombstones = load_tombstones(scholar_id, category="startups")
+    tombstones_block = format_tombstones_for_prompt(tombstones)
+
     if use_bootstrap:
         prompt = _BOOTSTRAP_PROMPT.format(
-            name=name, affiliation_clause=affiliation_clause
+            name=name, affiliation_clause=affiliation_clause,
+            tombstones_block=tombstones_block,
         )
         mode_used = "bootstrap"
     else:
@@ -219,6 +237,7 @@ async def run(
             affiliation_clause=affiliation_clause,
             cutoff=format_cutoff(cutoff),
             known_block=format_known_ventures(existing_items),
+            tombstones_block=tombstones_block,
         )
         mode_used = "incremental"
 
@@ -289,6 +308,12 @@ async def run(
             "new_events": 0, "total": len(existing_items),
         }
 
+    # Tombstone guard — drop anything previously rejected.
+    filtered = [
+        it for it in filtered
+        if not matches_tombstone(it.get("name") or "", tombstones, category="startups")
+    ]
+
     # ── Canonicalize survivors against existing ledger ───────────
     scholar_context = {
         "name": name,
@@ -321,6 +346,8 @@ async def run(
         if existing_idx is not None:
             prev = existing_items[existing_idx]
             merged = {**prev, **cand}
+            # Updated rows need re-verification too (URL may have changed).
+            merged["_refinement_status"] = "pending"
             prev_status = prev.get("current_status")
             new_status = cand.get("current_status")
             if (
@@ -331,6 +358,7 @@ async def run(
             modified_existing[existing_idx] = merged
         else:
             merged = dict(cand)
+            merged["_refinement_status"] = "pending"
             new_status = cand.get("current_status")
             transitions.append(("startup_founded", merged))
             if new_status in _TRANSITION_STATUSES:
@@ -348,6 +376,12 @@ async def run(
         reverse=True,
     )
     write_json(path, {"items": final_items, "count": len(final_items)})
+
+    if transitions:
+        ctx = await build_scholar_context(scholar_id)
+        asyncio.create_task(
+            refine_pending_items(scholar_id, "startups", context=ctx)
+        )
 
     for event_type, item in transitions:
         try:

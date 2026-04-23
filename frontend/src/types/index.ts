@@ -437,15 +437,6 @@ export type StageFilter = 'all' | 'funnel' | DealStage;
 /** Portfolio archival filter. Distinct dim from workflow stage. */
 export type StatusFilter = 'active' | 'archived' | 'all';
 
-export interface TabState {
-  viewMode: 'list' | 'grid';
-  scrollPosition: number;
-  selectedEntityId?: string;
-  searchQuery: string;
-  stageFilter?: StageFilter;
-  statusFilter?: StatusFilter;
-}
-
 // ============== Entity Metadata Form Configuration ==============
 
 export interface EntityMetadataField {

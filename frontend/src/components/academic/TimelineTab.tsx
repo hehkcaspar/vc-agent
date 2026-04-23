@@ -31,16 +31,16 @@ export function TimelineTab({ scholarId, events, mutateEvents, sortBy, onSortCha
         </div>
         <div className="paper-filters">
           <button
-            className={`filter-btn ${sortBy === 'discovered' ? 'active' : ''}`}
-            onClick={() => onSortChange('discovered')}
-          >
-            Discovered
-          </button>
-          <button
             className={`filter-btn ${sortBy === 'event_date' ? 'active' : ''}`}
             onClick={() => onSortChange('event_date')}
           >
             Event date
+          </button>
+          <button
+            className={`filter-btn ${sortBy === 'discovered' ? 'active' : ''}`}
+            onClick={() => onSortChange('discovered')}
+          >
+            Discovered
           </button>
         </div>
       </div>
