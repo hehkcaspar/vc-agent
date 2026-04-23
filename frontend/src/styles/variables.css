@@ -33,6 +33,7 @@
   --color-warning-bg-subtle: rgba(217, 119, 6, 0.12);
   --color-error-bg-subtle: rgba(220, 38, 38, 0.10);
   --color-error-bg-strong: rgba(220, 38, 38, 0.18);
+  --color-success-bg-subtle: rgba(5, 150, 105, 0.12);
   --color-neutral-bg-subtle: rgba(120, 120, 115, 0.12);
   
   /* Border & Divider */
@@ -125,6 +126,7 @@
   --color-warning-bg-subtle: rgba(234, 179, 8, 0.22);
   --color-error-bg-subtle: rgba(248, 113, 113, 0.18);
   --color-error-bg-strong: rgba(248, 113, 113, 0.30);
+  --color-success-bg-subtle: rgba(52, 211, 153, 0.20);
   --color-neutral-bg-subtle: rgba(156, 163, 175, 0.15);
 
   /* Adjust Shadows for Dark Mode */
