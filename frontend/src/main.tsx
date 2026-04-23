@@ -1,7 +1,12 @@
+// Side-effect import — installs the window.fetch shim that attaches the
+// shared-password header. Must precede any module that captures fetch.
+import './services/auth'
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import App from './App'
+import { LoginGate } from './components/LoginGate'
 import { ViewportGuard } from './components/ViewportGuard'
 import './styles/global.css'
 import './styles/primitives.css'
@@ -22,14 +27,16 @@ document.documentElement.setAttribute('data-theme', initialTheme);
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ViewportGuard>
-      <BrowserRouter
-        future={{
-          v7_startTransition: true,
-          v7_relativeSplatPath: true,
-        }}
-      >
-        <App />
-      </BrowserRouter>
+      <LoginGate>
+        <BrowserRouter
+          future={{
+            v7_startTransition: true,
+            v7_relativeSplatPath: true,
+          }}
+        >
+          <App />
+        </BrowserRouter>
+      </LoginGate>
     </ViewportGuard>
   </React.StrictMode>,
 )
