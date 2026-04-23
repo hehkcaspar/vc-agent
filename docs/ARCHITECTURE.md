@@ -547,15 +547,17 @@ App (ToastHost for global toasts, e.g. metadata pre-process)
 
 The shell and entity detail view are wired so **long file previews** (for example DOCX rendered as HTML) scroll **inside the workspace column**, not by growing the whole document.
 
-**Desktop (viewport width >= 769px)**
+**Supported range — ≥ 768px** (desktop + tablet, gated by `ViewportGuard` in `components/ViewportGuard.tsx`)
 
 - `Layout.css`: `.layout` uses `height` / `max-height: 100vh` and `overflow: hidden` so the app chrome stays within the window.
 - `Layout.css`: `.main-content` uses `min-height: 0`, `overflow-y: auto`, and a column flex container so it can shrink inside the row, scroll the portfolio list when needed, and pass a bounded height to its children.
 - `EntityDetail.css`: `.entity-detail` is `flex: 1` / `min-height: 0`; `.entity-zones--notebook` is a three-column grid with `minmax(0, 1fr)` so columns shrink correctly; each `.zone` is a column flex card; `.zone-content` is `flex: 1` / `min-height: 0` / `overflow-y: auto` so lists and previews scroll inside the card.
+- `Layout.tsx` auto-collapses the sidebar to icon rail (80 px) when `window.innerWidth >= 768 && <= 1024`; full sidebar at > 1024.
 
-**Mobile (width < 769px)**
+**< 768px — denied**
 
-- The layout is not locked to `100vh` the same way, so drawer/header behavior is unchanged.
+- `ViewportGuard` short-circuits the whole router and renders a polite denial `<main>` with a brand `<h1>`, reason copy, and a live current-width readout. Theme (`data-theme`) is applied synchronously in `main.tsx` before React renders so the denial respects the user's stored light/dark preference.
+- Mobile CSS (`@media (max-width: 767px)` in `Layout.css` / `PortfolioTab.css` / `academic/AcademicTab.css` / `Settings/Settings.css`) is effectively dead code today — the guard never lets a `<768` viewport reach those rules. Kept in place so a future un-guard doesn't regress responsive handling.
 
 **Preview panels**
 

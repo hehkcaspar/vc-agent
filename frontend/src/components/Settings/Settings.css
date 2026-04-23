@@ -511,8 +511,8 @@
   border-color: var(--color-border-hover);
 }
 
-/* Mobile */
-@media (max-width: 768px) {
+/* Mobile (dead code behind ViewportGuard — kept for future un-guard) */
+@media (max-width: 767px) {
   .settings-root {
     flex-direction: column;
     gap: var(--space-4);

@@ -353,6 +353,7 @@ export function ScholarConversation({ scholarId }: ScholarConversationProps) {
         <textarea
           className="entity-conversation-input"
           rows={2}
+          aria-label="Ask about this scholar"
           placeholder={
             agentActiveHere
               ? agentStatus || 'Agent is working...'

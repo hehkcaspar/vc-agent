@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { ParkingSquare, Building2, Pencil, Archive, ArchiveRestore, Trash2, X } from 'lucide-react';
 import { useEntities } from '../hooks/useEntities';
 import { useSetSearchParam } from '../hooks/useSetSearchParam';
@@ -142,10 +142,6 @@ export function PortfolioTab() {
   const handleStatusFilterChange = (next: StatusFilter) =>
     setSearchParam('status', next, 'active');
 
-  const handleEntitySelect = (entity: Entity) => {
-    navigate(`/portfolio/entities/${entity.id}`);
-  };
-
   const handleEntityCreated = (entity: Entity) => {
     mutate();
     navigate(`/portfolio/entities/${entity.id}`);
@@ -196,7 +192,7 @@ export function PortfolioTab() {
   return (
     <div className="portfolio-tab">
       <div className="portfolio-header">
-        <h2>Portfolio</h2>
+        <h1>Portfolio</h1>
         <div className="header-actions">
           <button 
             className={`parking-lot-button ${parkingLotCount > 0 ? 'has-items' : ''}`}
@@ -291,7 +287,6 @@ export function PortfolioTab() {
               <EntityRow
                 key={entity.id}
                 entity={entity}
-                onClick={() => handleEntitySelect(entity)}
                 onEdit={(e) => {
                   e.stopPropagation();
                   setEditingEntity(entity);
@@ -303,7 +298,6 @@ export function PortfolioTab() {
               <EntityCard
                 key={entity.id}
                 entity={entity}
-                onClick={() => handleEntitySelect(entity)}
                 onEdit={(e) => {
                   e.stopPropagation();
                   setEditingEntity(entity);
@@ -411,10 +405,20 @@ function StageChip({ stage }: { stage: DealStage }) {
   );
 }
 
-function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
+function EntityRow({ entity, onEdit, onArchive, onDelete }: { entity: Entity; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   const isArchived = entity.status === 'archived';
+  // Action buttons cancel the Link's navigation so clicking Edit/Archive/Delete
+  // does not also open the entity detail page.
+  const wrap = (fn: (e: React.MouseEvent) => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    fn(e);
+  };
   return (
-    <div className={`entity-row ${isArchived ? 'archived' : ''}`} onClick={onClick}>
+    <Link
+      to={`/portfolio/entities/${entity.id}`}
+      className={`entity-row ${isArchived ? 'archived' : ''}`}
+      aria-label={`Open ${entity.name}`}
+    >
       <div className="entity-row-icon"><Building2 size={20} /></div>
       <div className="entity-row-info">
         <div className="entity-row-name">
@@ -428,54 +432,74 @@ function EntityRow({ entity, onClick, onEdit, onArchive, onDelete }: { entity: E
       <StageChip stage={entity.deal_stage} />
       <div className="entity-row-actions">
         <button
+          type="button"
           className="btn-icon"
-          onClick={onEdit}
+          onClick={wrap(onEdit)}
           title="Edit entity"
+          aria-label={`Edit ${entity.name}`}
         >
           <Pencil size={14} />
         </button>
         <button
+          type="button"
           className="btn-icon archive-btn"
-          onClick={onArchive}
+          onClick={wrap(onArchive)}
           title={isArchived ? 'Unarchive entity' : 'Archive entity'}
+          aria-label={`${isArchived ? 'Unarchive' : 'Archive'} ${entity.name}`}
         >
           {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </button>
         <button
+          type="button"
           className="btn-icon delete-btn"
-          onClick={onDelete}
+          onClick={wrap(onDelete)}
           title="Delete entity"
+          aria-label={`Delete ${entity.name}`}
         >
           <Trash2 size={14} />
         </button>
       </div>
-    </div>
+    </Link>
   );
 }
 
-function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: Entity; onClick: () => void; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
+function EntityCard({ entity, onEdit, onArchive, onDelete }: { entity: Entity; onEdit: (e: React.MouseEvent) => void; onArchive: (e: React.MouseEvent) => void; onDelete: (e: React.MouseEvent) => void }) {
   const isArchived = entity.status === 'archived';
+  const wrap = (fn: (e: React.MouseEvent) => void) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    fn(e);
+  };
   return (
-    <div className={`entity-card ${isArchived ? 'archived' : ''}`} onClick={onClick}>
+    <Link
+      to={`/portfolio/entities/${entity.id}`}
+      className={`entity-card ${isArchived ? 'archived' : ''}`}
+      aria-label={`Open ${entity.name}`}
+    >
       <div className="card-actions">
         <button
+          type="button"
           className="btn-icon card-edit-btn"
-          onClick={onEdit}
+          onClick={wrap(onEdit)}
           title="Edit entity"
+          aria-label={`Edit ${entity.name}`}
         >
           <Pencil size={14} />
         </button>
         <button
+          type="button"
           className="btn-icon card-archive-btn"
-          onClick={onArchive}
+          onClick={wrap(onArchive)}
           title={isArchived ? 'Unarchive entity' : 'Archive entity'}
+          aria-label={`${isArchived ? 'Unarchive' : 'Archive'} ${entity.name}`}
         >
           {isArchived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
         </button>
         <button
+          type="button"
           className="btn-icon card-delete-btn"
-          onClick={onDelete}
+          onClick={wrap(onDelete)}
           title="Delete entity"
+          aria-label={`Delete ${entity.name}`}
         >
           <Trash2 size={14} />
         </button>
@@ -492,6 +516,6 @@ function EntityCard({ entity, onClick, onEdit, onArchive, onDelete }: { entity: 
         {entity.website || 'No website'}<br />
         Updated {new Date(entity.updated_at).toLocaleDateString()}
       </div>
-    </div>
+    </Link>
   );
 }

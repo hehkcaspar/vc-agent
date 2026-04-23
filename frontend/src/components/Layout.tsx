@@ -46,16 +46,18 @@ function LayoutShell() {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  // Handle responsive sidebar behavior on mount and resize
+  // Handle responsive sidebar behavior on mount and resize. ViewportGuard
+  // short-circuits anything below 768, so the "mobile drawer" branch only
+  // applies to viewports of exactly 767 or less — effectively dead code
+  // behind the guard today, but kept so a future un-guard doesn't lose it.
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth <= 1024 && window.innerWidth > 768) {
+      if (window.innerWidth <= 1024 && window.innerWidth >= 768) {
         setIsSidebarCollapsed(true);
       } else if (window.innerWidth > 1024) {
         setIsSidebarCollapsed(false);
-      } else if (window.innerWidth <= 768) {
-        // On mobile, "collapsed" state is reused for the drawer menu
-        setIsSidebarCollapsed(false); 
+      } else {
+        setIsSidebarCollapsed(false);
       }
     };
 
@@ -75,13 +77,16 @@ function LayoutShell() {
     <div className="layout">
       {/* Mobile Header */}
       <div className="mobile-header">
-        <button 
+        <button
           className="mobile-toggle"
           onClick={() => setIsMobileMenuOpen(true)}
+          aria-label="Open navigation menu"
+          aria-expanded={isMobileMenuOpen}
+          aria-controls="main-sidebar"
         >
           <Menu size={20} />
         </button>
-        <h1>VC Portfolio</h1>
+        <div className="mobile-brand">VC Portfolio</div>
       </div>
 
       {/* Mobile Overlay */}
@@ -91,24 +96,32 @@ function LayoutShell() {
       />
 
       {/* Sidebar */}
-      <aside className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileMenuOpen ? 'collapsed' : ''}`}>
+      <aside
+        id="main-sidebar"
+        className={`sidebar ${isSidebarCollapsed ? 'collapsed' : ''} ${isMobileMenuOpen ? 'collapsed' : ''}`}
+        aria-label="Primary navigation"
+      >
         <div className="sidebar-header">
-  <div className="sidebar-title">
-            <h1>VC Portfolio</h1>
+          <div className="sidebar-title">
+            <div className="sidebar-brand">VC Portfolio</div>
             <p>Portfolio Manager</p>
           </div>
-          <button 
+          <button
             className="sidebar-toggle"
             onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            aria-expanded={!isSidebarCollapsed}
+            title={isSidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
             {isSidebarCollapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
         </div>
-        <nav className="sidebar-nav">
+        <nav className="sidebar-nav" aria-label="Main sections">
           <button
             className={`nav-item ${activeTab === 'portfolio' ? 'active' : ''}`}
             onClick={() => goToTab('portfolio')}
+            title="Portfolio"
+            aria-current={activeTab === 'portfolio' ? 'page' : undefined}
           >
             <span className="nav-icon"><Briefcase size={18} /></span>
             <span className="nav-text">Portfolio</span>
@@ -116,6 +129,8 @@ function LayoutShell() {
           <button
             className={`nav-item ${activeTab === 'academic' ? 'active' : ''}`}
             onClick={() => goToTab('academic')}
+            title="Academic"
+            aria-current={activeTab === 'academic' ? 'page' : undefined}
           >
             <span className="nav-icon"><GraduationCap size={18} /></span>
             <span className="nav-text">Academic</span>
@@ -125,11 +140,18 @@ function LayoutShell() {
           <button
             className={`nav-item ${activeTab === 'settings' ? 'active' : ''}`}
             onClick={() => goToTab('settings')}
+            title="Settings"
+            aria-current={activeTab === 'settings' ? 'page' : undefined}
           >
             <span className="nav-icon"><SettingsIcon size={18} /></span>
             <span className="nav-text">Settings</span>
           </button>
-          <button className="theme-toggle" onClick={toggleTheme} title="Toggle Theme">
+          <button
+            className="theme-toggle"
+            onClick={toggleTheme}
+            title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+            aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          >
             <span className="nav-icon">{theme === 'light' ? <Moon size={18} /> : <Sun size={18} />}</span>
             <span className="theme-text">{theme === 'light' ? 'Dark Mode' : 'Light Mode'}</span>
           </button>

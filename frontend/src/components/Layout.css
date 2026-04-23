@@ -62,7 +62,7 @@
   overflow: hidden;
 }
 
-.sidebar-header h1 {
+.sidebar-header .sidebar-brand {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
   font-weight: 600;
@@ -262,7 +262,7 @@
   }
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .sidebar {
     width: 280px;
     transform: translateX(-100%);
@@ -314,7 +314,7 @@
     margin-right: var(--space-4);
   }
 
-  .mobile-header h1 {
+  .mobile-header .mobile-brand {
     font-family: var(--font-display);
     font-size: var(--text-xl);
     font-weight: 600;

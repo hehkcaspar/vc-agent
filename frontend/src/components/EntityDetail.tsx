@@ -240,6 +240,42 @@ export function EntityDetail({
     (liveEntity?.metadata as Record<string, unknown> | null | undefined)?._news_tracking,
   );
 
+  // W3C APG tab pattern: Left/Right/Home/End cycle focus through the tablist,
+  // activating the focused tab on move. Invisible tabs are filtered out.
+  const visibleTabs: ContentTab[] = [
+    'workroom',
+    'facts',
+    ...(showScreeningV1 ? (['screening_v1'] as const) : []),
+    ...(showScreeningV2 ? (['screening_v2'] as const) : []),
+    ...(showNews ? (['news'] as const) : []),
+  ];
+  const tablistRef = useRef<HTMLDivElement>(null);
+  const pendingTabFocusRef = useRef(false);
+  const handleTablistKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    const idx = visibleTabs.indexOf(contentTab);
+    if (idx < 0) return;
+    let nextIdx = idx;
+    if (e.key === 'ArrowRight') nextIdx = (idx + 1) % visibleTabs.length;
+    else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + visibleTabs.length) % visibleTabs.length;
+    else if (e.key === 'Home') nextIdx = 0;
+    else if (e.key === 'End') nextIdx = visibleTabs.length - 1;
+    else return;
+    if (nextIdx === idx) return;
+    e.preventDefault();
+    pendingTabFocusRef.current = true;
+    onContentTabChange(visibleTabs[nextIdx]);
+  };
+  // Pull keyboard focus to the newly active tab *after* React commits the
+  // aria-selected flip. Only fires when the last change came from a keypress
+  // so clicking a tab doesn't steal focus from a nested surface.
+  useEffect(() => {
+    if (!pendingTabFocusRef.current) return;
+    pendingTabFocusRef.current = false;
+    tablistRef.current
+      ?.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+      ?.focus();
+  }, [contentTab]);
+
   // If the active screening tab's underlying memo disappears (deleted, tree
   // refresh), fall back to workroom so the tablist stays coherent.
   useEffect(() => {
@@ -333,15 +369,18 @@ export function EntityDetail({
       )}
 
       <div
+        ref={tablistRef}
         className="content-tabs entity-content-tabs"
         role="tablist"
         aria-label="Entity detail views"
+        onKeyDown={handleTablistKeyDown}
       >
         <button
           type="button"
           role="tab"
           aria-selected={contentTab === 'workroom'}
           aria-controls="entity-tab-workroom"
+          tabIndex={contentTab === 'workroom' ? 0 : -1}
           className={`content-tab ${contentTab === 'workroom' ? 'active' : ''}`}
           onClick={() => onContentTabChange('workroom')}
         >
@@ -352,6 +391,7 @@ export function EntityDetail({
           role="tab"
           aria-selected={contentTab === 'facts'}
           aria-controls="entity-tab-facts"
+          tabIndex={contentTab === 'facts' ? 0 : -1}
           className={`content-tab ${contentTab === 'facts' ? 'active' : ''}`}
           onClick={() => onContentTabChange('facts')}
         >
@@ -363,6 +403,7 @@ export function EntityDetail({
             role="tab"
             aria-selected={contentTab === 'screening_v1'}
             aria-controls="entity-tab-screening-v1"
+            tabIndex={contentTab === 'screening_v1' ? 0 : -1}
             className={`content-tab ${contentTab === 'screening_v1' ? 'active' : ''}`}
             onClick={() => onContentTabChange('screening_v1')}
           >
@@ -375,6 +416,7 @@ export function EntityDetail({
             role="tab"
             aria-selected={contentTab === 'screening_v2'}
             aria-controls="entity-tab-screening-v2"
+            tabIndex={contentTab === 'screening_v2' ? 0 : -1}
             className={`content-tab ${contentTab === 'screening_v2' ? 'active' : ''}`}
             onClick={() => onContentTabChange('screening_v2')}
           >
@@ -387,6 +429,7 @@ export function EntityDetail({
             role="tab"
             aria-selected={contentTab === 'news'}
             aria-controls="entity-tab-news"
+            tabIndex={contentTab === 'news' ? 0 : -1}
             className={`content-tab ${contentTab === 'news' ? 'active' : ''}`}
             onClick={() => onContentTabChange('news')}
           >

@@ -203,7 +203,7 @@ export function ScholarDetail({
         <button className="btn-back" onClick={onBack}><ArrowLeft size={14} /> Back</button>
         <div className="academic-detail-title">
           <div className="header-top-row">
-            <h2>{scholar.name}</h2>
+            <h1>{scholar.name}</h1>
             <TagMenu<UserSettableStatus>
               label={SCHOLAR_STATUS_LABELS[scholar.status] ?? scholar.status}
               toneClass={`status-${scholar.status}`}
@@ -463,18 +463,20 @@ export function ScholarDetail({
 function NarrativeReportView({ narrative }: { narrative: NarrativeReport }) {
   // Compose the narrative as a markdown document so the existing
   // ReactMarkdown renderer in the report panel does the layout.
+  // Scholar's name is the page h1 (rendered in the detail header). The
+  // narrative's headline is the h2; its subsections are h3s.
   const md = [
-    `# ${narrative.headline}`,
+    `## ${narrative.headline}`,
     '',
     narrative.summary,
     '',
     narrative.red_flag_banner ? `> ⚠ **Red flags**\n>\n> ${narrative.red_flag_banner}` : '',
-    narrative.per_dim_highlights.length > 0 ? '## Dimension highlights' : '',
+    narrative.per_dim_highlights.length > 0 ? '### Dimension highlights' : '',
     ...narrative.per_dim_highlights.map(
       (h) => `- **${DIMENSION_LABELS[h.dimension_id] ?? h.dimension_id}** — ${h.highlight}`,
     ),
     '',
-    narrative.open_questions.length > 0 ? '## Open questions' : '',
+    narrative.open_questions.length > 0 ? '### Open questions' : '',
     ...narrative.open_questions.map((q) => `- ${q}`),
   ]
     .filter(Boolean)

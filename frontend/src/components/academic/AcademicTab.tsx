@@ -13,13 +13,12 @@ import { AddScholarModal } from './AddScholarModal';
 import { Modal } from '../ui/Modal';
 import { RankingView } from './RankingView';
 import { type ContentTab } from './ScholarDetail';
-import { TasksView } from './TasksView';
 import type { Scholar, UserSettableStatus } from '../../types/academic';
 import { SCHOLAR_STATUS_LABELS, PRIORITY_LABELS, lifecycleOptionsFor } from '../../types/academic';
 
 type StatusFilter = 'all' | 'active' | 'paused' | 'archived';
 const VALID_STATUS_FILTERS: StatusFilter[] = ['all', 'active', 'paused', 'archived'];
-const VALID_VIEW_MODES = ['list', 'ranking', 'tasks'] as const;
+const VALID_VIEW_MODES = ['list', 'ranking'] as const;
 type AcademicViewMode = (typeof VALID_VIEW_MODES)[number];
 
 function StatusMenu({
@@ -70,6 +69,15 @@ export function AcademicTab() {
   )
     ? (rawView as AcademicViewMode)
     : 'list';
+
+  // Tasks used to live under Academic > Tasks. It moved to Settings — redirect
+  // bookmarked `/academic?view=tasks` URLs there instead of silently degrading
+  // to the list view.
+  useEffect(() => {
+    if (rawView === 'tasks') {
+      navigate('/settings/academic-tasks', { replace: true });
+    }
+  }, [rawView, navigate]);
 
   const rawStatus = searchParams.get('status');
   const statusFilter: StatusFilter = VALID_STATUS_FILTERS.includes(
@@ -256,7 +264,7 @@ export function AcademicTab() {
   return (
     <div className="academic-tab">
       <div className="academic-header">
-        <h2>Academic Tracking</h2>
+        <h1>Academic Tracking</h1>
         <div className="header-actions">
           <div className="view-toggle">
             <button
@@ -270,12 +278,6 @@ export function AcademicTab() {
               onClick={() => setViewMode('ranking')}
             >
               Ranking
-            </button>
-            <button
-              className={`view-toggle-btn ${viewMode === 'tasks' ? 'active' : ''}`}
-              onClick={() => setViewMode('tasks')}
-            >
-              Tasks
             </button>
           </div>
           <button
@@ -395,9 +397,6 @@ export function AcademicTab() {
       {viewMode === 'ranking' && (
         <RankingView onSelectScholar={(s) => openScholar(s as Scholar)} />
       )}
-
-      {/* Tasks view */}
-      {viewMode === 'tasks' && <TasksView />}
 
       {/* List view */}
       {viewMode === 'list' && isLoading && <p className="text-muted">Loading...</p>}

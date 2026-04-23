@@ -740,6 +740,7 @@ export function EntityConversation({
           <div className="entity-conversation-compose-shell">
             <textarea
               className="entity-conversation-textarea entity-conversation-textarea--shell"
+              aria-label="Chat with this entity"
               value={input}
               onChange={(e) => {
                 if (!agentActiveHere) setInput(e.target.value);

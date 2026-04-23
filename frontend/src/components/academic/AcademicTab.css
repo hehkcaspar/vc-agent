@@ -15,6 +15,7 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+.academic-header h1,
 .academic-header h2 {
   font-family: var(--font-display);
   font-size: var(--text-4xl);
@@ -314,6 +315,7 @@
   flex-wrap: wrap;
 }
 
+.header-top-row h1,
 .header-top-row h2 {
   font-family: var(--font-display);
   font-size: var(--text-2xl);
@@ -1141,7 +1143,7 @@
 
 /* ── Responsive ──────────────────────────────────────── */
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .task-table-header,
   .task-row {
     grid-template-columns: 1fr auto auto;
@@ -1747,11 +1749,41 @@ a.event-link:hover {
 }
 
 .ranking-table-wrapper {
+  position: relative;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Force a persistent scrollbar so the user sees that more columns exist
+     to the right at tablet widths. macOS "hide scrollbars" default is the
+     reason the overflow was previously silent. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border-hover) transparent;
+  padding-bottom: 4px;
+}
+
+.ranking-table-wrapper::-webkit-scrollbar {
+  height: 8px;
+}
+
+.ranking-table-wrapper::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ranking-table-wrapper::-webkit-scrollbar-thumb {
+  background: var(--color-border-hover);
+  border-radius: 4px;
+}
+
+.ranking-table-wrapper::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
 }
 
 .ranking-table {
+  /* min-width forces the wrapper's overflow-x to engage on narrow tablet
+     viewports (≈768) so the dim columns stay visible behind a scroll
+     affordance instead of being silently clipped. Natural content width is
+     ~640 with 4 dim columns; 720 gives a comfortable floor. */
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
   font-size: 0.85em;
 }
