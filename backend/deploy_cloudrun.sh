@@ -27,6 +27,7 @@ set -euo pipefail
 : "${REPO:=vc-agent}"
 : "${IMAGE_TAG:=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M%S)}"
 : "${CORS_ORIGINS:=*}"
+: "${APP_PASSWORD:=}"   # empty = no gate (SPA wide open); set to enable login card
 
 IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}/backend:${IMAGE_TAG}"
 
@@ -54,7 +55,7 @@ gcloud run deploy "$SERVICE" \
     --execution-environment=gen2 \
     --add-cloudsql-instances="${CLOUD_SQL_INSTANCE}" \
     --update-secrets="GEMINI_API_KEY=gemini-api-key:latest,DATABASE_URL=portfolio-db-url:latest,ACADEMIC_DATABASE_URL=academic-db-url:latest" \
-    --set-env-vars="^@@^CORS_ORIGINS=${CORS_ORIGINS}@@GCS_BUCKET=${GCS_BUCKET}" \
+    --set-env-vars="^@@^CORS_ORIGINS=${CORS_ORIGINS}@@GCS_BUCKET=${GCS_BUCKET}@@APP_PASSWORD=${APP_PASSWORD}" \
     --add-volume="name=gcs-data,type=cloud-storage,bucket=${GCS_BUCKET}" \
     --add-volume-mount="volume=gcs-data,mount-path=/mnt/gcs"
 
