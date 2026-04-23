@@ -3,8 +3,10 @@ from contextlib import asynccontextmanager
 import logging
 import os
 import re
-from fastapi import FastAPI
+import secrets
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import inspect as sa_inspect
 
 from app.config import settings
@@ -97,6 +99,11 @@ async def lifespan(app: FastAPI):
     # Startup
     _install_secret_redactor()
     _guard_langsmith_tracing()
+    if not settings.APP_PASSWORD:
+        logger.warning(
+            "APP_PASSWORD is empty — shared-password gate is DISABLED. "
+            "Set APP_PASSWORD in the environment to require auth."
+        )
     await init_db()
     await init_academic_db()
 
@@ -351,6 +358,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Shared-password gate. When APP_PASSWORD is unset, pass-through (local dev).
+# When set, every request except liveness + CORS preflight must carry an
+# X-Access-Password header matching it (constant-time compare).
+_AUTH_EXEMPT_PATHS = frozenset({"/", "/health"})
+
+
+@app.middleware("http")
+async def shared_password_gate(request: Request, call_next):
+    expected = settings.APP_PASSWORD
+    if not expected:
+        return await call_next(request)
+    if request.method == "OPTIONS":
+        return await call_next(request)
+    if request.url.path in _AUTH_EXEMPT_PATHS:
+        return await call_next(request)
+    provided = request.headers.get("X-Access-Password", "")
+    if not secrets.compare_digest(provided.encode("utf-8"), expected.encode("utf-8")):
+        return JSONResponse({"detail": "unauthorized"}, status_code=401)
+    return await call_next(request)
+
+
 # Include routers
 app.include_router(entities.router)
 app.include_router(chat.router)
@@ -375,3 +404,10 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.post("/auth/verify")
+async def auth_verify():
+    # Reaching this route means the shared-password middleware accepted the
+    # header. The SPA's LoginGate calls this to validate before persisting.
+    return {"ok": True}

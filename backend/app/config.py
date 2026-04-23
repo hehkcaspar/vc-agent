@@ -113,6 +113,11 @@ class Settings(BaseSettings):
     SEMANTIC_SCHOLAR_API_KEY: str = ""  # optional; free tier works without key
     ACADEMIC_GEMINI_MODEL: str = "gemini-3-flash-preview"
 
+    # Shared-password gate for the SPA. Empty = no gate (local dev default).
+    # When set, every request (except "/" and "/health") must carry an
+    # X-Access-Password header matching this value. See middleware in main.py.
+    APP_PASSWORD: str = ""
+
     # LangSmith tracing (project-level runtime config).
     LANGSMITH_TRACING: bool = False
     LANGSMITH_API_KEY: str = ""
