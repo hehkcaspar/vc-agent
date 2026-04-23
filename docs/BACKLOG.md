@@ -2,7 +2,7 @@
 
 Future-development items that are known but not yet scheduled. Newest first.
 
-**Current priority order (2026-04-22 audit):**
+**Current priority order (2026-04-23 audit):**
 1. ~~`test_chat_api.py` — 3 red tests~~ — **✅ resolved 2026-04-22**: all 3 were test-code drift against evolved production (use_deep_agent→react, CHAT_USE_DEEP_AGENT→CHAT_DEFAULT_AGENT_MODE, preset session-id requirement). Tests realigned; full suite 250/250 (excluding pre-existing `test_three_paths_e2e.py` fixture bug, see below).
 2. ~~URL routing — restore browser back/forward + survive refresh~~ — **✅ resolved 2026-04-22**: 6-commit rollout wired BrowserRouter + detail routes (`/portfolio/entities/:id/:subTab?`, `/academic/scholars/:id/:subTab?`) + search-param filters + modal routes (`/portfolio/new`, `/portfolio/parking-lot`, `/portfolio/entities/:id/edit`, `/academic/new`) + settings section path param + `?chat=<sid>` for session reattach + 404 catch-all. Job reattach already worked via backend `active_job_id` — no new endpoint needed. Two polish items deferred (see below).
 3. Backfill grounding-sourced URLs — **medium** (live scholar data, 58% broken)
@@ -12,7 +12,28 @@ Future-development items that are known but not yet scheduled. Newest first.
 7. `_MAX_PAPERS` config override — low
 8. Legal config → JSON-seed migration — low (ergonomics)
 9. `docs/ARCHITECTURE.md` v2 rewrite — low (doc-drift)
-10. Dim-seed collapse — **n/a on main**; move to `gc-deploy` branch's own backlog (`backend/app/defaults/` does not exist on `main`)
+10. `APP_PASSWORD` → Secret Manager — **low** (hardening; prod gate works today, but the plain env-var is readable by anyone with project view access)
+11. Dim-seed collapse — **n/a on main**; move to `gc-deploy` branch's own backlog (`backend/app/defaults/` does not exist on `main`)
+
+---
+
+## `APP_PASSWORD` → Secret Manager (hardening)
+
+**Status:** not started · **Priority:** low (gate is effective today; this is a defence-in-depth upgrade) · **Filed:** 2026-04-23
+
+### Problem
+The shared-password gate (shipped 2026-04-23) stores `APP_PASSWORD` as a plain `--set-env-vars` entry on the Cloud Run service. Anyone with `roles/run.viewer` (or broader project read) can list the service config and see the password in cleartext. That's a narrow exposure surface inside the GCP project, but it's below the bar already set by `gemini-api-key`, `portfolio-db-url`, and `academic-db-url`, all of which live in Secret Manager and are grant-gated to the compute SA alone.
+
+The gate itself works correctly: `backend/app/main.py::shared_password_gate` uses `secrets.compare_digest` against `settings.APP_PASSWORD`, and the SPA's `LoginGate` + fetch shim round-trip correctly on prod. This backlog item is purely about moving where the value is stored, not how it's used.
+
+### Fix
+- Create a Secret Manager secret `app-password` in `vc-agent-taihill`; grant `roles/secretmanager.secretAccessor` to the compute SA.
+- Update `backend/deploy_cloudrun.sh`: move `APP_PASSWORD=${APP_PASSWORD}` out of `--set-env-vars` and append `APP_PASSWORD=app-password:latest` to `--update-secrets`.
+- Redeploy; remove the `APP_PASSWORD` line from the service's env-var config (it'll be shadowed by the mounted secret, but cleaner to delete).
+- Rotate the password value in Secret Manager when needed — no redeploy required (env from secret is fetched per-revision, so a new secret version takes effect on next revision rollover; add `--update-secrets=APP_PASSWORD=app-password:latest` forces a revision).
+
+### Effort
+Small. One Secret Manager create + one IAM grant + one deploy-script line swap + one redeploy. ~15 min.
 
 ---
 
