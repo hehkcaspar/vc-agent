@@ -1,44 +1,38 @@
-"""Background URL/category refinement for grounded-search items.
+"""Academic-side refinement glue.
 
-Runs as a fire-and-forget task after each source's synchronous write:
+The verify→triage→url_fallback orchestrator itself lives in
+``services.grounded_extraction.refinement.refine_jsonl`` (Tier 2
+refactor, 2026-05-02) and is shared with portfolio entity news. This
+module just supplies the academic-specific ``LedgerStorage`` (scholar
+dossier paths, scholar write lock, scholar tombstones, scholar
+destinations) and keeps the dispatcher for the items.json categories
+(patents, startups) which haven't been generalised yet.
 
-    SOURCE.run() → persist items with `_refinement_status: "pending"`
-                 → asyncio.create_task(refine_pending_items(scholar_id,
-                                                             category))
-
-Per record, in parallel:
-
-    (B) verify_item         — flash-lite grounded search
-    (C) triage              — pure keep/drop decision
-    (D) apply_url_fallback  — 3-tier URL quality check (only on KEEP)
-
-Writes back to the ledger in place:
-
-    KEEP  → url updated, `_refinement_status: "finalized"`
-    DROP  → `_rejected: True`, `_refinement_status: "rejected"`,
-            `_rejection_reason: <note>`, and a row appended to
-            `_tombstones.jsonl` for the next run's prompt guard.
-
-Crash-safe: if the task dies, records stay `"pending"` and the next
-sweep picks them up.
+Public API unchanged: ``refine_pending_items(scholar_id, category,
+*, context)`` keeps working for academic source modules.
 """
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from app.services.grounded_extraction import (
+    LedgerStorage,
+    apply_url_fallback,
+    refine_jsonl,
+    triage,
+    verify_item,
+)
 from .destinations import accept_into
 from .file_utils import dossier_path, read_json, write_json
-from .item_triage import triage
-from .item_verification import verify_item
 from .locks import scholar_write_lock
 from .tombstones import write_tombstone
-from .url_fallback import apply_url_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +47,37 @@ _VERIFY_CONCURRENCY = 5
 _HTTP_CONCURRENCY = 10
 
 
+# ── LedgerStorage adapter for the scholar side ────────────────────────
+
+
+def _scholar_jsonl_path(scholar_id: str, category: str) -> Path:
+    return dossier_path(scholar_id) / f"{category}.jsonl"
+
+
+@asynccontextmanager
+async def _scholar_lock_ctx(scholar_id: str):
+    """Adapter from scholar_write_lock to the LedgerStorage write_lock
+    contract (a single-arg async context manager)."""
+    async with scholar_write_lock(scholar_id):
+        yield
+
+
+def _scholar_tombstone(
+    scholar_id: str, *, category: str, title: str, reason: str,
+) -> None:
+    write_tombstone(
+        scholar_id, category=category, title=title, reason=reason,
+    )
+
+
+SCHOLAR_STORAGE = LedgerStorage(
+    jsonl_path=_scholar_jsonl_path,
+    write_lock=_scholar_lock_ctx,
+    write_tombstone=_scholar_tombstone,
+    accept_into=accept_into,
+)
+
+
 # ── Public API ────────────────────────────────────────────────────────
 
 
@@ -64,67 +89,32 @@ async def refine_pending_items(
 ) -> dict[str, Any]:
     """Refine every ``_refinement_status == "pending"`` record in the
     given ledger. Idempotent; safe to call repeatedly.
+
+    JSONL categories (news, red_flags) route through the shared
+    ``grounded_extraction.refine_jsonl`` orchestrator. ``items.json``
+    categories (patents, startups) still use the local handler below
+    until they're generalised to JSONL too.
     """
     if category not in _ALL_CATEGORIES:
         logger.warning("refine: unknown category %r — skipping", category)
         return {"refined": 0, "kept": 0, "dropped": 0, "skipped": True}
 
     if category in _JSONL_CATEGORIES:
-        return await _refine_jsonl(scholar_id, category, context)
+        return await refine_jsonl(
+            scholar_id, category,
+            context=context,
+            storage=SCHOLAR_STORAGE,
+        )
     return await _refine_items_json(scholar_id, category, context)
 
 
-# ── JSONL ledgers (news, red_flags) ───────────────────────────────────
-
-
-async def _refine_jsonl(
-    scholar_id: str, category: str, context: str,
-) -> dict[str, Any]:
-    path = dossier_path(scholar_id) / f"{category}.jsonl"
-    if not path.exists():
-        return {"refined": 0, "kept": 0, "dropped": 0}
-
-    records = _read_jsonl(path)
-    pending_idx = [
-        i for i, r in enumerate(records)
-        if isinstance(r, dict) and r.get("_refinement_status") == "pending"
-    ]
-    if not pending_idx:
-        return {"refined": 0, "kept": 0, "dropped": 0}
-
-    logger.info(
-        "refine/%s: %d pending records for scholar %s",
-        category, len(pending_idx), scholar_id,
-    )
-
-    sem_verify = asyncio.Semaphore(_VERIFY_CONCURRENCY)
-    sem_http = asyncio.Semaphore(_HTTP_CONCURRENCY)
-
-    async with _http_client() as http:
-        async def _one(i: int) -> None:
-            async with sem_verify:
-                await _refine_record(
-                    records[i], scholar_id, category,
-                    context=context, http=http, sem_http=sem_http,
-                )
-
-        await asyncio.gather(*(_one(i) for i in pending_idx))
-
-    async with scholar_write_lock(scholar_id):
-        _write_jsonl(path, records)
-
-    kept = sum(
-        1 for i in pending_idx
-        if records[i].get("_refinement_status") == "finalized"
-    )
-    dropped = sum(
-        1 for i in pending_idx
-        if records[i].get("_refinement_status") == "rejected"
-    )
-    return {"refined": len(pending_idx), "kept": kept, "dropped": dropped}
-
-
 # ── JSON-items ledgers (patents, startups) ────────────────────────────
+#
+# These haven't been generalised into the shared module yet because
+# they use a different on-disk shape (``{count, items: [...]}`` wrapper)
+# and the destinations matter (route patent → patent ledger). Lift to
+# grounded_extraction in a follow-up if portfolio ever needs the same
+# ledger shape.
 
 
 async def _refine_items_json(
@@ -177,7 +167,7 @@ async def _refine_items_json(
     return {"refined": len(pending_idx), "kept": kept, "dropped": dropped}
 
 
-# ── Per-record refinement ─────────────────────────────────────────────
+# ── Per-record refinement (scholar items.json categories) ─────────────
 
 
 async def _refine_record(
@@ -189,10 +179,13 @@ async def _refine_record(
     http: httpx.AsyncClient,
     sem_http: asyncio.Semaphore,
 ) -> None:
-    """Verify → triage → URL fallback. Mutates the record in place."""
+    """Verify → triage → URL fallback. Mutates the record in place.
+    Used for items.json categories only — the shared orchestrator in
+    grounded_extraction handles the JSONL path."""
     vr = await verify_item(record, context=context, source_category=category)
     record["_verification"] = {
         "verdict": vr.verdict,
+        "subject_match": vr.subject_match,
         "category_correct": vr.category_correct,
         "evidence": vr.evidence,
         "correction_note": vr.correction_note,
@@ -209,15 +202,10 @@ async def _refine_record(
     )
 
     if decision.action in ("drop", "route"):
-        # In both cases the source ledger no longer wants this record.
-        # Soft-delete here; differ only in what happens downstream.
         record["_rejected"] = True
         record["_rejection_reason"] = decision.reason
         record["_refinement_status"] = "rejected"
 
-        # Tombstone only in the SOURCE category so the next source run
-        # doesn't re-emit. The destination (if any) runs its own
-        # acceptance policy; we never tombstone its ledger.
         try:
             write_tombstone(
                 scholar_id,
@@ -256,12 +244,13 @@ async def _refine_record(
             )
         return
 
-    # KEEP → adopt authoritative URL if verification found one, then
-    # run the 3-tier HTTP fallback to finalize.
     if vr.authoritative_url:
-        field = _active_url_field(record)
-        record[field] = vr.authoritative_url
-        record["_url_source"] = "grounding"  # from verify's chunks
+        existing = record.get("_grounding_chunk_urls") or []
+        if not isinstance(existing, list):
+            existing = []
+        if vr.authoritative_url not in existing:
+            record["_grounding_chunk_urls"] = [vr.authoritative_url, *existing]
+            record["_all_grounding_urls"] = record["_grounding_chunk_urls"]
 
     async with sem_http:
         try:
@@ -270,16 +259,6 @@ async def _refine_record(
             logger.debug("refine: url_fallback failed: %s", exc)
 
     record["_refinement_status"] = "finalized"
-
-
-# ── helpers ────────────────────────────────────────────────────────────
-
-
-def _active_url_field(item: dict[str, Any]) -> str:
-    for f in ("url", "source_url"):
-        if f in item:
-            return f
-    return "url"
 
 
 def _http_client() -> httpx.AsyncClient:
@@ -294,28 +273,6 @@ def _http_client() -> httpx.AsyncClient:
             )
         },
     )
-
-
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                records.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return records
-
-
-def _write_jsonl(path: Path, records: list[dict[str, Any]]) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w", encoding="utf-8") as f:
-        for r in records:
-            f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
-    tmp.replace(path)
 
 
 async def build_scholar_context(scholar_id: str) -> str:
@@ -340,4 +297,4 @@ async def build_scholar_context(scholar_id: str) -> str:
     return " ".join(parts)
 
 
-__all__ = ["refine_pending_items", "build_scholar_context"]
+__all__ = ["refine_pending_items", "build_scholar_context", "SCHOLAR_STORAGE"]

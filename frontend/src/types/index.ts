@@ -497,6 +497,23 @@ export interface EntityNewsItem {
   summary?: string | null;
   published_date?: string | null;
   category?: string | null;
+  // Set by url_fallback.apply_url_fallback during refinement and exposed
+  // as `url_status` on the API surface (Pydantic field name, no leading
+  // underscore — the JSONL record uses `_url_status` internally).
+  // 'verified' = GET resolved AND page title fuzzy-matched our claim.
+  // anything else = the URL is unverifiable; the click still works but
+  // the user should treat the link as best-effort.
+  url_status?:
+    | 'verified'
+    | 'title_mismatch'
+    | 'status_4xx'
+    | 'blocked'
+    | 'timeout'
+    | 'no_title_tag'
+    | 'fallback_search'
+    | 'no_anchor'
+    | 'invalid_url'
+    | null;
 }
 
 export interface EntityNewsTracking {

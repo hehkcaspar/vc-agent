@@ -38,9 +38,11 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import AsyncSessionLocal
+from app.models import Entity
 from app.services.agent_harness import (
     create_react_portfolio_agent,
     history_to_lc_messages,
@@ -713,6 +715,182 @@ async def run_research_v2(
         sections=sections,
         total_seconds=total,
     )
+
+
+# ---------------------------------------------------------------------------
+# Post-processing of section JSONs
+# ---------------------------------------------------------------------------
+
+
+def _summarize_coinvestor(notes: dict) -> str:
+    """Compress a coinvestors_notes entry into one human-readable sentence
+    for the Facts-tab co-investor description popover.
+
+    Composes from optional fields: tier, founding_year, aum, sectors,
+    portfolio_recent (first 2), signal. Always returns a string (possibly
+    empty) — frontend treats empty as "no description"."""
+    parts: List[str] = []
+    tier = (notes.get("tier") or "").strip()
+    if tier and tier.lower() != "unknown":
+        parts.append(tier)
+    fy = notes.get("founding_year")
+    if isinstance(fy, int) and 1900 < fy < 2100:
+        parts.append(f"founded {fy}")
+    aum = (notes.get("aum_usd_str") or "").strip()
+    if aum:
+        parts.append(f"AUM {aum}")
+    sectors = notes.get("sectors") or []
+    if isinstance(sectors, list) and sectors:
+        first = [str(s) for s in sectors[:2] if str(s).strip()]
+        if first:
+            parts.append("sectors: " + ", ".join(first))
+    recent = notes.get("portfolio_recent") or []
+    if isinstance(recent, list) and recent:
+        first = [str(p) for p in recent[:2] if str(p).strip()]
+        if first:
+            parts.append("recent: " + ", ".join(first))
+    signal = (notes.get("signal") or "").strip()
+    if signal:
+        parts.append(signal)
+    return ". ".join(parts)
+
+
+async def post_process_section_jsons(
+    db: AsyncSession,
+    ws: WorkspaceService,
+    *,
+    entity_id: str,
+    agent_run_id: str,
+    on_status: Optional[Callable[[str], None]] = None,
+) -> None:
+    """Run between research and compose. Two responsibilities:
+
+    1. **GS contract enforcement** — read team.json. For every founder card
+       with ``profile_type=academic`` and a missing ``gs_metrics``, append a
+       synthetic ``open_gaps[]`` row so the composed memo surfaces the gap
+       even when the section agent forgot. If anything is appended, write
+       team.json back.
+
+    2. **Co-investor enrichment pipe** — read funding_traction.json's
+       ``extras.coinvestors_notes[]``. Merge into the entity's
+       ``metadata_json.co_investor_details`` (a name-keyed sidecar). Empty
+       names are ignored. The map fully replaces any prior IS-derived
+       enrichment (latest run wins).
+
+    Failure-isolated: any error here is logged and swallowed — the compose
+    stage still runs on the existing section JSONs.
+    """
+    actor = Actor(
+        type="system",
+        ref=f"preset:initial_screening_v2:post_process:{agent_run_id}",
+    )
+
+    # --- (1) Team JSON: GS contract -------------------------------------
+    team_path = f"{V2_ANALYSIS_DIR}/team.json"
+    try:
+        node = await ws.get_node_by_path(db, entity_id, team_path)
+        if node is not None and node.storage_key:
+            raw = await asyncio.to_thread(
+                ws.storage.read_file_sync, node.storage_key,
+            )
+            team = json.loads(raw.decode("utf-8"))
+            facts = team.get("facts") or []
+            gaps = team.get("open_gaps") or []
+            if not isinstance(gaps, list):
+                gaps = []
+            appended = 0
+            for entry in facts:
+                if not isinstance(entry, dict):
+                    continue
+                extras = entry.get("extras") or {}
+                if not isinstance(extras, dict):
+                    continue
+                if extras.get("profile_type") != "academic":
+                    continue
+                if extras.get("gs_metrics"):
+                    continue
+                name = (extras.get("name") or "").strip() or "(unnamed founder)"
+                # Skip if a matching gap is already present so we don't
+                # double-append on re-runs.
+                marker = f"{name}: no Google Scholar"
+                if any(marker in (str(g) or "") for g in gaps):
+                    continue
+                gaps.append(
+                    f"{name}: no Google Scholar metrics surfaced; "
+                    f"agent did not run the mandatory GS check (orchestrator-flagged)."
+                )
+                appended += 1
+            if appended:
+                team["open_gaps"] = gaps
+                await ws.write_file(
+                    db,
+                    entity_id,
+                    team_path,
+                    json.dumps(team, ensure_ascii=False, indent=2).encode("utf-8"),
+                    "application/json",
+                    actor,
+                )
+                _notify(
+                    on_status,
+                    f"[post] team.json: appended {appended} GS-gap row(s)",
+                )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning(
+            "initial_screening_v2 post: team GS check failed: %s",
+            exc, exc_info=True,
+        )
+
+    # --- (2) Funding/Traction JSON: pipe coinvestors → metadata ---------
+    ft_path = f"{V2_ANALYSIS_DIR}/funding_traction.json"
+    try:
+        node = await ws.get_node_by_path(db, entity_id, ft_path)
+        if node is None or not node.storage_key:
+            return
+        raw = await asyncio.to_thread(
+            ws.storage.read_file_sync, node.storage_key,
+        )
+        ft = json.loads(raw.decode("utf-8"))
+        notes_list = (ft.get("extras") or {}).get("coinvestors_notes") or []
+        if not isinstance(notes_list, list):
+            return
+        details: Dict[str, Dict[str, Any]] = {}
+        for n in notes_list:
+            if not isinstance(n, dict):
+                continue
+            name = (n.get("name") or "").strip()
+            if not name:
+                continue
+            details[name] = {
+                "url": (n.get("url") or None),
+                "description": _summarize_coinvestor(n),
+            }
+        if not details:
+            return
+        # Merge into entity.metadata_json.co_investor_details (latest wins).
+        result = await db.execute(
+            select(Entity).where(Entity.id == entity_id)
+        )
+        entity_row = result.scalars().first()
+        if entity_row is None:
+            return
+        try:
+            meta = json.loads(entity_row.metadata_json or "{}")
+        except Exception:  # noqa: BLE001
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        meta["co_investor_details"] = details
+        entity_row.metadata_json = json.dumps(meta, ensure_ascii=False)
+        await db.commit()
+        _notify(
+            on_status,
+            f"[post] piped {len(details)} co-investor entries into entity metadata",
+        )
+    except Exception as exc:  # noqa: BLE001
+        _log.warning(
+            "initial_screening_v2 post: coinvestor pipe failed: %s",
+            exc, exc_info=True,
+        )
 
 
 async def run_compose_review_v2(

@@ -27,10 +27,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, ChevronRight, ExternalLink, Loader2 } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+} from 'lucide-react';
 import type { WorkspaceTreeNode } from '../types';
 import { api } from '../services/api';
 import { formatRelativeTime } from '../lib/relativeTime';
+import { showToast } from '../lib/appToast';
 
 function findNodeByPath(
   nodes: WorkspaceTreeNode[],
@@ -116,6 +123,13 @@ export interface EntityInitialScreeningTabProps {
   memoPath: string;
   reviewPath?: string | null;
   onOpenPreview?: (node: WorkspaceTreeNode) => void;
+  /** v1 vs v2 — drives which composer to invoke for Recompose. Inferred
+   *  from memoPath if omitted. */
+  version?: 'v1' | 'v2';
+  /** Refetch the workspace tree after recompose so mdNode.version bumps
+   *  and the file content reload triggers. Optional — falls back to a
+   *  direct download if omitted. */
+  onTreeChanged?: () => void;
 }
 
 export function EntityInitialScreeningTab({
@@ -124,7 +138,11 @@ export function EntityInitialScreeningTab({
   memoPath,
   reviewPath,
   onOpenPreview,
+  version,
+  onTreeChanged,
 }: EntityInitialScreeningTabProps) {
+  const screeningVersion: 'v1' | 'v2' =
+    version ?? (memoPath.includes('_v2') ? 'v2' : 'v1');
   const mdNode = useMemo(
     () => (tree ? findNodeByPath(tree, memoPath) : null),
     [tree, memoPath],
@@ -138,6 +156,8 @@ export function EntityInitialScreeningTab({
   const [mdUpdatedAt, setMdUpdatedAt] = useState<string | null>(null);
   const [mdLoading, setMdLoading] = useState(false);
   const [mdError, setMdError] = useState<string | null>(null);
+  const [recomposing, setRecomposing] = useState(false);
+  const [recomposeKey, setRecomposeKey] = useState(0);
 
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewContent, setReviewContent] = useState<string | null>(null);
@@ -178,7 +198,32 @@ export function EntityInitialScreeningTab({
     return () => {
       cancelled = true;
     };
-  }, [entityId, mdNodeId, mdVersion]);
+  }, [entityId, mdNodeId, mdVersion, recomposeKey]);
+
+  const handleRecompose = async () => {
+    if (recomposing) return;
+    setRecomposing(true);
+    try {
+      const r = await api.initialScreening.recompose(entityId, screeningVersion);
+      if (r.warnings.length > 0) {
+        showToast(
+          `Recomposed with ${r.warnings.length} warning(s) — see logs.`,
+          'info',
+        );
+      } else {
+        showToast('Memo recomposed.', 'success');
+      }
+      // Bump our local refetch key so the useEffect above redownloads,
+      // even if the parent tree's mdNode.version hasn't refreshed yet.
+      setRecomposeKey((k) => k + 1);
+      onTreeChanged?.();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Recompose failed';
+      showToast(msg, 'error');
+    } finally {
+      setRecomposing(false);
+    }
+  };
 
   const reviewNodeId = reviewNode?.id ?? null;
   useEffect(() => {
@@ -250,6 +295,20 @@ export function EntityInitialScreeningTab({
           )}
         </span>
         <div className="screening-meta-actions">
+          <button
+            type="button"
+            className="facts-section-edit"
+            onClick={handleRecompose}
+            disabled={recomposing}
+            title="Re-runs only the composer using the existing section JSONs + your edited facts. Cheap (~10 s, no web search)."
+          >
+            {recomposing ? (
+              <Loader2 size={12} className="zone-header-icon-btn-spin" aria-hidden />
+            ) : (
+              <RefreshCw size={12} />
+            )}
+            {recomposing ? 'Recomposing…' : 'Recompose'}
+          </button>
           {reviewNode && (
             <button
               type="button"

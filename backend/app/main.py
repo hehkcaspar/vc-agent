@@ -20,6 +20,7 @@ from app.routers import (
     entity_news,
     fact_ledger,
     ingest,
+    initial_screening_actions,
     parkinglot,
     settings as settings_router,
     workspace,
@@ -391,6 +392,7 @@ app.include_router(settings_router.router)
 app.include_router(discrepancies.router)
 app.include_router(fact_ledger.router)
 app.include_router(entity_news.router)
+app.include_router(initial_screening_actions.router)
 
 
 @app.get("/")

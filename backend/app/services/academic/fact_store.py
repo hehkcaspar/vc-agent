@@ -176,11 +176,14 @@ def _recent_news(scholar_id: str, limit: int) -> list[dict[str, Any]]:
 
     Sorts by `published_date` with `id` (ISO-timestamp of append) as
     the fallback, so items the LLM couldn't date still land in
-    discovery order.
+    discovery order. Hides records the refinement pipeline rejected
+    (``_rejected: True``) — they stay on disk as audit trail but
+    shouldn't reach Layer 3 dim runners.
     """
     items = read_records(scholar_id, "news")
     if not items:
         return []
+    items = [it for it in items if not it.get("_rejected")]
     items.sort(
         key=lambda r: (r.get("published_date") or "", r.get("id") or ""),
         reverse=True,

@@ -539,6 +539,24 @@
   margin: 0;
 }
 
+.entity-edit-textarea {
+  width: 100%;
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.4;
+}
+
+.entity-edit-founder-departed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-end;
+  margin-bottom: 8px;
+  font-size: var(--text-xs);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
 .entity-edit-stage-group {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2935,6 +2953,17 @@
   font-size: var(--text-xs);
 }
 
+.facts-section-info {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-tertiary);
+  cursor: help;
+}
+
+.facts-section-info:hover {
+  color: var(--color-text-secondary);
+}
+
 .facts-section-edit {
   margin-left: auto;
   display: inline-flex;
@@ -3370,12 +3399,25 @@
 .facts-coinvestor-chip {
   display: inline-flex;
   align-items: center;
+  gap: 4px;
   padding: 2px 10px;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: 12px;
   font-size: var(--text-xs);
   color: var(--color-text-primary);
+}
+
+.facts-coinvestor-chip--linked {
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+
+.facts-coinvestor-chip--linked:hover {
+  background: var(--color-bg-elevated, var(--color-bg-secondary));
+  border-color: var(--color-border-strong, var(--color-text-tertiary));
+  color: var(--color-link, var(--color-text-primary));
 }
 
 /* ============================================================ */
@@ -3826,6 +3868,25 @@
 
 .entity-news-title a:hover {
   text-decoration: underline;
+}
+
+.entity-news-url-status {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(217, 119, 6, 0.12);
+  color: #d97706;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: help;
+  vertical-align: baseline;
+}
+
+.entity-news-title a:hover .entity-news-url-status {
+  text-decoration: none;
 }
 
 .entity-news-summary {

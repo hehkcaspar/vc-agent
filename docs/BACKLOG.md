@@ -2,6 +2,125 @@
 
 Future-development items that are known but not yet scheduled. Newest first.
 
+---
+
+## Tier 2: extract `services/grounded_extraction/` shared module
+
+**Status:** not started · **Priority:** medium · **Filed:** 2026-05-02
+
+### Problem
+The verify→triage→url_fallback pipeline exists in two places:
+- `services/academic/refinement.py` — async fire-and-forget, scholar-keyed via `scholar_id`, writes through `services/academic/file_utils.py`.
+- `services/portfolio/sources/news_web.py::run` — synchronous inline (added 2026-05-01), entity-keyed via `entity_id`, writes through `services/portfolio/file_utils.py`. Imports `verify_item` and `triage` directly out of `services/academic/`.
+
+Two consequences:
+1. **Drift risk**: any verify-prompt or triage-rule change has to be made twice. Different storage / lock / context-builder wiring on each side. Fixing the subject-identity verdict in 2026-05-02 (Tier 1) fortunately needed only a prompt edit; future structural changes won't be that lucky.
+2. **Cross-module reach**: portfolio code does `from ...academic.item_triage import triage` — wrong direction; portfolio should not import from academic internals.
+
+### Fix sketch
+New top-level `backend/app/services/grounded_extraction/`:
+
+```
+grounded_extraction/
+    __init__.py
+    fetcher.py            # grounded_search_json (no_grounding filter, byte→char, search-meta capture)
+    item_verification.py  # moved from academic/
+    item_triage.py        # moved from academic/
+    url_fallback.py       # moved from academic/
+    refinement.py         # entity-agnostic verify+triage+url_fallback orchestrator
+    storage.py            # Protocol[append, rewrite, read] for ledger writers
+    contexts.py           # Protocol[build_context(subject_id) -> str]
+```
+
+Then:
+- `services/academic/refinement.py` becomes a thin shim wiring scholar `file_utils` + `build_scholar_context` into `grounded_extraction.refinement.refine`.
+- `services/portfolio/sources/news_web.py` calls `grounded_extraction.refinement.refine` with portfolio writers + `_build_verify_context` instead of inlining the loop.
+
+Both paths converge on a single async fire-and-forget pipeline. Portfolio gets fire-and-forget for free (current sync inline → 30-60s wait on REFRESH NOW becomes ~5s + background completion).
+
+### Effort
+~1 day. The risk is keeping academic's existing tests green during the move (a lot of imports change paths). Plan: one PR for module move + import-shim, one PR for entity-agnostic refactor.
+
+---
+
+## Tier 3: retry-on-zero-grounded in `grounded_search_json`
+
+**Status:** not started · **Priority:** low · **Filed:** 2026-05-02
+
+### Problem
+Empirically observed (2026-05-02 portfolio-wide refresh): on 4 of 9 entities, the model returned items with ZERO grounding chunks across the entire response — meaning Gemini decided not to use Google Search at all, despite the prompt saying "You MUST use Google Search". Our `no_grounding` filter correctly drops these as untrustable, but the user sees an empty news tab without knowing whether (a) there genuinely is no news, or (b) the model arbitrarily skipped search this turn.
+
+### Fix sketch
+In `grounded_search_json`, after the `no_grounding` filter, if EVERY item was dropped:
+- Retry once with a stricter prompt (prepend `"You MUST call Google Search at least once for each subject before answering. If you cannot find search results, return [] — do not answer from memory."`).
+- If the retry still produces 0 grounded items, return `[]` with a structured warning that the caller can persist on the snapshot detail (`detail.no_search_executed: true`) so the UI can distinguish "no results" from "search failed".
+
+### Effort
+~2 hours. The async-retry plumbing is small; the prompt-stiffening is one block.
+
+### Why low priority
+Tier 1 (subject-identity check) is the higher-leverage fix for the data-quality complaints we have. Tier 3 only matters when the user wants to DEBUG why a refresh returned nothing. Defer until Tier 1 + Tier 2 land and we have data on whether silent zero-fetches are a real recurring problem.
+
+---
+
+## Render Google `searchEntryPoint` widget — TOS compliance for grounded responses
+
+**Status:** not started · **Priority:** medium (TOS compliance) · **Filed:** 2026-05-01
+
+### Problem
+Per the Gemini grounding API docs, `groundingMetadata.searchEntryPoint.renderedContent` is the HTML+CSS for a "Search Suggestions" widget that is **required** to be displayed when grounding was used. Quote from the docs:
+
+> `searchEntryPoint`: Contains the HTML and CSS to render the required Search Suggestions. Full usage requirements are detailed in the [Terms of Service](https://ai.google.dev/gemini-api/terms#grounding-with-google-search).
+
+Today (2026-05-01) `services/academic/llm_client.py::_extract_grounding` captures `search_entry_html` into the grounding dict, but no caller persists or renders it. The portfolio News tab + scholar dossiers display per-item URLs as attribution (`item.url`, `item.source`) but the Google-mandated Search Suggestions widget is missing.
+
+### Fix sketch
+- Persist `search_entry_html` per refresh (e.g., on the `last_snapshot` for news_web) so the frontend can render it once per refresh instead of per item.
+- Frontend News tab: render the widget at the bottom of the feed when present (sandboxed `<iframe srcdoc=...>` to isolate Google's CSS from our app's).
+- Same for scholar dossier news.
+- Decide whether IS / Risk Analysis memos (which also use grounded search) need a per-memo Search Suggestions block.
+
+### Effort
+~Half day. Trivially small backend (already extracted); frontend needs the iframe + sandboxing right.
+
+### Open question
+Strict reading of the TOS says "must be displayed". Pragmatic reading: as long as we cite each grounded source per item, attribution is satisfied. Recommend a quick legal-review check before deciding scope.
+
+---
+
+## Inline markdown editor for IS / Risk Analysis memos
+
+**Status:** not started · **Priority:** medium · **Filed:** 2026-05-01
+
+### Problem
+Users want to hand-edit generated `.md` deliverables (`Deliverables/Memos/initial_screening.md`, `..._v2.md`, `Deliverables/Reports/risk_analyze.md`) directly in the UI — typically to fix LLM mistakes that aren't structural (a wrong number the model fabricated, a sentence that reads awkwardly) and that the upstream "fix the facts and recompose" flow can't address cheaply.
+
+The CS3 work shipped 2026-05-01 deliberately did NOT build this:
+- We extended `EntityEditModal` with all canonical metadata fields (Identity & deal, Founders, Key team, team_size).
+- We added a **Recompose** button that re-runs only the composer phase against the existing section JSONs (~10 s, one Gemini call).
+- Together those serve "memo is wrong because facts are wrong" — fix facts, recompose, done.
+
+But "memo is wrong because the LLM phrased something poorly / fabricated a number not in the JSONs" is a real residual case. The user still wants a markdown editor for those.
+
+### Open design question
+Need to decide how this composes with the agent-rerun lifecycle. Three options:
+- (a) Auto-flip `origin_type` to `user` on first manual edit (silent) — protects the edit but hides the divergence from the section JSONs forever.
+- (b) "Fork" semantics — manual edit creates a `*_user_edited.md` sibling and the original stays agent-managed; UI shows both with a toggle.
+- (c) Section-JSON editor instead — let users edit the structured JSONs, then Recompose. More aligned with Facts-vs-Opinions but more clicks.
+
+User's explicit request (2026-05-01) is option (a) or (b) — i.e., a real `.md` editor — so plan for that. Option (c) is a non-substitute for the residual case.
+
+### Fix sketch
+- Backend: new `PUT /entities/{entity_id}/workspace/file/{node_id}/content` accepting `{ content: str, expected_version_id: str | null }`. Reuses existing `WorkspaceService.write_file` with `origin_type="user"`. Rejects 415 for binary MIME types.
+- Frontend `FilePreview` (in `EntityDetail.tsx`): Edit button (lucide `Pencil`) for markdown / json / txt. Swaps `MarkdownView` → `<textarea>`. Save → PUT → refetch.
+- Frontend `EntityInitialScreeningTab`: same Edit button next to Recompose / Review notes / Source.
+- Decide (a)/(b) before implementation. Surface the implication in the Save toast: "Auto-promoted to user-managed (next agent run will not overwrite)" or "Saved as fork: <path>".
+
+### Effort
+~1 day for the editor itself. The hard part is the (a)/(b) UX call — make sure the user has signed off before implementing, since reverting either choice means breaking saved edits.
+
+---
+
 **Current priority order (2026-04-23 audit):**
 1. ~~`test_chat_api.py` — 3 red tests~~ — **✅ resolved 2026-04-22**: all 3 were test-code drift against evolved production (use_deep_agent→react, CHAT_USE_DEEP_AGENT→CHAT_DEFAULT_AGENT_MODE, preset session-id requirement). Tests realigned; full suite 250/250 (excluding pre-existing `test_three_paths_e2e.py` fixture bug, see below).
 2. ~~URL routing — restore browser back/forward + survive refresh~~ — **✅ resolved 2026-04-22**: 6-commit rollout wired BrowserRouter + detail routes (`/portfolio/entities/:id/:subTab?`, `/academic/scholars/:id/:subTab?`) + search-param filters + modal routes (`/portfolio/new`, `/portfolio/parking-lot`, `/portfolio/entities/:id/edit`, `/academic/new`) + settings section path param + `?chat=<sid>` for session reattach + 404 catch-all. Job reattach already worked via backend `active_job_id` — no new endpoint needed. Two polish items deferred (see below).

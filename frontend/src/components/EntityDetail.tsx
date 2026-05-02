@@ -461,6 +461,7 @@ export function EntityDetail({
               setPreviewNode(node);
               onContentTabChange('workroom');
             }}
+            onTreeChanged={() => { void mutateTree(); }}
           />
         </div>
       )}
@@ -476,6 +477,7 @@ export function EntityDetail({
               setPreviewNode(node);
               onContentTabChange('workroom');
             }}
+            onTreeChanged={() => { void mutateTree(); }}
           />
         </div>
       )}

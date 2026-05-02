@@ -1,11 +1,23 @@
 /**
- * Edit deal_stage + Taihill positions + founder status for an entity.
+ * Edit canonical facts for an entity. The Facts tab is read-only by design
+ * (Facts vs Opinions doctrine: facts are the source of truth, memos are
+ * derived). When the user wants to fix a wrong extract or add a missing
+ * fact (e.g. referral_source), the right surface is THIS modal — not the
+ * memo markdown. Re-running compose picks up the corrections.
  *
- * Three sections share a single PATCH at save: deal_stage goes to the
- * entity column, while positions (under _positions) and founder status
- * flags are merged into metadata_json. Funds can be added inline via
- * the position row's fund picker; new funds are persisted to
- * data/config/funds.json via POST /settings/funds.
+ * Sections:
+ *   1. Deal stage          — entity column
+ *   2. Identity & Deal     — one_liner, description, business_model,
+ *                            industry_tags, hq_location, founded_date,
+ *                            incorporation_*, referral_source, website
+ *   3. Our positions       — _positions[] (Taihill-side cap-table)
+ *   4. Founders            — name/title/background/linkedin_url/status
+ *   5. Key team            — name/title/background
+ *   6. Team size           — single number
+ *
+ * All non-stage fields land in metadata_json on save. The user-edited
+ * shape sets source `user` in the fact ledger so it outranks any future
+ * agent extraction (existing fact_manager precedence rule).
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -13,7 +25,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { api } from '../services/api';
 import { showToast } from '../lib/appToast';
-import { readFounders, readPositions } from '../lib/entityFormat';
+import { asArray, asString, readFounders, readPositions } from '../lib/entityFormat';
 import type {
   DealStage,
   Entity,
@@ -21,6 +33,54 @@ import type {
   FounderEntry,
   Fund,
 } from '../types';
+
+// Editable shapes — slightly looser than the canonical types so the form
+// can hold partial input without coercing nulls back to undefined.
+interface KeyTeamMember {
+  name: string;
+  title: string | null;
+  background: string | null;
+}
+
+interface IdentityFields {
+  one_liner: string;
+  description: string;
+  business_model: string;
+  industry_tags: string[];   // edited as comma-separated text → array on save
+  hq_location: string;
+  founded_date: string;
+  incorporation_jurisdiction: string;
+  incorporation_entity_type: string;
+  referral_source: string;
+  website: string;
+}
+
+function readIdentity(meta: Record<string, unknown>): IdentityFields {
+  return {
+    one_liner: asString(meta.one_liner) ?? '',
+    description: asString(meta.description) ?? '',
+    business_model: asString(meta.business_model) ?? '',
+    industry_tags: asArray<string>(meta.industry_tags).filter(
+      (s) => typeof s === 'string' && s.trim(),
+    ),
+    hq_location: asString(meta.hq_location) ?? '',
+    founded_date: asString(meta.founded_date) ?? '',
+    incorporation_jurisdiction: asString(meta.incorporation_jurisdiction) ?? '',
+    incorporation_entity_type: asString(meta.incorporation_entity_type) ?? '',
+    referral_source: asString(meta.referral_source) ?? '',
+    website: asString(meta.website) ?? '',
+  };
+}
+
+function readKeyTeam(meta: Record<string, unknown>): KeyTeamMember[] {
+  return asArray<Record<string, unknown>>(meta.key_team)
+    .map((m) => ({
+      name: asString(m.name) ?? '',
+      title: asString(m.title),
+      background: asString(m.background),
+    }))
+    .filter((m) => m.name);
+}
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -75,6 +135,15 @@ export function EntityEditModal({
     })),
   );
   const [founders, setFounders] = useState<FounderEntry[]>(() => readFounders(initialMeta));
+  const [identity, setIdentity] = useState<IdentityFields>(() => readIdentity(initialMeta));
+  const [industryTagsText, setIndustryTagsText] = useState<string>(() =>
+    readIdentity(initialMeta).industry_tags.join(', '),
+  );
+  const [keyTeam, setKeyTeam] = useState<KeyTeamMember[]>(() => readKeyTeam(initialMeta));
+  const [teamSize, setTeamSize] = useState<number | null>(() => {
+    const n = (initialMeta.team_size as unknown);
+    return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : null;
+  });
   const [saving, setSaving] = useState(false);
   const [fundList, setFundList] = useState<Fund[]>(funds);
 
@@ -137,6 +206,46 @@ export function EntityEditModal({
     );
   };
 
+  const updateFounder = <K extends keyof FounderEntry>(
+    i: number,
+    key: K,
+    value: FounderEntry[K],
+  ) => {
+    setFounders((arr) =>
+      arr.map((f, idx) => (idx === i ? { ...f, [key]: value } : f)),
+    );
+  };
+
+  const addFounder = () =>
+    setFounders((arr) => [
+      ...arr,
+      { name: '', title: null, background: null, linkedin_url: null, status: 'active' },
+    ]);
+
+  const removeFounder = (i: number) =>
+    setFounders((arr) => arr.filter((_, idx) => idx !== i));
+
+  const updateKeyTeam = <K extends keyof KeyTeamMember>(
+    i: number,
+    key: K,
+    value: KeyTeamMember[K],
+  ) => {
+    setKeyTeam((arr) =>
+      arr.map((m, idx) => (idx === i ? { ...m, [key]: value } : m)),
+    );
+  };
+
+  const addKeyTeam = () =>
+    setKeyTeam((arr) => [...arr, { name: '', title: null, background: null }]);
+
+  const removeKeyTeam = (i: number) =>
+    setKeyTeam((arr) => arr.filter((_, idx) => idx !== i));
+
+  const updateIdentity = <K extends keyof IdentityFields>(
+    key: K,
+    value: IdentityFields[K],
+  ) => setIdentity((cur) => ({ ...cur, [key]: value }));
+
   const handleSave = async () => {
     // Validate positions: fund_id required, invested_amount required.
     const bad = positions.findIndex(
@@ -147,9 +256,39 @@ export function EntityEditModal({
       return;
     }
 
+    // Validate founders/key_team have a name (other fields can be blank).
+    const badFounder = founders.findIndex((f) => !f.name.trim());
+    if (badFounder !== -1) {
+      showToast(`Founder ${badFounder + 1}: name is required.`, 'error');
+      return;
+    }
+    const badKt = keyTeam.findIndex((m) => !m.name.trim());
+    if (badKt !== -1) {
+      showToast(`Key team member ${badKt + 1}: name is required.`, 'error');
+      return;
+    }
+
     // Build the next metadata: preserve all other extract_info fields, override
-    // _positions and founders only.
+    // editable subsets only. Empty strings on identity fields → null so the
+    // backend treats "user explicitly blanked this" the same as unset.
     const nextMeta: Record<string, unknown> = { ...initialMeta };
+
+    // Identity & Deal — strip blanks to null so we don't persist "" clutter.
+    const blankToNull = (v: string) => (v.trim() === '' ? null : v.trim());
+    nextMeta.one_liner = blankToNull(identity.one_liner);
+    nextMeta.description = blankToNull(identity.description);
+    nextMeta.business_model = blankToNull(identity.business_model);
+    nextMeta.industry_tags = industryTagsText
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    nextMeta.hq_location = blankToNull(identity.hq_location);
+    nextMeta.founded_date = blankToNull(identity.founded_date);
+    nextMeta.incorporation_jurisdiction = blankToNull(identity.incorporation_jurisdiction);
+    nextMeta.incorporation_entity_type = blankToNull(identity.incorporation_entity_type);
+    nextMeta.referral_source = blankToNull(identity.referral_source);
+    nextMeta.website = blankToNull(identity.website);
+
     nextMeta._positions = positions.map((p) => ({
       fund_id: p.fund_id,
       invested_amount: p.invested_amount,
@@ -161,15 +300,21 @@ export function EntityEditModal({
       notes: p.notes,
     }));
 
-    if (founders.length > 0) {
-      nextMeta.founders = founders.map((f) => ({
-        name: f.name,
-        title: f.title,
-        background: f.background,
-        linkedin_url: f.linkedin_url,
-        status: f.status ?? 'active',
-      }));
-    }
+    nextMeta.founders = founders.map((f) => ({
+      name: f.name.trim(),
+      title: blankToNull(f.title ?? ''),
+      background: blankToNull(f.background ?? ''),
+      linkedin_url: blankToNull(f.linkedin_url ?? ''),
+      status: f.status ?? 'active',
+    }));
+
+    nextMeta.key_team = keyTeam.map((m) => ({
+      name: m.name.trim(),
+      title: blankToNull(m.title ?? ''),
+      background: blankToNull(m.background ?? ''),
+    }));
+
+    nextMeta.team_size = teamSize;
 
     setSaving(true);
     try {
@@ -187,7 +332,7 @@ export function EntityEditModal({
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`Edit — ${entity.name}`} size="standard">
+    <Modal isOpen={isOpen} onClose={onClose} title={`Edit — ${entity.name}`} size="wide">
       <div className="modal-body entity-edit-body">
         {/* ── Deal stage ─────────────────────────── */}
         <section className="entity-edit-section">
@@ -209,6 +354,124 @@ export function EntityEditModal({
                 <span className="entity-edit-stage-hint">{opt.hint}</span>
               </label>
             ))}
+          </div>
+        </section>
+
+        {/* ── Identity & Deal ────────────────────── */}
+        <section className="entity-edit-section">
+          <h4 className="entity-edit-section-title">Identity &amp; deal</h4>
+          <p className="entity-edit-hint">
+            Canonical facts about the company. Edits here flow into the Facts tab and re-runs of Initial Screening / composer.
+          </p>
+          <div className="form-group">
+            <label className="form-label">One-liner</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="Single-sentence pitch"
+              value={identity.one_liner}
+              onChange={(e) => updateIdentity('one_liner', e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Description</label>
+            <textarea
+              className="form-input entity-edit-textarea"
+              rows={3}
+              placeholder="2–4 sentence company description"
+              value={identity.description}
+              onChange={(e) => updateIdentity('description', e.target.value)}
+            />
+          </div>
+          <div className="entity-edit-position-row">
+            <div className="form-group entity-edit-field-grow">
+              <label className="form-label">Business model</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. SaaS, marketplace, hardware"
+                value={identity.business_model}
+                onChange={(e) => updateIdentity('business_model', e.target.value)}
+              />
+            </div>
+            <div className="form-group entity-edit-field-grow">
+              <label className="form-label">HQ location</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="city, state/country"
+                value={identity.hq_location}
+                onChange={(e) => updateIdentity('hq_location', e.target.value)}
+              />
+            </div>
+            <div className="form-group entity-edit-field-narrow">
+              <label className="form-label">Founded</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="YYYY or YYYY-MM-DD"
+                value={identity.founded_date}
+                onChange={(e) => updateIdentity('founded_date', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Industry tags (comma-separated)</label>
+            <input
+              type="text"
+              className="form-input"
+              placeholder="fintech, B2B SaaS"
+              value={industryTagsText}
+              onChange={(e) => setIndustryTagsText(e.target.value)}
+            />
+          </div>
+          <div className="entity-edit-position-row">
+            <div className="form-group entity-edit-field-grow">
+              <label className="form-label">Website</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="example.com"
+                value={identity.website}
+                onChange={(e) => updateIdentity('website', e.target.value)}
+              />
+            </div>
+            <div className="form-group entity-edit-field-grow">
+              <label className="form-label">Referral source</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g. Peter Pan, NEVY Summit"
+                value={identity.referral_source}
+                onChange={(e) => updateIdentity('referral_source', e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="entity-edit-position-row">
+            <div className="form-group entity-edit-field-grow">
+              <label className="form-label">Incorporation jurisdiction</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="Delaware / Singapore"
+                value={identity.incorporation_jurisdiction}
+                onChange={(e) =>
+                  updateIdentity('incorporation_jurisdiction', e.target.value)
+                }
+              />
+            </div>
+            <div className="form-group entity-edit-field-narrow">
+              <label className="form-label">Entity type</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="C-Corp / LLC / Pte Ltd"
+                value={identity.incorporation_entity_type}
+                onChange={(e) =>
+                  updateIdentity('incorporation_entity_type', e.target.value)
+                }
+              />
+            </div>
           </div>
         </section>
 
@@ -348,34 +611,168 @@ export function EntityEditModal({
         </section>
 
         {/* ── Founders ───────────────────────────── */}
-        {founders.length > 0 && (
-          <section className="entity-edit-section">
-            <h4 className="entity-edit-section-title">Founders — mark as departed</h4>
-            <p className="entity-edit-hint">
-              Departed founders stay in the record with a strike-through in the header.
-            </p>
-            <div className="entity-edit-founders">
+        <section className="entity-edit-section">
+          <div className="entity-edit-section-header">
+            <h4 className="entity-edit-section-title">Founders</h4>
+            <button type="button" className="btn-text entity-edit-add-btn" onClick={addFounder}>
+              <Plus size={14} /> Add founder
+            </button>
+          </div>
+          <p className="entity-edit-hint">
+            Departed founders stay in the record with a strike-through in the header.
+          </p>
+          {founders.length === 0 ? (
+            <p className="entity-edit-empty">No founders recorded yet.</p>
+          ) : (
+            <div className="entity-edit-positions">
               {founders.map((f, i) => (
-                <label key={i} className="entity-edit-founder-row">
-                  <input
-                    type="checkbox"
-                    checked={f.status === 'departed'}
-                    onChange={() => toggleFounderStatus(i)}
-                  />
-                  <span
-                    className={
-                      'entity-edit-founder-name' +
-                      (f.status === 'departed' ? ' entity-edit-founder-name--departed' : '')
-                    }
-                  >
-                    {f.status === 'departed' ? <s>{f.name}</s> : f.name}
-                  </span>
-                  {f.title && <span className="entity-edit-founder-title">{f.title}</span>}
-                </label>
+                <div key={i} className="entity-edit-position">
+                  <div className="entity-edit-position-row">
+                    <div className="form-group entity-edit-field-grow">
+                      <label className="form-label">Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={f.name}
+                        onChange={(e) => updateFounder(i, 'name', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group entity-edit-field-grow">
+                      <label className="form-label">Title</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="CEO / CTO / …"
+                        value={f.title ?? ''}
+                        onChange={(e) => updateFounder(i, 'title', e.target.value || null)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-icon-danger entity-edit-remove"
+                      onClick={() => removeFounder(i)}
+                      aria-label="Remove founder"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Background</label>
+                    <textarea
+                      className="form-input entity-edit-textarea"
+                      rows={2}
+                      placeholder="Brief bio / prior experience"
+                      value={f.background ?? ''}
+                      onChange={(e) =>
+                        updateFounder(i, 'background', e.target.value || null)
+                      }
+                    />
+                  </div>
+                  <div className="entity-edit-position-row">
+                    <div className="form-group entity-edit-field-grow">
+                      <label className="form-label">LinkedIn URL</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        placeholder="https://linkedin.com/in/…"
+                        value={f.linkedin_url ?? ''}
+                        onChange={(e) =>
+                          updateFounder(i, 'linkedin_url', e.target.value || null)
+                        }
+                      />
+                    </div>
+                    <label className="entity-edit-founder-departed">
+                      <input
+                        type="checkbox"
+                        checked={f.status === 'departed'}
+                        onChange={() => toggleFounderStatus(i)}
+                      />
+                      <span>Departed</span>
+                    </label>
+                  </div>
+                </div>
               ))}
             </div>
-          </section>
-        )}
+          )}
+        </section>
+
+        {/* ── Key team ───────────────────────────── */}
+        <section className="entity-edit-section">
+          <div className="entity-edit-section-header">
+            <h4 className="entity-edit-section-title">Key team</h4>
+            <button type="button" className="btn-text entity-edit-add-btn" onClick={addKeyTeam}>
+              <Plus size={14} /> Add member
+            </button>
+          </div>
+          {keyTeam.length === 0 ? (
+            <p className="entity-edit-empty">No key team members recorded.</p>
+          ) : (
+            <div className="entity-edit-positions">
+              {keyTeam.map((m, i) => (
+                <div key={i} className="entity-edit-position">
+                  <div className="entity-edit-position-row">
+                    <div className="form-group entity-edit-field-grow">
+                      <label className="form-label">Name</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={m.name}
+                        onChange={(e) => updateKeyTeam(i, 'name', e.target.value)}
+                      />
+                    </div>
+                    <div className="form-group entity-edit-field-grow">
+                      <label className="form-label">Title</label>
+                      <input
+                        type="text"
+                        className="form-input"
+                        value={m.title ?? ''}
+                        onChange={(e) => updateKeyTeam(i, 'title', e.target.value || null)}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-icon-danger entity-edit-remove"
+                      onClick={() => removeKeyTeam(i)}
+                      aria-label="Remove member"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Background</label>
+                    <textarea
+                      className="form-input entity-edit-textarea"
+                      rows={2}
+                      value={m.background ?? ''}
+                      onChange={(e) =>
+                        updateKeyTeam(i, 'background', e.target.value || null)
+                      }
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ── Team size ──────────────────────────── */}
+        <section className="entity-edit-section">
+          <h4 className="entity-edit-section-title">Team size</h4>
+          <div className="form-group entity-edit-field-narrow">
+            <label className="form-label">Approximate headcount</label>
+            <input
+              type="number"
+              className="form-input"
+              placeholder="e.g. 12"
+              min={0}
+              step={1}
+              value={teamSize ?? ''}
+              onChange={(e) =>
+                setTeamSize(e.target.value === '' ? null : Number(e.target.value))
+              }
+            />
+          </div>
+        </section>
       </div>
 
       <div className="modal-footer">
