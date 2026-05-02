@@ -224,8 +224,6 @@ export function EntityConversation({
   useEffect(() => {
     if (!agentJob) return undefined;
     let cancelled = false;
-    const startedAt = Date.now();
-    const POLL_TIMEOUT_MS = 3 * 60 * 1000;
     // Throttle entity refetches: poll runs every 450ms, but entity refetch
     // every ~2s is enough to surface newly-appended discrepancies without
     // hammering SWR. Always fire once on terminal status.
@@ -241,6 +239,18 @@ export function EntityConversation({
         /* non-fatal */
       }
     };
+    // Tolerance for transient poll failures (network blip, 502, etc.).
+    // Pre-2026-05-02 we set agentJob=null on the FIRST exception, which
+    // killed the watch permanently — the user had to reload to recover
+    // even though the backend job was still running fine. Now we count
+    // consecutive failures and only give up after MAX_CONSECUTIVE_ERRORS
+    // (~12s of network failure at the 450ms cadence). Single blips are
+    // ignored. The backend `succeeded` / `failed` status remains the
+    // ONLY clean termination — the UI no longer imposes a hard deadline
+    // (the prior 3-minute POLL_TIMEOUT_MS was wrong: IS v2 + compose +
+    // review legitimately exceeds 3 min).
+    let consecutiveErrors = 0;
+    const MAX_CONSECUTIVE_ERRORS = 25;  // ≈12s at 450ms cadence
     const poll = async () => {
       try {
         const st = await api.chat.getMessageJob(
@@ -249,6 +259,7 @@ export function EntityConversation({
           agentJob.jobId
         );
         if (cancelled) return;
+        consecutiveErrors = 0;
         const viewingThis = sessionIdRef.current === agentJob.sessionId;
         if (viewingThis) {
           setAgentStatus(
@@ -260,22 +271,6 @@ export function EntityConversation({
         // propose_fact_update lands in metadata.
         if (st.status === 'pending' || st.status === 'running') {
           maybeRefetchEntity();
-        }
-        if (
-          (st.status === 'pending' || st.status === 'running') &&
-          Date.now() - startedAt > POLL_TIMEOUT_MS
-        ) {
-          const forSession = agentJob.sessionId;
-          setAgentJob((curr) =>
-            curr && curr.jobId === agentJob.jobId ? null : curr
-          );
-          setAgentStatus('');
-          if (sessionIdRef.current === forSession) {
-            setError(
-              'Agent run timed out in the UI. Please retry, or reopen this chat session to refresh status.'
-            );
-          }
-          return;
         }
         if (st.status === 'succeeded') {
           setWarnings(st.warnings);
@@ -331,13 +326,31 @@ export function EntityConversation({
           }
         }
       } catch (e) {
-        if (!cancelled) {
-          const forSession = agentJob.sessionId;
-          setAgentJob(null);
-          setAgentStatus('');
-          if (sessionIdRef.current === forSession) {
-            setError(e instanceof Error ? e.message : String(e));
+        if (cancelled) return;
+        consecutiveErrors += 1;
+        // Only give up after a sustained outage. Single transient
+        // failures (a 502 from the proxy, a Wi-Fi blip, Cloud Run cold
+        // start) shouldn't strand the user on a frozen UI — the next
+        // poll usually succeeds.
+        if (consecutiveErrors < MAX_CONSECUTIVE_ERRORS) {
+          // Surface a soft hint that the connection is flaky without
+          // killing the watch. The next successful poll resets to the
+          // real backend status.
+          if (sessionIdRef.current === agentJob.sessionId) {
+            setAgentStatus(
+              `Reconnecting… (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS})`
+            );
           }
+          return;
+        }
+        const forSession = agentJob.sessionId;
+        setAgentJob(null);
+        setAgentStatus('');
+        if (sessionIdRef.current === forSession) {
+          setError(
+            (e instanceof Error ? e.message : String(e)) +
+              ' — connection lost; reload the page to resume.'
+          );
         }
       }
     };
