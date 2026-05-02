@@ -14,6 +14,7 @@
  */
 
 import { WorkspaceNode } from '../types';
+import { clearPassword, getPassword, signalAuthRequired } from './auth';
 
 export type ProgressHandler = (loaded: number, total: number) => void;
 
@@ -39,6 +40,24 @@ interface XhrRequestOptions extends UploadOptions {
   headers?: Record<string, string>;
 }
 
+// Mirror auth.ts's targetsOurBackend rule. The fetch shim attaches the
+// X-Access-Password header automatically; XHR has no equivalent shim, so
+// xhrSend has to add it itself for any same-origin / direct-API URL.
+const _DIRECT_API_RAW =
+  (import.meta as unknown as { env?: { VITE_API_URL?: string } }).env
+    ?.VITE_API_URL?.trim() ?? '';
+const _useDirectApi = /^https?:\/\//i.test(_DIRECT_API_RAW);
+const _API_ORIGIN = _useDirectApi ? new URL(_DIRECT_API_RAW).origin : '';
+
+function _targetsOurBackend(url: string): boolean {
+  if (url.startsWith('/')) return true;
+  if (typeof window !== 'undefined' && url.startsWith(window.location.origin)) {
+    return true;
+  }
+  if (_useDirectApi && url.startsWith(_API_ORIGIN)) return true;
+  return false;
+}
+
 function xhrSend<T>(
   method: 'PUT' | 'POST',
   url: string,
@@ -49,10 +68,21 @@ function xhrSend<T>(
     const xhr = new XMLHttpRequest();
     xhr.open(method, url, true);
 
+    // Apply caller-supplied headers first so any explicit X-Access-Password
+    // override (rare) takes precedence over the localStorage default.
+    const sentHeaders = new Set<string>();
     if (opts.headers) {
       for (const [k, v] of Object.entries(opts.headers)) {
         xhr.setRequestHeader(k, v);
+        sentHeaders.add(k.toLowerCase());
       }
+    }
+    // Attach the shared-password header for our-backend URLs only.
+    // Signed-URL PUTs (GCS / local mint) hit external storage and must
+    // NOT carry our auth header — those rely on the URL's own signature.
+    if (_targetsOurBackend(url) && !sentHeaders.has('x-access-password')) {
+      const pw = getPassword();
+      if (pw) xhr.setRequestHeader('X-Access-Password', pw);
     }
 
     if (opts.onProgress) {
@@ -73,6 +103,12 @@ function xhrSend<T>(
           resolve(undefined as unknown as T);
         }
         return;
+      }
+      // 401 from our backend → password is wrong / expired. Match the
+      // fetch shim's behaviour: clear localStorage + signal LoginGate.
+      if (xhr.status === 401 && _targetsOurBackend(url)) {
+        clearPassword();
+        signalAuthRequired();
       }
       const snippet = xhr.responseText ? xhr.responseText.slice(0, 300) : xhr.statusText;
       reject(new Error(`HTTP ${xhr.status}: ${snippet}`));
