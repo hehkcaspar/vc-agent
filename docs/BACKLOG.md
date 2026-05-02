@@ -4,6 +4,43 @@ Future-development items that are known but not yet scheduled. Newest first.
 
 ---
 
+## `deploy_cloudrun.sh` should fail-closed on empty `APP_PASSWORD`
+
+**Status:** not started · **Priority:** **HIGH** (security regression risk) · **Filed:** 2026-05-02
+
+### Problem
+On 2026-05-02 a re-deploy to `vc-agent-backend` left the SPA wide open for ~5 minutes because the deployer didn't export `APP_PASSWORD` and the script's `: "${APP_PASSWORD:=}"` line silently defaulted to empty. `--set-env-vars="…@@APP_PASSWORD=${APP_PASSWORD}"` then OVERWROTE the previously-set value on the Cloud Run revision, and `services/main.py::shared_password_gate` skips the gate when `settings.APP_PASSWORD` is empty:
+
+```python
+expected = settings.APP_PASSWORD
+if not expected:
+    return await call_next(request)   # ← gate disabled
+```
+
+Caught immediately by `curl /entities` returning 200 without auth header; re-deployed with `APP_PASSWORD='TH2026+'` exported. But the failure mode is silent — a rushed deploy could ship the wide-open revision and only get noticed when someone external pokes the API.
+
+### Fix
+In `backend/deploy_cloudrun.sh`, replace the silent default with an explicit guard. Two acceptable shapes:
+
+**Option A — fail-closed with a clear message:**
+```bash
+if [[ -z "${APP_PASSWORD:-}" ]]; then
+  echo "ERROR: APP_PASSWORD is not set. Re-run with APP_PASSWORD=... bash backend/deploy_cloudrun.sh" >&2
+  echo "       To deliberately deploy WITHOUT a password gate (local-only / staging), pass APP_PASSWORD=DISABLE_GATE." >&2
+  exit 2
+fi
+if [[ "${APP_PASSWORD}" == "DISABLE_GATE" ]]; then
+  APP_PASSWORD=""   # explicit opt-out for staging/dev
+fi
+```
+
+**Option B — move APP_PASSWORD to Secret Manager.** Already on the backlog (`APP_PASSWORD → Secret Manager hardening`); reading from a secret eliminates the "did the deployer remember to export it?" failure mode entirely. Combine with Option A's guard so a missing secret reference is caught at deploy time instead of post-deploy.
+
+### Effort
+~15 minutes for Option A. Option B is the bigger structural fix (already filed).
+
+---
+
 ## Tier 2: extract `services/grounded_extraction/` shared module
 
 **Status:** not started · **Priority:** medium · **Filed:** 2026-05-02
