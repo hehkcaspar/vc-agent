@@ -38,22 +38,23 @@ while achieving 60–95% gross margins on dataset sales."
 >
 
 ## [1] Team
-<Render each core team member using the SHAPE dictated by `team.extras.profile_type`:
+<Render each core team member using the SHAPE dictated by `team.extras.profile_type`. The team section is the SINGLE home for founder career history (current role + prior roles, with prior-company funding outcomes inline as part of the prior-role bullet). Founder-prior fundraising/exits live HERE, NOT in [5] Funding & Traction.
+
+Compression rule: each role gets ONE sub-bullet with metrics inline. Don't fan a single role across four bullets.
 
 For a business-focused person:
-<Name> | <Role>
-  - <Prior company> | <role there>
-    - <what company does / scale / funding or market cap; specific responsibilities; 1-2 concrete outcomes with numbers>
-  - <next prior company, same bullet depth>
+<Name> | <Role at {{entity_name}}>
+  - <Current company before joining {{entity_name}}, if any> | <Title> | <Years>: <what company does, stage>. Outcome: <funding raised + exit amount/acquirer + year, OR market cap & revenue if public>. Role: <1 concrete outcome with a number>.
+  - Prior: <Prior company> | <Title> | <Years>: <one-line description with funding/exit outcome inline>.
+  - Prior: <next prior, same shape>.
 
 For an academic / research-focused person:
-<Name> | <Role>
-  - <School> | <Degree> | <Subject/Field>
-    - Research focus: <topics>
-    - Google Scholar: Citations <N>; h-index <N>; i-10 index <N>
-    - Publications: <journal/conference with impact factor / tier>
+<Name> | <Role at {{entity_name}}>
+  - <Institution> | <Title (e.g. Tenured Professor / Associate Professor / Research Scientist)> | <Field> · <N yrs in role>. Research: <topics>. GS: <C> cit / h-<H> / i-<I>. <T> pubs (<F> first, <S> senior). Top venues: <Journal (IF <N>) / Conference (Tier <X>)>.
+  - Prior: <Institution> | <Title> | <Years>. <One-line accomplishment if material.>
+  - Prior: <Institution> | <Title> | <Years>.
 
-Blend styles if a founder is both (e.g. ex-researcher now operator) — lead with the primary identity.
+Blend styles if a founder is both (e.g. ex-researcher now operator) — lead with the primary identity. Drop unknown sub-fields silently; do not write "(unknown)" inline. Omit "Prior:" sub-bullets entirely if `prior_positions[]` is empty — never write "None disclosed."
 
 3-6 members. Skip advisors unless they have real operational authority (CMO, Chief Regulatory, etc.).>
 
@@ -93,21 +94,25 @@ If a sub-field is missing in the JSON, write "Not disclosed in the materials." r
 Do NOT dump `business_model.extras.summary_paragraph` as a single paragraph — break it into the bullets above.>
 
 ## [5] Funding & Traction
-**Funding History** (bullets, one per event; omit heading if empty):
+
+This section is the cap-table of {{entity_name}} ONLY. Founder-prior fundraising / exits live in [1] Team and must NOT appear here. If `funding_traction.extras.founder_priors[]` is present in the input JSON (older runs), ignore it.
+
+**Funding History** (capital raised by {{entity_name}}, omit heading if empty):
 - <Round name + year: amount, lead, participants, valuation if disclosed>
-- <Founder prior: "Name exited Prior Co for $X to <acquirer>, <year>" OR "Name raised $X at Prior Co (no exit)">
 
 **Current Round** (bullets, not a paragraph):
 - **Ask:** $X at $Y pre/post-money via <instrument>; cap $Z if SAFE.
 - **Lead:** <name or "not disclosed">.
 - **Commits:** $<hard-circled> hard / $<soft-circled> soft.
-- **Use of funds:** <primary uses>.
+- **Use of funds:** <primary uses — forward-looking allocation only, e.g. "21-month runway for product hardening + GTM">.
 - **Close target:** <date or "not disclosed">.
 
 **Current Traction** (bullets under sub-headers):
-- **Financial:** one bullet per metric (ARR, growth, margin, pipeline $).
+- **Financial:** ACHIEVED metrics ONLY. Booked ARR, growth %, gross margin %, pipeline $. Targets, projections, and forward-looking goals belong in **Use of funds**, NEVER here. If the only "financial" data is a target ARR (no actuals), write "Pre-revenue" — do NOT restate the target.
 - **Customers:** one bullet per named customer or cohort (e.g. "35+ enterprise: Unity, Nexon, Netflix, Scopely"). For lesser-known names, add brief context in parentheses.
 - **Product usage / engagement:** one bullet per metric (DAU/MAU, retention, volume). Omit this sub-header if empty.
+
+**Hard rule (no shared numbers):** the same metric (e.g. "$1M ARR") must NOT appear in both **Use of funds** and **Current Traction → Financial**. Forward-looking → Use of funds. Achieved → Financial. If a number is only forward-looking, Financial reads "Pre-revenue" or "Not disclosed in the materials."
 
 ## [6] Source
 <Single line: the deal source (referral person or firm) from the entity context passed in.

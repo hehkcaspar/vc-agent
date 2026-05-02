@@ -15,6 +15,7 @@ Three-layer dedup (shared shape with scholar news_web):
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timedelta, timezone
@@ -29,13 +30,16 @@ from ...academic.sources._incremental import (
     format_known_titles,
     sort_items_recent_first,
 )
+from ...grounded_extraction import apply_url_fallback, refine_jsonl
 from ..events_sync import log_event, news_significance
 from ..file_utils import (
     append_record,
     last_snapshot_for_source,
     read_records,
     record_snapshot,
+    rewrite_records,
 )
+from ..refinement_storage import PORTFOLIO_STORAGE
 
 logger = logging.getLogger(__name__)
 
@@ -274,12 +278,24 @@ async def _rank_key_persons(
 # ── Prompts ───────────────────────────────────────────────────────────
 
 
+_COMMON_GROUNDING_RULE = (
+    "You MUST use Google Search to find each item. Do NOT rely on "
+    "training-data memory. Every item you emit must be backed by a "
+    "specific real article that you actually retrieved. If Google "
+    "Search returns no relevant results for this company, return an "
+    "empty array `[]` — do NOT fabricate plausible-sounding stories. "
+    "Only emit items where the URL points to a SPECIFIC article page "
+    "(not a homepage, listing index, or profile page). If you cannot "
+    "find a specific article URL for a claim, omit that item. "
+)
+
 _COMMON_NEWS_SHAPE = (
     "Return a JSON array where each item has: "
     "`title`, `url`, `published_date` (ISO 8601 if known), `source`, "
     "`summary` (1-3 sentences), `category` (one of: funding, launch, "
     "partnership, award, acquisition, appointment, product, "
-    "talk, other)."
+    "talk, other). "
+    "Return ONLY the JSON array — no prose, no markdown, no headers."
 )
 
 _COMMON_EXCLUSIONS = (
@@ -290,6 +306,7 @@ _COMMON_EXCLUSIONS = (
 )
 
 _BOOTSTRAP_PROMPT = (
+    _COMMON_GROUNDING_RULE +
     "Find news, press releases, product launches, funding "
     "announcements, or blog posts about portfolio company "
     "**{company}**{tag_clause} — full history, no time limit. "
@@ -302,6 +319,7 @@ _BOOTSTRAP_PROMPT = (
 )
 
 _INCREMENTAL_PROMPT = (
+    _COMMON_GROUNDING_RULE +
     "Find news, press releases, product launches, funding "
     "announcements, or blog posts about portfolio company "
     "**{company}**{tag_clause} published since {cutoff}. "
@@ -312,8 +330,7 @@ _INCREMENTAL_PROMPT = (
     "The following headlines are already in our ledger — skip reposts "
     "and reworded versions, only include fresh developments:\n"
     "{known_titles_block}\n"
-    "Return ONLY a JSON array — no prose, no markdown, no section "
-    "headers. " + _COMMON_NEWS_SHAPE
+    + _COMMON_NEWS_SHAPE
 )
 
 
@@ -424,6 +441,102 @@ async def _filter_news(
     return [candidates[i] for i in sorted(accepted) if i < len(candidates)]
 
 
+# ── Verify-item context ───────────────────────────────────────────────
+
+
+def _build_verify_context(
+    company: str,
+    metadata: dict[str, Any],
+    tags: list[Any],
+) -> str:
+    """Compose the ``context`` string fed to ``verify_item`` so the
+    flash-lite grounded search has enough disambiguation signal to tell
+    'Glacian Technologies (Penn State data-center cooling spin-out)'
+    from any other company sharing a similar name.
+
+    Mirrors academic ``build_scholar_context`` but for portfolio
+    entities — name + sector tags + HQ + founder names + one-liner.
+    """
+    parts: list[str] = [f"Company: {company}"]
+    one_liner = (metadata.get("one_liner") or "").strip()
+    if one_liner:
+        parts.append(f"One-liner: {one_liner[:200]}")
+    if isinstance(tags, list) and tags:
+        parts.append(
+            "Sectors: " + ", ".join(str(t) for t in tags[:6] if str(t).strip())
+        )
+    hq = (metadata.get("hq_location") or "").strip()
+    if hq:
+        parts.append(f"HQ: {hq}")
+    founders = _active_founders(metadata)
+    if founders:
+        names = [
+            (f.get("name") or "").strip()
+            for f in founders[:3] if (f.get("name") or "").strip()
+        ]
+        if names:
+            parts.append("Founders: " + ", ".join(names))
+    return ". ".join(parts)
+
+
+# ── URL-status backfill ───────────────────────────────────────────────
+
+
+async def _backfill_url_status(
+    entity_id: str, records: list[dict[str, Any]],
+) -> None:
+    """One-shot validate any existing records lacking ``_url_status``.
+
+    Portfolio news_web pre-2026-05-01 wrote records without going through
+    ``apply_url_fallback`` (the validator wasn't wired). After the wiring
+    fix, those rows still claim every URL is fine (no `_url_status` ⇒
+    frontend treats it as `verified` and shows no badge). This pass
+    re-validates them in place — vertex redirects get resolved, dead
+    URLs get tagged, and the records are rewritten atomically.
+
+    Mutates ``records`` in place AND rewrites the underlying .jsonl.
+    Caller's ``existing`` reference reflects the new state, so the
+    incremental prompt + dedup downstream pick up resolved URLs.
+    """
+    pending = [r for r in records if r.get("_url_status") in (None, "")]
+    if not pending:
+        return
+    import httpx
+
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(8.0),
+        follow_redirects=True,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/128.0.0.0 Safari/537.36"
+            ),
+        },
+    ) as client:
+        for r in pending:
+            try:
+                await apply_url_fallback(r, client=client)
+            except Exception:  # noqa: BLE001
+                logger.debug(
+                    "news_web backfill: apply_url_fallback failed (non-fatal)",
+                    exc_info=True,
+                )
+                r.setdefault("_url_status", "timeout")
+
+    try:
+        await rewrite_records(entity_id, "news", records)
+        logger.info(
+            "news_web: backfilled _url_status on %d existing record(s) for %s",
+            len(pending), entity_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "news_web: backfill rewrite failed for %s — records mutated in memory only",
+            entity_id, exc_info=True,
+        )
+
+
 # ── Main run ──────────────────────────────────────────────────────────
 
 
@@ -483,6 +596,28 @@ async def run(
 
     # Existing ledger — used for incremental prompt context + post-search dedup.
     existing = read_records(entity_id, "news")
+
+    # Backfill: any record predating url-validation lacks `_url_status`.
+    # Validate them in-place once so the user's already-displayed broken
+    # URLs get an unverified badge (or fall back to a Google search).
+    # First ever run will see existing == [] and skip this whole block.
+    await _backfill_url_status(entity_id, existing)
+
+    # Crash-recovery: kick off refinement on any leftover `_refinement_status: pending`
+    # records from a prior run that didn't finish. fire-and-forget; this
+    # task and the post-fetch refinement task may run concurrently —
+    # refine_jsonl reads + atomically rewrites under the per-entity write
+    # lock so they serialize safely. If no pending records exist, the
+    # background task short-circuits to a no-op.
+    company_context_for_recovery = _build_verify_context(company, metadata, tags)
+    if any(r.get("_refinement_status") == "pending" for r in existing):
+        asyncio.create_task(
+            refine_jsonl(
+                entity_id, "news",
+                context=company_context_for_recovery,
+                storage=PORTFOLIO_STORAGE,
+            )
+        )
 
     # Cutoff / bootstrap decision. We inline a thin version of the
     # scholar ``incremental_cutoff`` helper because the scholar version
@@ -653,11 +788,22 @@ async def run(
         domain_label="Industry",
     )
 
+    # Persist all surviving items as `_refinement_status: "pending"`
+    # then fire-and-forget the verify→triage→url_fallback orchestrator
+    # in the background. Matches academic news_web's UX pattern:
+    # REFRESH NOW returns fast (~10s for the grounded search), and
+    # the background task marks records as finalized / rejected over
+    # the next ~30-60s. The frontend filters records flagged
+    # `_rejected: True` (set by refinement) so the user only sees
+    # surviving items once refinement completes.
+    company_context = _build_verify_context(company, metadata, tags)
+
     # Append unmatched items; log events.
     count = 0
     for cand_idx, it in enumerate(after_rule):
         if canon_map.get(cand_idx) is not None:
             continue
+        it["_refinement_status"] = "pending"
         title = (it.get("title") or "").strip()
         url_key = _normalize_url(it.get("url") or "")
         await append_record(entity_id, "news", it)
@@ -685,6 +831,21 @@ async def run(
         except Exception:
             logger.warning("news_web: log_event failed", exc_info=True)
         count += 1
+
+    # Fire-and-forget: verify → triage → URL fallback in the background.
+    # Each newly-persisted record gets re-marked `_refinement_status:
+    # finalized` (or `rejected` with `_rejected: True`) over the next
+    # ~30-60s. Crash-recovery for prior pending items is handled by the
+    # earlier task at the top of run() — both serialize on the per-entity
+    # write lock inside refine_jsonl.
+    if count > 0:
+        asyncio.create_task(
+            refine_jsonl(
+                entity_id, "news",
+                context=company_context,
+                storage=PORTFOLIO_STORAGE,
+            )
+        )
 
     sid = await record_snapshot(
         entity_id,

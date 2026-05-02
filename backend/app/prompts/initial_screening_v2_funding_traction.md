@@ -7,7 +7,7 @@ You are a focused research agent for **{{entity_name}}**. Your sole deliverable 
 
 Either works. Don't write prose anywhere else.
 
-This section merges funding history + current round + current traction into Taihill's single [5] Funding & Traction.
+This section is the **cap-table of {{entity_name}} only**. Founder-prior fundraising / exits live in the team section ([1] Team) — do NOT duplicate them here. The composer treats this section as the company's own funding history.
 
 ---
 
@@ -17,11 +17,10 @@ Three parts:
 
 ### a. Funding History
 
-Previous investments to the company AND notable prior fundraising by the founder(s). Taihill cares about both (an operator's prior $1B exit is as relevant as this company's Seed round).
+Capital raised by **{{entity_name}}** only. NOT prior ventures of the founders (those are captured in the team section's prior_positions[]).
 
-Format (per round or event):
+Format (per round):
 - `<Round label>: <amount> from <investors>, <year>, <valuation if disclosed>`
-- Founder priors: `<Founder>: exited <prior company> for <amount> to <acquirer>, <year>`
 
 ### b. Current Round
 
@@ -82,11 +81,6 @@ Contradictions between deck and signed doc → call `propose_fact_update` (e.g. 
       { "round": "Seed", "amount": "$2M", "year": 2023, "lead": "...",
         "participants": ["..."], "note": "prior to current ask" }
     ],
-    "founder_priors": [
-      { "founder": "Michael Schrader", "event": "exit",
-        "prior_company": "Vaxess", "amount": "$100M+ raised, no exit",
-        "notes": "12 years as CEO, stepped down May 2024" }
-    ],
     "current_round": {
       "amount": "$1M - $1.5M", "instrument": "SAFE", "cap": "$12M post-money",
       "lead": "not disclosed", "hard_circled": "$625K", "soft_circled": "$2M+",
@@ -98,9 +92,17 @@ Contradictions between deck and signed doc → call `propose_fact_update` (e.g. 
       "product_usage":[ "2B+ chat messages/mo" ]
     },
     "coinvestors_notes": [
-      { "name": "Ulu Ventures", "tier": "established seed fund",
-        "portfolio_recent": ["..."], "signal": "prior investor in CEO's past company — positive" },
-      { "name": "Apollo Labs", "tier": "unknown", "signal": "no identifiable VC fund under this name" }
+      { "name": "Ulu Ventures",
+        "url": "https://uluventures.com",          // canonical homepage if surfaced — null if not in your search results
+        "tier": "established seed fund",
+        "founding_year": 2008,                     // optional — only if surfaced; null otherwise
+        "aum_usd_str": "$300M+",                   // optional — short string with units; null otherwise
+        "sectors": ["enterprise SaaS", "fintech"], // optional — empty array if not surfaced
+        "portfolio_recent": ["..."],
+        "signal": "prior investor in CEO's past company — positive" },
+      { "name": "Apollo Labs", "url": null, "tier": "unknown", "founding_year": null,
+        "aum_usd_str": null, "sectors": [], "portfolio_recent": [],
+        "signal": "no identifiable VC fund under this name" }
     ]
   }
 }

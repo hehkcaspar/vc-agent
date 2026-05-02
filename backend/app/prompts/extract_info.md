@@ -53,7 +53,7 @@ Produce **one JSON object** with exactly these fields. All top-level keys are re
       "name": "string",
       "title": "string | null — e.g. 'CEO', 'CTO'",
       "background": "string | null — brief bio / prior experience",
-      "linkedin_url": "string | null"
+      "linkedin_url": "string | null — emit ONLY if a canonical LinkedIn URL (https://(www.)?linkedin.com/in/<slug>) appears literally in the source doc. Don't infer, guess, or construct from a name. If LinkedIn is referenced but no canonical URL is present, set null and add a row to open_gaps[] like '<Founder>: LinkedIn referenced but no canonical URL extractable'."
     }
   ],
   "team_size": "number | null — approximate headcount",

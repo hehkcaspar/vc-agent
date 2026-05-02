@@ -170,8 +170,12 @@ export function EntityNewsTab({ entityId }: EntityNewsTabProps) {
         </div>
       ) : (
         <ul className="entity-news-feed">
-          {items.map((item) => (
-            <NewsRow key={item.id} item={item} />
+          {items.map((item, idx) => (
+            // Defence-in-depth: combine id + index so historical jsonl
+            // files written by the (now-fixed) buggy ``_new_iso_id``
+            // (string-compare same-second escalation) don't trigger
+            // React duplicate-key warnings. New writes get unique ids.
+            <NewsRow key={`${item.id}-${idx}`} item={item} />
           ))}
         </ul>
       )}
@@ -179,7 +183,25 @@ export function EntityNewsTab({ entityId }: EntityNewsTabProps) {
   );
 }
 
+// Map url_status → human-readable hint for the unverified pill's title attr.
+// Only `verified` hides the pill; everything else is best-effort.
+const URL_STATUS_HINT: Record<string, string> = {
+  verified: 'URL verified — page title matched the article claim.',
+  title_mismatch:
+    'URL resolves but the page title does not match the article — link may be a homepage / redirect / unrelated article.',
+  status_4xx: 'URL returned 4xx (page not found or removed).',
+  blocked:
+    'Server blocked our content check (bot wall / 403 / 999) — content not verifiable.',
+  timeout: 'URL timed out or network error during verification.',
+  no_title_tag: 'Page returned no <title> tag — content not verifiable.',
+  fallback_search: 'Original URL failed; this is a Google search query, not a direct article link.',
+  no_anchor: 'No URL anchor available; nothing to validate.',
+  invalid_url: 'URL is not a valid http(s) link.',
+};
+
 function NewsRow({ item }: { item: EntityNewsItem }) {
+  const status = item.url_status;
+  const showUnverified = !!item.url && status && status !== 'verified';
   return (
     <li className="entity-news-row">
       <div className="entity-news-row-head">
@@ -194,6 +216,14 @@ function NewsRow({ item }: { item: EntityNewsItem }) {
           <a href={item.url} target="_blank" rel="noopener noreferrer">
             {item.title}
             <ExternalLink size={12} style={{ marginLeft: 4, verticalAlign: 'baseline' }} />
+            {showUnverified && (
+              <span
+                className="entity-news-url-status"
+                title={URL_STATUS_HINT[status as string] ?? `URL ${status}`}
+              >
+                unverified
+              </span>
+            )}
           </a>
         ) : (
           <span>{item.title}</span>

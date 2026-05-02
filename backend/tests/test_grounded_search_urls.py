@@ -77,16 +77,35 @@ def test_attach_maps_each_item_to_its_support():
     assert items[1]["_url_source"] == "grounding"
 
 
-def test_attach_overwrites_llm_fabricated_url():
-    text = '[{"title": "A", "url": "https://fake.example/hallucinated"}]'
+def test_attach_preserves_llm_url_keeps_chunks_as_backup():
+    # Contract change (2026-05-01): we no longer blindly overwrite the LLM's
+    # URL with the first chunk URL. The LLM URL is typically the more
+    # specific article URL; the chunk URL is whichever source the model
+    # cited and is often a coarser homepage / listing page. url_fallback
+    # picks whichever one content-validates against the item title.
+    text = '[{"title": "A", "url": "https://specific.example/article"}]'
+    items, _, spans = _parse_json_array_with_spans(text)
+    chunks = [{"url": "https://coarse.example/listing", "title": "", "domain": ""}]
+    supports = [{"start": 1, "end": len(text) - 1, "chunk_indices": [0]}]
+    _attach_grounding_urls(items, text, spans, _grounding(chunks, supports))
+    assert items[0]["url"] == "https://specific.example/article"
+    assert items[0]["_url_source"] == "llm_with_grounding"
+    assert items[0]["_llm_url"] == "https://specific.example/article"
+    assert items[0]["_grounding_chunk_urls"] == ["https://coarse.example/listing"]
+    assert items[0]["_all_grounding_urls"] == ["https://coarse.example/listing"]
+
+
+def test_attach_uses_chunk_url_when_llm_url_absent():
+    # When LLM emitted no URL, fall back to the first chunk URL.
+    text = '[{"title": "A"}]'
     items, _, spans = _parse_json_array_with_spans(text)
     chunks = [{"url": "https://real.example/article", "title": "", "domain": ""}]
     supports = [{"start": 1, "end": len(text) - 1, "chunk_indices": [0]}]
     _attach_grounding_urls(items, text, spans, _grounding(chunks, supports))
     assert items[0]["url"] == "https://real.example/article"
     assert items[0]["_url_source"] == "grounding"
-    # LLM's hallucinated URL is stashed for audit.
-    assert items[0]["_llm_url"] == "https://fake.example/hallucinated"
+    assert "_llm_url" not in items[0]
+    assert items[0]["_grounding_chunk_urls"] == ["https://real.example/article"]
 
 
 def test_attach_leaves_llm_url_when_no_citation_overlaps():
@@ -111,12 +130,16 @@ def test_attach_leaves_llm_url_when_no_grounding_at_all():
 
 
 def test_attach_writes_source_url_for_red_flags_shape():
-    text = '[{"claim": "x", "source_url": "https://fake"}]'
+    # Red-flag items use `source_url` instead of `url` — the LLM URL is
+    # still preferred (post-2026-05-01 contract); chunks live in
+    # `_grounding_chunk_urls` for url_fallback to retry on.
+    text = '[{"claim": "x", "source_url": "https://specific.example/article"}]'
     items, _, spans = _parse_json_array_with_spans(text)
-    chunks = [{"url": "https://real.example", "title": "", "domain": ""}]
+    chunks = [{"url": "https://coarse.example/listing", "title": "", "domain": ""}]
     supports = [{"start": 1, "end": len(text) - 1, "chunk_indices": [0]}]
     _attach_grounding_urls(items, text, spans, _grounding(chunks, supports))
-    assert items[0]["source_url"] == "https://real.example"
+    assert items[0]["source_url"] == "https://specific.example/article"
+    assert items[0]["_grounding_chunk_urls"] == ["https://coarse.example/listing"]
     assert "url" not in items[0]
 
 

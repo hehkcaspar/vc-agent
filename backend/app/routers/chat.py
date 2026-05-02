@@ -718,6 +718,7 @@ async def run_preset_agent_job(job_id: str) -> None:
         # function handles v1 presets untouched.
         if preset_id == "initial_screening_v2":
             from app.services.initial_screening_v2_job import (
+                post_process_section_jsons,
                 run_compose_review_v2,
                 run_research_v2,
                 V2_MEMO_PATH,
@@ -736,6 +737,15 @@ async def run_preset_agent_job(job_id: str) -> None:
 
             async with AsyncSessionLocal() as db:
                 ws = WorkspaceService(storage)
+                # Enforce the GS contract on team.json + pipe co-investor
+                # details into entity metadata. Runs before compose so
+                # the open_gaps[] additions show up in the memo.
+                await post_process_section_jsons(
+                    db, ws,
+                    entity_id=job.entity_id,
+                    agent_run_id=agent_run_id_snap,
+                    on_status=on_status,
+                )
                 memo, warns = await run_compose_review_v2(
                     db, ws,
                     entity_id=job.entity_id,
@@ -971,6 +981,21 @@ async def run_preset_agent_job(job_id: str) -> None:
                                 pass
 
                         merged = merge_entity_metadata(existing, validated)
+                        # HEAD-check LinkedIn URLs (canonical pattern was
+                        # already enforced in validate_entity_metadata) and
+                        # null any 4xx so the Facts UI doesn't render a
+                        # broken Link2 icon. Failure-isolated: timeouts
+                        # leave the URL intact with _linkedin_status set.
+                        try:
+                            from app.services.metadata_extraction import (
+                                head_validate_linkedin_urls,
+                            )
+                            await head_validate_linkedin_urls(merged)
+                        except Exception:  # noqa: BLE001
+                            _log.warning(
+                                "extract_info: linkedin head-check failed (non-fatal)",
+                                exc_info=True,
+                            )
                         entity_row.metadata_json = json.dumps(
                             merged, ensure_ascii=False,
                         )

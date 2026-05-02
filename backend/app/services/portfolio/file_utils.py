@@ -42,13 +42,36 @@ def _record_path(entity_id: str, record_name: str) -> Path:
 
 
 def _new_iso_id(entity_id: str) -> str:
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    """Allocate a monotonically-increasing per-entity id.
+
+    The lexicographic comparison ``now <= last`` was buggy when ``last``
+    already had a microsecond suffix (e.g. ``2026-05-02T05-01-28-940901Z``)
+    and ``now`` was the bare-second form (``2026-05-02T05-01-28Z``).
+    The bare-second string sorts AFTER the suffixed string because ``Z``
+    (0x5A) > ``-`` (0x2D), so the guard let the bare-second id through
+    even though it represented the same wall-clock second as the prior
+    id — producing duplicate row ids and React duplicate-key warnings.
+
+    Fix: when the current bare-second id is the same prefix as ``last``
+    (with or without ``last``'s microsecond suffix), always escalate to
+    a microsecond-suffixed id. Compare prefixes, not lex order.
+    """
+    bare = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     last = _last_id_seen.get(entity_id)
-    if last is not None and now <= last:
+    # Both candidates have the same per-second prefix when the leading
+    # 19 chars (YYYY-MM-DDTHH-MM-SS) match. Use that, not lex compare.
+    same_second = (
+        last is not None
+        and len(last) >= 19
+        and last[:19] == bare[:19]
+    )
+    if same_second:
         micro = datetime.now(timezone.utc).strftime("%f")
-        now = f"{last[:-1]}-{micro}Z"
-    _last_id_seen[entity_id] = now
-    return now
+        new_id = f"{bare[:-1]}-{micro}Z"
+    else:
+        new_id = bare
+    _last_id_seen[entity_id] = new_id
+    return new_id
 
 
 async def append_record(
@@ -65,6 +88,32 @@ async def append_record(
         with open(path, "a", encoding="utf-8") as f:
             f.write(json.dumps(obj, ensure_ascii=False, default=str) + "\n")
         return record_id
+
+
+async def rewrite_records(
+    entity_id: str,
+    record_name: str,
+    records: list[dict[str, Any]],
+) -> None:
+    """Atomically replace ``{record_name}.jsonl`` with ``records``.
+
+    Use sparingly — the file is otherwise append-only. Intended for
+    in-place mutations of existing rows (e.g., backfilling a new field
+    like ``_url_status`` after the validator was added). Caller MUST
+    preserve ``id`` on each record so downstream consumers don't see
+    fresh ids reshuffle history.
+
+    Atomic semantics: write to ``{path}.tmp`` then ``os.replace``, both
+    inside the entity write-lock so concurrent appends serialize.
+    """
+    async with entity_write_lock(entity_id):
+        path = _record_path(entity_id, record_name)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r, ensure_ascii=False, default=str) + "\n")
+        tmp.replace(path)
 
 
 def read_records(entity_id: str, record_name: str) -> list[dict[str, Any]]:

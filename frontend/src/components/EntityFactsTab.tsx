@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ChevronRight,
   ExternalLink,
+  Info,
   Link2,
   Pencil,
 } from 'lucide-react';
@@ -165,23 +166,91 @@ function IdentitySection({ meta, entity }: { meta: Record<string, unknown> | nul
 // Section: Co-investors
 // ---------------------------------------------------------------------------
 
+// `co_investor_details` is the IS v2 enrichment sidecar — name-keyed map of
+// `{ url?, description? }` written by the IS v2 post-process. Falls back to
+// the plain string array from `existing_investors` for older entities that
+// haven't run IS v2.
+type CoInvestorDetail = { url?: string | null; description?: string | null };
+
+function readCoInvestorDetails(
+  meta: Record<string, unknown> | null,
+): Record<string, CoInvestorDetail> {
+  const raw = meta?.co_investor_details;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const out: Record<string, CoInvestorDetail> = {};
+  for (const [name, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!val || typeof val !== 'object') continue;
+    const v = val as Record<string, unknown>;
+    out[name] = {
+      url: typeof v.url === 'string' && v.url.trim() ? v.url.trim() : null,
+      description:
+        typeof v.description === 'string' && v.description.trim()
+          ? v.description.trim()
+          : null,
+    };
+  }
+  return out;
+}
+
 function CoInvestorsSection({ meta }: { meta: Record<string, unknown> | null }) {
-  const investors = asArray<string>(meta?.existing_investors).filter(
+  const names = asArray<string>(meta?.existing_investors).filter(
     (s) => typeof s === 'string' && s.trim(),
   );
-  if (investors.length === 0) return null;
+  const details = readCoInvestorDetails(meta);
+  // Union: any name in either source. Preserve existing_investors order, then
+  // append details-only names (e.g. enriched after the user removed the
+  // string but the IS run still has it).
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const n of names) {
+    if (!seen.has(n)) {
+      seen.add(n);
+      ordered.push(n);
+    }
+  }
+  for (const n of Object.keys(details)) {
+    if (!seen.has(n)) {
+      seen.add(n);
+      ordered.push(n);
+    }
+  }
+  if (ordered.length === 0) return null;
   return (
     <section className="facts-section">
       <h3 className="facts-section-title">
         Co-investors
-        <span className="facts-section-hint"> · {investors.length}</span>
+        <span className="facts-section-hint"> · {ordered.length}</span>
       </h3>
       <div className="facts-coinvestors">
-        {investors.map((name, i) => (
-          <span key={`${name}-${i}`} className="facts-coinvestor-chip">
-            {name}
-          </span>
-        ))}
+        {ordered.map((name, i) => {
+          const d = details[name];
+          const desc = d?.description ?? null;
+          const url = d?.url ?? null;
+          if (url) {
+            return (
+              <a
+                key={`${name}-${i}`}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="facts-coinvestor-chip facts-coinvestor-chip--linked"
+                title={desc ? `${name} — ${desc}` : name}
+              >
+                {name}
+                <ExternalLink size={10} />
+              </a>
+            );
+          }
+          return (
+            <span
+              key={`${name}-${i}`}
+              className="facts-coinvestor-chip"
+              title={desc || undefined}
+            >
+              {name}
+            </span>
+          );
+        })}
         <FactProvenanceBadge factPath="existing_investors" />
       </div>
     </section>
@@ -255,7 +324,16 @@ function TeamSection({ meta }: { meta: Record<string, unknown> | null }) {
   // subtitle so the same number isn't loud in two adjacent surfaces.
   return (
     <section className="facts-section">
-      <h3 className="facts-section-title">Team</h3>
+      <h3 className="facts-section-title">
+        Team
+        <span
+          className="facts-section-info"
+          title="Facts on this tab come from uploaded documents only. Run Initial Screening to add web research (Google Scholar, prior roles, co-investor context)."
+          aria-label="How team facts are sourced"
+        >
+          <Info size={12} />
+        </span>
+      </h3>
       {founders.length > 0 && (
         <ul className="facts-team-list">
           {founders.map((f, i) => (

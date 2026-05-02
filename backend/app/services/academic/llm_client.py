@@ -197,6 +197,76 @@ async def grounded_generate_text(
     return _extract_text(response)
 
 
+_RETRY_PREAMBLE = (
+    "CRITICAL: this is a retry because the previous response either did "
+    "not call Google Search at all, or returned items unbacked by any "
+    "search result. You MUST execute at least one Google Search query "
+    "before answering. If your search surfaces no relevant results, the "
+    "ONLY correct response is the empty array `[]` — do not answer from "
+    "training data. Do not fabricate items.\n\n"
+)
+
+
+async def _grounded_search_once(
+    prompt: str,
+    *,
+    model_id: str,
+    is_retry: bool = False,
+) -> tuple[list[dict[str, Any]], int, int]:
+    """Single grounded-search call. Returns (parsed_items, dropped_count,
+    chunks_total) where chunks_total is the response-level grounding-chunk
+    count (0 means the model bypassed search entirely).
+
+    Drops items whose ``_url_source`` is ``"no_grounding"`` — those have
+    no source citation backing them and are structurally untrustable
+    for fact-extraction prompts.
+    """
+    client = genai_client()
+    config = types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+    )
+
+    full_prompt = (_RETRY_PREAMBLE + prompt) if is_retry else prompt
+
+    async def _call():
+        return await client.aio.models.generate_content(
+            model=model_id,
+            contents=_parts([full_prompt]),
+            config=config,
+        )
+
+    response = await _with_retry(_call)
+    text = _extract_text(response)
+    if not text:
+        return [], 0, 0
+
+    parsed, _array_start, item_spans = _parse_json_array_with_spans(text)
+    if not parsed:
+        return [], 0, 0
+
+    grounding = _extract_grounding(response, response_text=text)
+    queries = grounding.get("queries") or []
+    chunks_total = len(grounding.get("chunks") or [])
+    if queries:
+        logger.info(
+            "grounded_search_json%s: model ran %d search queries, %d chunks: %s",
+            " (RETRY)" if is_retry else "",
+            len(queries), chunks_total, queries[:6],
+        )
+    _attach_grounding_urls(parsed, text, item_spans, grounding)
+
+    before = len(parsed)
+    parsed = [
+        it for it in parsed
+        if not (
+            isinstance(it, dict)
+            and (it.get("_url_source") == "no_grounding")
+        )
+    ]
+    dropped = before - len(parsed)
+    return parsed, dropped, chunks_total
+
+
 async def grounded_search_json(
     prompt: str,
     *,
@@ -219,32 +289,54 @@ async def grounded_search_json(
     per-item verification, category triage) is deliberately NOT done
     here. It lives downstream in ``refinement.refine_pending_items``,
     which runs as a background task against persisted records.
+
+    Retry semantics (Tier 3 fix, 2026-05-02): if the first call
+    produced 0 grounding chunks (model bypassed Google Search) AND
+    every item got dropped as ungrounded, retry once with a
+    prepended stricter directive. Empirically, Gemini sometimes
+    decides to answer from memory even when ``GoogleSearch`` is
+    enabled — the retry catches that without making every call cost
+    twice. On retry-still-zero, return ``[]`` (caller observes via
+    the absence of items).
     """
-    client = genai_client()
     model_id = model or settings.ACADEMIC_GEMINI_MODEL
 
-    config = types.GenerateContentConfig(
-        tools=[types.Tool(google_search=types.GoogleSearch())],
+    parsed, dropped, chunks_total = await _grounded_search_once(
+        prompt, model_id=model_id, is_retry=False,
     )
 
-    async def _call():
-        return await client.aio.models.generate_content(
-            model=model_id,
-            contents=_parts([prompt]),
-            config=config,
+    # Retry condition: model bypassed search entirely (no chunks at all)
+    # AND every item the model emitted got dropped. Don't retry when we
+    # have at least one survivable item — that's a partial success worth
+    # keeping over a doubled-cost gamble.
+    if chunks_total == 0 and dropped > 0 and not parsed:
+        logger.warning(
+            "grounded_search_json: 0 grounding chunks + all %d items dropped — "
+            "retrying once with stricter prompt",
+            dropped,
+        )
+        parsed_retry, dropped_retry, chunks_retry = await _grounded_search_once(
+            prompt, model_id=model_id, is_retry=True,
+        )
+        if parsed_retry or chunks_retry > 0:
+            logger.info(
+                "grounded_search_json RETRY: recovered %d items (chunks=%d, dropped=%d)",
+                len(parsed_retry), chunks_retry, dropped_retry,
+            )
+            parsed, dropped = parsed_retry, dropped_retry
+        else:
+            logger.warning(
+                "grounded_search_json: retry also produced 0 grounded items — "
+                "model is bypassing search; returning empty array",
+            )
+
+    if dropped:
+        logger.warning(
+            "grounded_search_json: dropped %d ungrounded item(s) "
+            "(model produced no grounding chunks for those spans)",
+            dropped,
         )
 
-    response = await _with_retry(_call)
-    text = _extract_text(response)
-    if not text:
-        return []
-
-    parsed, _array_start, item_spans = _parse_json_array_with_spans(text)
-    if not parsed:
-        return []
-
-    grounding = _extract_grounding(response)
-    _attach_grounding_urls(parsed, text, item_spans, grounding)
     seed_missing_url_fallbacks(parsed)
     return parsed
 
@@ -313,16 +405,52 @@ def _parse_json_array_with_spans(
     return items, lbracket, spans
 
 
-def _extract_grounding(response: Any) -> dict[str, Any]:
-    """Pull ``grounding_chunks`` + ``grounding_supports`` off the response.
-    Returns a dict the attach step can consume without touching the SDK.
+def _byte_to_char_index(text: str, byte_idx: int) -> int:
+    """Convert a UTF-8 byte offset into a character offset on ``text``.
+
+    Critical for support→item span matching: Gemini's grounding API
+    returns ``segment.start_index`` / ``segment.end_index`` as BYTE
+    offsets in UTF-8, NOT character offsets — verified empirically
+    against a response containing an en-dash ("2–1") where
+    ``end_index = char_len + 2`` matched only when interpreted as a
+    byte offset. For all-ASCII text the two coincide; for CJK or any
+    multibyte content (e.g. CyberNexus 赛源), char-based mapping
+    silently lands supports on the wrong JSON items.
+
+    Lossy: a byte offset that lands mid-codepoint rounds down to the
+    nearest valid character boundary.
+    """
+    if byte_idx <= 0:
+        return 0
+    encoded = text.encode("utf-8")
+    if byte_idx >= len(encoded):
+        return len(text)
+    # Walk back at most 3 bytes to find the previous valid codepoint
+    # boundary if byte_idx lands mid-multibyte sequence.
+    for i in range(byte_idx, max(byte_idx - 4, -1), -1):
+        try:
+            return len(encoded[:i].decode("utf-8"))
+        except UnicodeDecodeError:
+            continue
+    return 0
+
+
+def _extract_grounding(response: Any, response_text: str = "") -> dict[str, Any]:
+    """Pull ``grounding_chunks`` + ``grounding_supports`` + diagnostic
+    metadata off the response. Returns a dict the attach step can
+    consume without touching the SDK.
+
+    ``response_text`` is needed because support segment offsets are
+    UTF-8 byte indices but our caller works in character space; we
+    convert here so downstream span-matching is correct for non-ASCII
+    content (CJK company names, etc.).
     """
     candidates = getattr(response, "candidates", None) or []
     if not candidates:
-        return {"chunks": [], "supports": []}
+        return {"chunks": [], "supports": [], "queries": [], "search_entry_html": ""}
     meta = getattr(candidates[0], "grounding_metadata", None)
     if meta is None:
-        return {"chunks": [], "supports": []}
+        return {"chunks": [], "supports": [], "queries": [], "search_entry_html": ""}
 
     chunks_raw = getattr(meta, "grounding_chunks", None) or []
     supports_raw = getattr(meta, "grounding_supports", None) or []
@@ -345,18 +473,36 @@ def _extract_grounding(response: Any) -> dict[str, Any]:
         if seg is None:
             continue
         # start_index may be None (= 0, start of text)
-        start = getattr(seg, "start_index", None)
-        end = getattr(seg, "end_index", None)
-        if end is None:
+        start_byte = getattr(seg, "start_index", None)
+        end_byte = getattr(seg, "end_index", None)
+        if end_byte is None:
             continue
+        # Convert UTF-8 byte offsets → character offsets so spans line
+        # up with our character-based JSON span parsing.
+        start_char = _byte_to_char_index(response_text, int(start_byte or 0))
+        end_char = _byte_to_char_index(response_text, int(end_byte))
         supports.append({
-            "start": int(start or 0),
-            "end": int(end),
+            "start": start_char,
+            "end": end_char,
             "chunk_indices": list(
                 getattr(sup, "grounding_chunk_indices", None) or []
             ),
         })
-    return {"chunks": chunks, "supports": supports}
+
+    # Capture diagnostic metadata: search queries (debugging) and the
+    # search-suggestions widget HTML (TOS — see BACKLOG entry).
+    queries = list(getattr(meta, "web_search_queries", None) or [])
+    sep = getattr(meta, "search_entry_point", None)
+    search_entry_html = ""
+    if sep is not None:
+        search_entry_html = (getattr(sep, "rendered_content", None) or "")
+
+    return {
+        "chunks": chunks,
+        "supports": supports,
+        "queries": queries,
+        "search_entry_html": search_entry_html,
+    }
 
 
 def _attach_grounding_urls(
@@ -365,10 +511,30 @@ def _attach_grounding_urls(
     spans: list[tuple[int, int]],
     grounding: dict[str, Any],
 ) -> None:
-    """When an item has overlapping grounding support, overwrite its
-    URL with the real chunk URI. Otherwise leave the LLM's URL in place
-    and mark the item for post-processing fallback (HEAD-validate, then
-    Google search fallback).
+    """Record both the LLM's article URL and the grounding-chunk URLs
+    so url_fallback can pick whichever resolves to content matching the
+    item's claim.
+
+    Why both: grounding chunks are the *sources the model cited*, not
+    necessarily the *URL of the article we're emitting*. A real-world
+    failure (Glacian 2026-05-01) had the LLM emit ``psu.edu/news/.../
+    new-software-could-cut-cooling-energy-use-25-data-centers/`` (a real,
+    verified-by-HEAD article), and the system overwrote it with a
+    vertex chunk URL pointing to a different Penn State page. Throwing
+    away the LLM URL when the LLM URL is the more specific anchor is
+    strictly worse — and there's no signal *here* (pre-validation) about
+    which is correct, so we preserve both and let url_fallback decide.
+
+    After this function runs, an item carries:
+      - ``url``: prefer LLM URL when present; else first chunk URL
+      - ``_llm_url``: original LLM URL (for url_fallback to retry on)
+      - ``_grounding_chunk_urls``: list of chunk URLs (for url_fallback
+        to retry on)
+      - ``_url_source``:
+          * ``llm_with_grounding`` — LLM emitted a URL AND chunks exist
+          * ``grounding`` — only chunks exist (LLM left URL blank)
+          * ``no_citation`` — chunks exist but none cite this item's span
+          * ``no_grounding`` — no chunks at all (model didn't ground)
     """
     chunks = grounding.get("chunks") or []
     supports = grounding.get("supports") or []
@@ -377,7 +543,7 @@ def _attach_grounding_urls(
         if not isinstance(it, dict):
             continue
 
-        urls: list[str] = []
+        chunk_urls: list[str] = []
         if chunks and idx < len(spans):
             span_start, span_end = spans[idx]
             seen: set[int] = set()
@@ -390,19 +556,32 @@ def _attach_grounding_urls(
                         if 0 <= ci < len(chunks):
                             u = chunks[ci]["url"]
                             if u:
-                                urls.append(u)
+                                chunk_urls.append(u)
 
-        if urls:
-            field = active_url_field(it)
-            if it.get(field):
-                it["_llm_url"] = it.get(field)
-            it[field] = urls[0]
+        field = active_url_field(it)
+        llm_url = (it.get(field) or "").strip()
+
+        if llm_url:
+            it["_llm_url"] = llm_url
+        if chunk_urls:
+            it["_grounding_chunk_urls"] = chunk_urls
+            # Mirror the legacy field name for downstream code that
+            # already knows about it (kept until callers migrate).
+            it["_all_grounding_urls"] = chunk_urls
+
+        if llm_url and chunk_urls:
+            # Prefer the LLM URL as the primary candidate — it's typically
+            # the more specific article URL. url_fallback will validate
+            # and fall back to chunks if it doesn't content-match.
+            it[field] = llm_url
+            it["_url_source"] = "llm_with_grounding"
+        elif chunk_urls:
+            it[field] = chunk_urls[0]
             it["_url_source"] = "grounding"
-            if len(urls) > 1:
-                it["_all_grounding_urls"] = urls
+        elif llm_url:
+            # LLM URL but no chunks at all → no anchor backing this claim.
+            it["_url_source"] = "no_grounding" if not chunks else "no_citation"
         else:
-            # Keep the LLM's URL (if any). Refinement handles validation
-            # and the 3-tier URL fallback against the persisted ledger.
             it["_url_source"] = "no_grounding" if not chunks else "no_citation"
 
 

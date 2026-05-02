@@ -439,4 +439,22 @@ export const api = {
         },
       ),
   },
+
+  // Initial Screening — composer-only rerun. Cheap (~10 s) — uses the
+  // existing section JSONs to regenerate the memo after canonical facts
+  // were edited. The full IS preset (with web search + section agents)
+  // is still invoked via chat/presets.
+  initialScreening: {
+    recompose: (entityId: string, version: 'v1' | 'v2' = 'v2') =>
+      fetchJson<{
+        ok: boolean;
+        memo_path: string;
+        memo_node_id: string | null;
+        warnings: string[];
+      }>(`/entities/${entityId}/initial_screening/recompose`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ version }),
+      }),
+  },
 };

@@ -121,6 +121,20 @@ const SOURCE_TYPE_LABEL: Record<FactSourceType, string> = {
   self_claim: 'self-claim',
 };
 
+// Longer descriptions used in the badge `title=` hover and the popover header,
+// so the user can tell *which extraction path* recorded the fact. The pill
+// itself stays terse (above) — these labels would crowd the inline UI.
+const SOURCE_TYPE_DESCRIPTION: Record<FactSourceType, string> = {
+  cap_table: 'cap table — read from a structured cap-table doc',
+  legal_doc: 'legal review — extracted from a signed SAFE / SPA / COI by the legal_review preset',
+  user: 'edited manually by a user',
+  upload: 'extract_info — read from an uploaded workspace document only (no web research)',
+  third_party: 'third-party data feed',
+  communication: 'inferred from communication notes',
+  web: 'web search — added by Initial Screening (search-grounded; not from uploaded docs)',
+  self_claim: 'self-claim — stated by the company without external corroboration',
+};
+
 const SOURCE_TYPE_TONE: Record<FactSourceType, string> = {
   cap_table: '#059669',     // emerald — highest tier
   legal_doc: '#16a34a',     // green
@@ -143,7 +157,7 @@ export function SourceTierPill({
     <span
       className={'fact-source-pill' + (small ? ' fact-source-pill--sm' : '')}
       style={{ color: SOURCE_TYPE_TONE[type] ?? '#6b7280' }}
-      title={`Evidence tier: ${SOURCE_TYPE_LABEL[type] ?? type}`}
+      title={SOURCE_TYPE_DESCRIPTION[type] ?? SOURCE_TYPE_LABEL[type] ?? type}
     >
       {SOURCE_TYPE_LABEL[type] ?? type}
     </span>
@@ -430,7 +444,7 @@ export function FactProvenanceBadge({
           e.stopPropagation();
           setOpen((v) => !v);
         }}
-        title={`Source: ${SOURCE_TYPE_LABEL[group.current.source.type] ?? group.current.source.type}`}
+        title={SOURCE_TYPE_DESCRIPTION[group.current.source.type] ?? `Source: ${SOURCE_TYPE_LABEL[group.current.source.type] ?? group.current.source.type}`}
         aria-label="Show fact provenance"
         aria-expanded={open}
         aria-haspopup="dialog"

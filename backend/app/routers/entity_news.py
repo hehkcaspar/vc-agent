@@ -98,6 +98,15 @@ class NewsItem(BaseModel):
     summary: Optional[str] = None
     published_date: Optional[str] = None
     category: Optional[str] = None
+    # `_url_status` is set by url_fallback during refinement and surfaces
+    # as an "unverified" badge in the UI when the URL didn't pass
+    # content-match. Stored on the JSONL with a leading underscore (audit
+    # convention for refinement-pipeline-set fields), but the API exposes
+    # it WITHOUT the underscore so the frontend can use a normal property
+    # name. We construct from the JSONL field manually rather than via
+    # Pydantic alias because FastAPI defaults to `by_alias=True` on
+    # response serialization, which would re-emit the underscore prefix.
+    url_status: Optional[str] = None
 
 
 class NewsSnapshot(BaseModel):
@@ -212,9 +221,13 @@ async def get_news_feed(
             summary=r.get("summary"),
             published_date=r.get("published_date"),
             category=r.get("category"),
+            url_status=r.get("_url_status"),
         )
         for r in records
-        if r.get("title")
+        # Hide items the refinement pipeline rejected (verify+triage
+        # said "unconfirmed" or wrong category). They stay in news.jsonl
+        # as audit trail but aren't shown to the user.
+        if r.get("title") and not r.get("_rejected")
     ]
 
     snap = last_snapshot_for_source(entity_id, NEWS_SOURCE_ID)

@@ -15,6 +15,8 @@ import json
 import logging
 from typing import Any, Dict, List, Tuple
 
+from app.services.url_validation import is_canonical_linkedin_url
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -168,7 +170,83 @@ def validate_entity_metadata(data: Any) -> Tuple[Dict[str, Any], List[str]]:
     # the only sanctioned writer.
     result["_fact_discrepancies"] = []
 
+    # Format-check LinkedIn URLs in founders[] + key_team[]. Off-pattern URLs
+    # (linkedin.com/pub/..., shortened links, non-LinkedIn domains, OCR
+    # garbage) get nulled now so the Facts UI never renders a broken icon.
+    # The full HEAD-check runs post-merge in chat.py (async).
+    def _normalize_linkedin_in(rows_key: str) -> None:
+        rows = result.get(rows_key) or []
+        if not isinstance(rows, list):
+            return
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            raw = row.get("linkedin_url")
+            if raw is None or not isinstance(raw, str) or not raw.strip():
+                continue
+            if not is_canonical_linkedin_url(raw):
+                row["linkedin_url"] = None
+                # Stash the original for debugging without rendering it.
+                row["_linkedin_url_invalid"] = raw.strip()
+                warnings.append(
+                    f"Non-canonical LinkedIn URL nulled in {rows_key}: {raw[:80]}"
+                )
+
+    _normalize_linkedin_in("founders")
+    _normalize_linkedin_in("key_team")
+
     return result, warnings
+
+
+async def head_validate_linkedin_urls(metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Async HEAD-check on canonical LinkedIn URLs in founders[] + key_team[].
+
+    Format-check happens in ``validate_entity_metadata`` (sync). This second
+    pass runs post-merge to catch URLs that match the pattern but 404 on the
+    LinkedIn server. LinkedIn's bot wall returns 999 / 403 for unauthenticated
+    callers — those count as "format ok, server-side content unverifiable"
+    and the URL stays intact (the human user lands on the auth wall, then
+    the real profile).
+
+    Mutates metadata in place; also returns it for chaining. Failures during
+    HEAD are conservative: keep the URL, set ``_linkedin_status="unverified"``.
+    """
+    import httpx
+
+    async def _check_one(url: str) -> str:
+        """Return one of: format_ok | broken | unverified."""
+        try:
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(4.0),
+                follow_redirects=True,
+                headers={"User-Agent": "Mozilla/5.0 (compatible; vc-agent-link-check/1.0)"},
+            ) as client:
+                resp = await client.head(url)
+                status = resp.status_code
+                if status in (200, 301, 302, 401, 403, 405, 999):
+                    return "format_ok"
+                if 400 <= status < 500:
+                    return "broken"
+                return "unverified"
+        except Exception:  # noqa: BLE001
+            return "unverified"
+
+    for rows_key in ("founders", "key_team"):
+        rows = metadata.get(rows_key) or []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            url = row.get("linkedin_url")
+            if not isinstance(url, str) or not url.strip():
+                continue
+            label = await _check_one(url.strip())
+            if label == "broken":
+                row["_linkedin_url_invalid"] = url.strip()
+                row["linkedin_url"] = None
+            row["_linkedin_status"] = label
+    return metadata
 
 
 def merge_entity_metadata(

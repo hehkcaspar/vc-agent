@@ -71,16 +71,33 @@ def _record_path(scholar_id: str, record_name: str) -> Path:
 
 
 def _new_iso_id(scholar_id: str) -> str:
-    """Mint a fresh ISO-timestamp id, monotonic per scholar in-process."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
+    """Mint a fresh ISO-timestamp id, monotonic per scholar in-process.
+
+    Bug history: the original ``now <= last`` lex-compare let duplicate
+    ids through when ``last`` was already microsecond-suffixed
+    (``2026-05-02T05-01-28-940901Z``) and the next ``now`` was the
+    bare-second form (``2026-05-02T05-01-28Z``). Lex order:
+    ``Z`` (0x5A) > ``-`` (0x2D), so the guard considered the bare-second
+    string to be LATER and let it pass — giving the same id as the very
+    first row of the same second.
+
+    Fix: compare per-second PREFIX (first 19 chars), not full lex order.
+    Same fix applied in services/portfolio/file_utils.py.
+    """
+    bare = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%SZ")
     last = _last_id_seen.get(scholar_id)
-    if last is not None and now <= last:
-        # Same second collision: bump by appending a microsecond suffix.
-        # Lexical order remains correct because the suffix is fixed-width.
+    same_second = (
+        last is not None
+        and len(last) >= 19
+        and last[:19] == bare[:19]
+    )
+    if same_second:
         micro = datetime.now(timezone.utc).strftime("%f")
-        now = f"{last[:-1]}-{micro}Z"
-    _last_id_seen[scholar_id] = now
-    return now
+        new_id = f"{bare[:-1]}-{micro}Z"
+    else:
+        new_id = bare
+    _last_id_seen[scholar_id] = new_id
+    return new_id
 
 
 async def append_record(
