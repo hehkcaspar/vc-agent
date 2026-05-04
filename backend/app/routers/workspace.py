@@ -2,10 +2,12 @@
 
 import json
 import mimetypes
+from pathlib import PurePosixPath
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -185,6 +187,107 @@ async def download_file_by_path(
 
     content_type = node.mime_type or mimetypes.guess_type(node.name)[0] or "application/octet-stream"
     return FileResponse(path=str(full_path), media_type=content_type, filename=node.name)
+
+
+# Inline editor — PUT /file/{node_id}/content
+#
+# Used by FilePreview's Edit button (Surface 1) and the IS tab's per-section
+# Edit (Surface 2) to overwrite a text file in place. Auto-flips
+# ``origin_type`` → ``"user"`` so the next agent run that tries to overwrite
+# this file bounces off ``_check_provenance``. Versioning is handled by
+# ``write_file`` (snapshots prior bytes to ``.versions/{node_id}/``).
+
+# Extensions the editor will accept. Anything not in this set returns 415 —
+# binary types (PDF, images, office docs) have no sensible "edit raw bytes"
+# UX, and the frontend doesn't expose the Edit affordance for them either.
+_EDITABLE_EXTS = {".md", ".markdown", ".json", ".txt", ".csv"}
+
+
+class FileContentUpdate(BaseModel):
+    """Body for PUT /file/{node_id}/content — the inline editor's save call."""
+    content: str = Field(..., description="New full file contents (UTF-8 text).")
+    expected_checksum: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optimistic concurrency token. Pass the node's ``checksum`` "
+            "as you read it; the server returns 409 if the on-disk "
+            "checksum has changed in the meantime."
+        ),
+    )
+
+
+@router.put("/file/{node_id}/content", response_model=WorkspaceNodeResponse)
+async def update_file_content(
+    entity_id: str,
+    node_id: str,
+    body: FileContentUpdate,
+    db: AsyncSession = Depends(get_db),
+):
+    """Overwrite the text content of an existing file node.
+
+    Auto-flips ``origin_type`` to ``"user"`` so subsequent agent runs
+    cannot overwrite the user's edit (see
+    ``WorkspaceService._check_provenance`` — protected_origins includes
+    ``"user"``). Reuses ``write_file``'s versioning; no new version
+    primitive needed.
+
+    Errors:
+      - 404 if node not found
+      - 400 if node is a folder / bookmark
+      - 415 if the node's path extension isn't in the editable allow-list
+      - 422 if the path extension is ``.json`` and ``content`` doesn't parse
+      - 409 if ``expected_checksum`` was supplied and doesn't match
+        the current on-disk checksum (someone else edited concurrently)
+    """
+    await _require_entity(db, entity_id)
+    node = await workspace_service.get_node_by_id(db, entity_id, node_id)
+    if node is None:
+        raise HTTPException(status_code=404, detail="Node not found")
+    if node.node_type != "file":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot edit a {node.node_type} node; only files have content.",
+        )
+
+    suffix = PurePosixPath(node.path).suffix.lower()
+    if suffix not in _EDITABLE_EXTS:
+        raise HTTPException(
+            status_code=415,
+            detail=(
+                f"Editing {suffix or '<no-extension>'} files is not supported. "
+                f"Allowed: {sorted(_EDITABLE_EXTS)}."
+            ),
+        )
+
+    # JSON parse-validate so a typo doesn't corrupt a section JSON.
+    if suffix == ".json":
+        try:
+            json.loads(body.content)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Invalid JSON: {exc.msg} at line {exc.lineno}, "
+                    f"column {exc.colno}."
+                ),
+            )
+
+    mime = node.mime_type or mimetypes.guess_type(node.name)[0] or "text/plain"
+    actor = Actor(type="user", ref="inline-editor")
+    try:
+        updated = await workspace_service.write_file(
+            db, entity_id, node.path,
+            body.content.encode("utf-8"),
+            mime, actor,
+            expected_checksum=body.expected_checksum,
+            origin_type="user",
+        )
+    except WorkspaceError as e:
+        _handle_ws_error(e)
+    else:
+        await db.commit()
+        await db.refresh(updated)
+        return updated
 
 
 @router.post("/file", response_model=WorkspaceNodeResponse)

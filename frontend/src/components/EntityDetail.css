@@ -98,6 +98,53 @@
   overflow: auto;
 }
 
+/* Inline editor (Surface 1) — replaces MarkdownView / preview-text in
+   the popup body when the user clicks the Pencil button. Save lives
+   in preview-modal-actions; this is just the body region. */
+.preview-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  height: 100%;
+  min-height: 60vh;
+}
+
+.preview-edit-textarea {
+  flex: 1;
+  min-height: 60vh;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  white-space: pre;
+  overflow: auto;
+}
+
+.preview-edit-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.preview-edit-error {
+  padding: var(--space-2) var(--space-3);
+  background: rgba(220, 38, 38, 0.08);
+  color: #b91c1c;
+  border: 1px solid rgba(220, 38, 38, 0.2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
+}
+
+.preview-modal-action-btn {
+  padding: 4px 12px;
+  font-size: var(--text-sm);
+}
+
 
 .entity-detail {
   animation: fadeIn var(--transition-base) ease-out;
@@ -3470,6 +3517,51 @@
  */
 .screening-section-body.markdown-viewer {
   font-size: var(--text-sm);
+}
+
+/* Inline section editor (Surface 2). Each section card grows an Edit
+   button next to its h3; click swaps the rendered ScreeningMarkdown
+   for a textarea bound to that section's body. */
+.screening-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.screening-section-header .facts-section-title {
+  margin-bottom: 0;
+}
+
+.screening-section-edit-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.screening-section-edit-textarea {
+  width: 100%;
+  min-height: 240px;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.screening-section-edit-textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
+.screening-section-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }
 
 .screening-section-body.markdown-viewer h1,

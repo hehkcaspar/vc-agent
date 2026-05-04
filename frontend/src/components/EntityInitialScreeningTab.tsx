@@ -32,6 +32,7 @@ import {
   ChevronRight,
   ExternalLink,
   Loader2,
+  Pencil,
   RefreshCw,
 } from 'lucide-react';
 import type { WorkspaceTreeNode } from '../types';
@@ -67,12 +68,29 @@ interface ScreeningSection {
   body: string;
 }
 
+interface ParsedScreening {
+  /**
+   * Lines that appear BEFORE the first ``##`` heading — typically the
+   * ``# {entity_name} — Initial Screening`` h1 plus whatever blank
+   * lines follow it. The tab UI does NOT render this (the entity
+   * header already shows the company name) but we MUST capture it
+   * for round-tripping: when the user edits one section and we PUT
+   * back the reassembled memo, dropping the prologue would corrupt
+   * the source file every save. Pre-2026-05-03 the parser threw
+   * these lines away, which was fine for read-only display and
+   * wrong for round-trip.
+   */
+  prologue: string;
+  sections: ScreeningSection[];
+}
+
 /** Split a well-formed screening markdown into its h2 sections. */
-function parseScreeningSections(md: string): ScreeningSection[] {
+function parseScreeningSections(md: string): ParsedScreening {
   const lines = md.replace(/\r\n/g, '\n').split('\n');
   const sections: ScreeningSection[] = [];
   let currentTitle: string | null = null;
   let currentBody: string[] = [];
+  const prologueLines: string[] = [];
 
   const commit = () => {
     if (currentTitle == null) return;
@@ -89,13 +107,31 @@ function parseScreeningSections(md: string): ScreeningSection[] {
       currentBody = [];
     } else if (currentTitle != null) {
       currentBody.push(line);
+    } else {
+      // Pre-h2 content — captured for round-trip preservation.
+      prologueLines.push(line);
     }
-    // Lines before any h2 (h1 title + leading whitespace) are intentionally
-    // dropped — the tab name already says "Initial Screening" and the entity
-    // header shows the company name.
   }
   commit();
-  return sections;
+  return {
+    prologue: prologueLines.join('\n'),
+    sections,
+  };
+}
+
+/**
+ * Reassemble a parsed screening memo into markdown. Inverse of
+ * ``parseScreeningSections`` — verified lossless for the IS memo
+ * shape produced by ``initial_screening_compose.md``.
+ */
+function reassembleScreening(parsed: ParsedScreening): string {
+  const sectionsText = parsed.sections
+    .map((s) => `## ${s.title}\n\n${s.body}`)
+    .join('\n\n');
+  const prologue = parsed.prologue.trimEnd();
+  return prologue
+    ? `${prologue}\n\n${sectionsText}\n`
+    : `${sectionsText}\n`;
 }
 
 function ScreeningMarkdown({ content }: { content: string }) {
@@ -244,10 +280,81 @@ export function EntityInitialScreeningTab({
     };
   }, [reviewOpen, reviewNodeId, entityId, reviewContent]);
 
-  const sections = useMemo(
+  const parsed = useMemo(
     () => parseScreeningSections(mdContent ?? ''),
     [mdContent],
   );
+  const sections = parsed.sections;
+
+  // Per-section inline editor (Surface 2). Tracks which section index
+  // (if any) is currently in edit mode + the textarea draft. Save
+  // reassembles the full memo (with prologue) and PUTs it; backend
+  // auto-flips origin_type to "user" via the inline-editor route.
+  const [editingSectionIdx, setEditingSectionIdx] = useState<number | null>(null);
+  const [sectionDraft, setSectionDraft] = useState('');
+  const [sectionSaving, setSectionSaving] = useState(false);
+  const [sectionError, setSectionError] = useState<string | null>(null);
+
+  const startEditingSection = (idx: number) => {
+    setEditingSectionIdx(idx);
+    setSectionDraft(sections[idx]?.body ?? '');
+    setSectionError(null);
+  };
+  const cancelSectionEdit = () => {
+    setEditingSectionIdx(null);
+    setSectionDraft('');
+    setSectionError(null);
+  };
+  const saveSectionEdit = async () => {
+    if (sectionSaving || editingSectionIdx == null) return;
+    if (sectionDraft.trim() === '') {
+      setSectionError(
+        'Section body would be empty. Use Cancel to discard your changes instead.',
+      );
+      return;
+    }
+    if (!mdNodeId) {
+      setSectionError('Memo node id missing — reload the page and try again.');
+      return;
+    }
+    const idx = editingSectionIdx;
+    const updatedSections = sections.map((s, i) =>
+      i === idx ? { ...s, body: sectionDraft.trim() } : s,
+    );
+    const reassembled = reassembleScreening({
+      prologue: parsed.prologue,
+      sections: updatedSections,
+    });
+    setSectionSaving(true);
+    setSectionError(null);
+    try {
+      await api.workspace.updateFileContent(
+        entityId,
+        mdNodeId,
+        reassembled,
+        // expectedChecksum: we don't track the memo's checksum on this
+        // tab today (it'd need a getNode round-trip). Optimistic for
+        // now — the per-entity write lock in WorkspaceService still
+        // serialises concurrent saves; a stale draft just races and
+        // the user re-edits. If this becomes painful, plumb checksum
+        // alongside mdUpdatedAt.
+        undefined,
+      );
+      showToast(
+        'Saved. This memo is now user-managed and protected from future composer runs.',
+        'success',
+      );
+      setEditingSectionIdx(null);
+      setSectionDraft('');
+      // Refetch the file content + bump the tree so the version bumps.
+      setRecomposeKey((k) => k + 1);
+      onTreeChanged?.();
+    } catch (e) {
+      setSectionError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSectionSaving(false);
+    }
+  };
 
   // On expand, smooth-scroll the newly-revealed review card into view so the
   // click has visible feedback. The meta-bar button sits at the top of the
@@ -353,18 +460,73 @@ export function EntityInitialScreeningTab({
         </section>
       )}
 
-      {!mdLoading && !mdError && sections.map((s, i) => (
-        <section
-          key={`${s.title}-${i}`}
-          className={
-            'facts-section' +
-            (isFollowUp(s.title) ? ' facts-section--followup' : '')
-          }
-        >
-          <h3 className="facts-section-title">{s.title}</h3>
-          <ScreeningMarkdown content={s.body} />
-        </section>
-      ))}
+      {!mdLoading && !mdError && sections.map((s, i) => {
+        const isEditingThis = editingSectionIdx === i;
+        return (
+          <section
+            key={`${s.title}-${i}`}
+            className={
+              'facts-section' +
+              (isFollowUp(s.title) ? ' facts-section--followup' : '')
+            }
+          >
+            <div className="screening-section-header">
+              <h3 className="facts-section-title">{s.title}</h3>
+              {!isEditingThis && editingSectionIdx == null && (
+                <button
+                  type="button"
+                  className="facts-section-edit"
+                  onClick={() => startEditingSection(i)}
+                  title="Edit this section"
+                >
+                  <Pencil size={12} />
+                  Edit
+                </button>
+              )}
+            </div>
+            {isEditingThis ? (
+              <div className="screening-section-edit-wrap">
+                <textarea
+                  className="screening-section-edit-textarea"
+                  value={sectionDraft}
+                  onChange={(e) => {
+                    setSectionDraft(e.target.value);
+                    if (sectionError) setSectionError(null);
+                  }}
+                  spellCheck={false}
+                  autoFocus
+                  aria-label={`Edit section ${s.title}`}
+                />
+                {sectionError && (
+                  <div className="preview-edit-error" role="alert">
+                    {sectionError}
+                  </div>
+                )}
+                <div className="screening-section-edit-actions">
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={cancelSectionEdit}
+                    disabled={sectionSaving}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => void saveSectionEdit()}
+                    disabled={sectionSaving}
+                  >
+                    {sectionSaving ? 'Saving…' : 'Save'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <ScreeningMarkdown content={s.body} />
+            )}
+          </section>
+        );
+      })}
 
       {reviewOpen && reviewNode && (
         <section

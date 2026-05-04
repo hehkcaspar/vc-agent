@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback, DragEvent, ReactNode } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Sparkles, Loader2, Copy, Maximize2, X, ChevronDown, ChevronRight, MoreVertical, Folder, Check, Clock, AlertTriangle } from 'lucide-react';
+import { Plus, Sparkles, Loader2, Copy, Maximize2, X, ChevronDown, ChevronRight, MoreVertical, Folder, Check, Clock, AlertTriangle, Pencil } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { Entity, WorkspaceTreeNode, DeliverableCardPayload, InboxProcessJobStatus, ExtractionProgress, DealStage } from '../types';
 import { useEntity, useFunds, useWorkspaceTree } from '../hooks/useEntities';
@@ -1506,6 +1506,21 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
   const [modalContent, setModalContent] = useState<string | null>(null);
   const [modalVersionLoading, setModalVersionLoading] = useState(false);
 
+  // Inline editor (Surface 1) — Edit button on the popup swaps the body to
+  // a textarea for `.md` / `.json` / `.txt` / `.csv`. Save calls PUT
+  // /file/{id}/content; the backend auto-flips origin_type → "user" so
+  // future agent runs bounce off _check_provenance and don't overwrite.
+  const [editing, setEditing] = useState(false);
+  const [editedText, setEditedText] = useState('');
+  const [editError, setEditError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  // Bump on successful save → triggers the content+version refetch effects
+  // below so the popup shows the new v(N+1) and the just-snapshotted v(N).
+  const [refetchKey, setRefetchKey] = useState(0);
+  // The file's current checksum, captured when content first loads —
+  // serves as the optimistic-concurrency token on save.
+  const [savedChecksum, setSavedChecksum] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     setIsLoading(true);
@@ -1563,8 +1578,28 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
         revokeBlobObjectUrl(content);
       }
     };
+    // refetchKey bumps after a successful inline-editor save so this
+    // effect re-runs and shows the freshly-saved bytes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityId, node.id]);
+  }, [entityId, node.id, refetchKey]);
+
+  // Capture the current checksum on each fresh content load — needed for
+  // the editor's expected_checksum optimistic-concurrency token.
+  useEffect(() => {
+    if (isLoading || !node.id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const meta = await api.workspace.getNode(entityId, node.id);
+        if (!cancelled) setSavedChecksum(meta?.checksum ?? null);
+      } catch {
+        if (!cancelled) setSavedChecksum(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entityId, node.id, refetchKey, isLoading]);
 
   // Render pptx when buffer is ready
   useEffect(() => {
@@ -1673,6 +1708,82 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
     };
   }, [expanded, selectedVersion, previewType, entityId, node.id, (node.version ?? 1)]);
 
+  // Inline editor — gating + Save handler (Surface 1).
+  //
+  // The Edit button shows for text-shaped files (markdown, json, txt,
+  // csv) only, and only when the user is viewing the CURRENT version
+  // (editing a historical version is meaningless — the user would just
+  // overwrite the live file). All non-text types (image / pdf / xlsx /
+  // docx / pptx) hide the affordance entirely; backend defends with 415.
+  const fileExt = (() => {
+    const i = node.name.lastIndexOf('.');
+    return i >= 0 ? node.name.slice(i).toLowerCase() : '';
+  })();
+  const isEditableText =
+    (previewType === 'markdown' || previewType === 'text') &&
+    !isLoading &&
+    ['.md', '.markdown', '.json', '.txt', '.csv'].includes(fileExt);
+  const isJsonFile = fileExt === '.json';
+  const viewingCurrent =
+    selectedVersion == null || selectedVersion === (node.version ?? 1);
+  const canEdit = isEditableText && viewingCurrent;
+
+  const startEditing = () => {
+    setEditedText(content ?? '');
+    setEditError(null);
+    setEditing(true);
+  };
+  const cancelEditing = () => {
+    setEditing(false);
+    setEditError(null);
+    setEditedText('');
+  };
+  const saveEdit = async () => {
+    if (saving) return;
+    setEditError(null);
+    if (editedText.trim() === '') {
+      setEditError('File would be empty. Use Cancel to discard your changes instead.');
+      return;
+    }
+    if (isJsonFile) {
+      try {
+        JSON.parse(editedText);
+      } catch (e) {
+        setEditError(
+          `Invalid JSON: ${e instanceof Error ? e.message : String(e)}. Fix and try again.`,
+        );
+        return;
+      }
+    }
+    setSaving(true);
+    try {
+      await api.workspace.updateFileContent(
+        entityId,
+        node.id,
+        editedText,
+        savedChecksum ?? undefined,
+      );
+      showToast(
+        'Saved. This file is now user-managed and protected from future agent runs.',
+        'success',
+      );
+      setEditing(false);
+      setEditError(null);
+      setEditedText('');
+      // Drop the cached version list so the next popup open picks up the
+      // newly-snapshotted prior version.
+      setVersions(null);
+      setSelectedVersion(null);
+      setModalContent(null);
+      setRefetchKey((k) => k + 1);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setEditError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleDownload = async () => {
     try {
       const response = await api.workspace.downloadFile(entityId, node.id);
@@ -1694,6 +1805,28 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
     if (isLoading) return <div className="preview-loading">Loading...</div>;
     if (variant === 'modal' && modalVersionLoading) {
       return <div className="preview-loading">Loading version…</div>;
+    }
+    // Editor body — replaces both markdown/text view in the modal only
+    // (the inline panel always shows the rendered view).
+    if (variant === 'modal' && editing && isEditableText) {
+      return (
+        <div className="preview-edit-wrap">
+          <textarea
+            className="preview-edit-textarea"
+            value={editedText}
+            onChange={(e) => {
+              setEditedText(e.target.value);
+              if (editError) setEditError(null);
+            }}
+            spellCheck={false}
+            autoFocus
+            aria-label={`Edit ${node.name}`}
+          />
+          {editError && (
+            <div className="preview-edit-error" role="alert">{editError}</div>
+          )}
+        </div>
+      );
     }
     const displayContent =
       variant === 'modal' && modalContent !== null ? modalContent : content;
@@ -1769,25 +1902,62 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
                   )}
               </div>
               <div className="preview-modal-actions">
-                {(previewType === 'text' || previewType === 'markdown') && (
-                  <button
-                    type="button"
-                    className="preview-modal-icon-btn"
-                    title="Copy to clipboard"
-                    aria-label="Copy to clipboard"
-                    onClick={async () => {
-                      const text =
-                        (modalContent !== null ? modalContent : content) ?? '';
-                      try {
-                        await navigator.clipboard.writeText(text);
-                        showToast('Copied', 'success');
-                      } catch {
-                        showToast('Copy failed', 'error');
-                      }
-                    }}
-                  >
-                    <Copy size={16} aria-hidden />
-                  </button>
+                {editing ? (
+                  // While editing: replace the Copy + version-picker
+                  // surface with Save / Cancel so the user can't
+                  // version-switch mid-edit.
+                  <>
+                    <button
+                      type="button"
+                      className="btn-secondary preview-modal-action-btn"
+                      onClick={cancelEditing}
+                      disabled={saving}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-primary preview-modal-action-btn"
+                      onClick={() => void saveEdit()}
+                      disabled={saving}
+                    >
+                      {saving ? 'Saving…' : 'Save'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    {canEdit && (
+                      <button
+                        type="button"
+                        className="preview-modal-icon-btn"
+                        title="Edit"
+                        aria-label="Edit"
+                        onClick={startEditing}
+                      >
+                        <Pencil size={16} aria-hidden />
+                      </button>
+                    )}
+                    {(previewType === 'text' || previewType === 'markdown') && (
+                      <button
+                        type="button"
+                        className="preview-modal-icon-btn"
+                        title="Copy to clipboard"
+                        aria-label="Copy to clipboard"
+                        onClick={async () => {
+                          const text =
+                            (modalContent !== null ? modalContent : content) ?? '';
+                          try {
+                            await navigator.clipboard.writeText(text);
+                            showToast('Copied', 'success');
+                          } catch {
+                            showToast('Copy failed', 'error');
+                          }
+                        }}
+                      >
+                        <Copy size={16} aria-hidden />
+                      </button>
+                    )}
+                  </>
                 )}
                 <button
                   type="button"
