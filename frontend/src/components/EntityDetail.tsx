@@ -1767,6 +1767,13 @@ function FilePreview({ entityId, node }: { entityId: string; node: WorkspaceTree
         'Saved. This file is now user-managed and protected from future agent runs.',
         'success',
       );
+      // Update local state with the bytes we just sent so the rendered
+      // view reflects the edit immediately — without this, the
+      // post-save refetch can race the browser cache and hand back
+      // the pre-save body, making the user think the edit didn't take.
+      // (downloadFile is also now ``cache: 'no-store'``, but the
+      // direct local update is the belt-and-braces fix.)
+      setContent(editedText);
       setEditing(false);
       setEditError(null);
       setEditedText('');

@@ -104,12 +104,27 @@ export const api = {
       fetchJson<WorkspaceNode[]>(
         `/entities/${entityId}/workspace/search?q=${encodeURIComponent(query)}`,
       ),
+    // ``cache: 'no-store'`` so post-edit refetches actually see the new
+    // bytes. The default fetch path can serve a cached body on an
+    // unchanged URL — after the inline editor (Surface 1 / Surface 2)
+    // saves, the URL hasn't changed (entity_id + node_id stay the
+    // same; only the file's bytes + version on disk did), so without
+    // the no-store hint the browser hands back the pre-save body and
+    // the user thinks their edit didn't take.
     downloadFile: (entityId: string, nodeId: string) =>
-      fetch(apiUrl(`/entities/${entityId}/workspace/file/${nodeId}`)),
+      fetch(apiUrl(`/entities/${entityId}/workspace/file/${nodeId}`), {
+        cache: 'no-store',
+      }),
     downloadFileVersion: (entityId: string, nodeId: string, version: number) =>
-      fetch(apiUrl(`/entities/${entityId}/workspace/file/${nodeId}/versions/${version}`)),
+      fetch(
+        apiUrl(`/entities/${entityId}/workspace/file/${nodeId}/versions/${version}`),
+        { cache: 'no-store' },
+      ),
     downloadFileByPath: (entityId: string, path: string) =>
-      fetch(apiUrl(`/entities/${entityId}/workspace/file?path=${encodeURIComponent(path)}`)),
+      fetch(
+        apiUrl(`/entities/${entityId}/workspace/file?path=${encodeURIComponent(path)}`),
+        { cache: 'no-store' },
+      ),
     // Uploads route through the signed-URL flow in services/upload.ts
     // so the browser can send bytes directly to GCS on prod (bypassing
     // Cloud Run's 32 MB request-body ceiling) while local dev falls

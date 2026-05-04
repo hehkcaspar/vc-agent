@@ -346,7 +346,15 @@ export function EntityInitialScreeningTab({
       );
       setEditingSectionIdx(null);
       setSectionDraft('');
-      // Refetch the file content + bump the tree so the version bumps.
+      // Update local state with the bytes we just sent — no need to
+      // wait for the refetch round-trip. Pre-2026-05-04 we relied on
+      // setRecomposeKey + tree refetch, which (a) raced the SWR mutate
+      // and (b) sometimes hit a cached browser response, so the user
+      // saw their edit "disappear" until reload. Now we render the
+      // new content immediately and use the refetch only to pick up
+      // the bumped version metadata + side-channel updates.
+      setMdContent(reassembled);
+      setMdUpdatedAt(new Date().toISOString());
       setRecomposeKey((k) => k + 1);
       onTreeChanged?.();
     } catch (e) {
