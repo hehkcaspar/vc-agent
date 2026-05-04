@@ -203,6 +203,30 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
       }),
+    // Inline editor (Surface 1: FilePreview, Surface 2: IS section edit).
+    // PUT replaces the file's full text content; backend auto-flips
+    // origin_type → "user" so subsequent agent runs bounce off the
+    // provenance check instead of overwriting the user's edits.
+    // ``expectedChecksum`` is the optimistic-concurrency token — pass
+    // ``node.checksum`` as you read it; the server returns 409 if
+    // someone else saved between your read and write.
+    updateFileContent: (
+      entityId: string,
+      nodeId: string,
+      content: string,
+      expectedChecksum?: string | null,
+    ) =>
+      fetchJson<WorkspaceNode>(
+        `/entities/${entityId}/workspace/file/${nodeId}/content`,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content,
+            expected_checksum: expectedChecksum ?? null,
+          }),
+        },
+      ),
   },
 
   // Ingestion

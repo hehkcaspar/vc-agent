@@ -230,6 +230,11 @@ def test_initial_screening_tab(page: Page, results: dict) -> None:
                 )[:80]
             else:
                 results[f"recompose_button_{label}"] = "missing"
+            # 2026-05-03 inline editor — Surface 2 per-section Edit
+            section_edit_btns = page.locator(
+                '.screening-section-header button:has-text("Edit")'
+            )
+            results["is_section_edit_buttons"] = section_edit_btns.count()
             return
     results["is_tab"] = "no-IS-tab-visible (no memo for entity)"
 

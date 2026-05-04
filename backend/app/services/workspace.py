@@ -325,16 +325,26 @@ class WorkspaceService:
         return parent_id
 
     def _check_provenance(self, node: WorkspaceNode, actor: Actor, operation: str):
-        """Raise ProtectedFileError if agent tries to mutate user-uploaded content."""
+        """Raise ProtectedFileError if agent tries to mutate content the user
+        owns (uploaded, ingested, or manually edited via the inline editor).
+
+        ``"user"`` was added 2026-05-03 to support the inline `.md` / `.json`
+        editor: when a user manually edits an agent-managed deliverable
+        (e.g., the IS memo), the route flips ``origin_type`` to ``"user"``
+        so subsequent agent runs (composer rerun, post-process, etc.)
+        bounce off via this check instead of silently overwriting the
+        user's edits.
+        """
         if actor.type != "agent":
             return
-        protected_origins = {"upload", "ingest"}
+        protected_origins = {"upload", "ingest", "user"}
         if operation in ("overwrite", "delete"):
             if node.origin_type in protected_origins:
                 raise ProtectedFileError(
-                    f"Cannot {operation} user-uploaded file '{node.path}'. "
-                    f"Create a derivative (e.g., '{_suggest_derivative_path(node.path)}') "
-                    f"or ask the user for explicit permission."
+                    f"Cannot {operation} user-managed file '{node.path}' "
+                    f"(origin_type={node.origin_type}). Create a derivative "
+                    f"(e.g., '{_suggest_derivative_path(node.path)}') or ask "
+                    f"the user for explicit permission."
                 )
         # shared files (WORKSPACE_NOTES.md) are writable by agents
 
@@ -403,6 +413,10 @@ class WorkspaceService:
             node.updated_at = utc_now()
             if mime_type:
                 node.mime_type = mime_type
+            # Mirror of the async `write_file`: allow origin_type flip on
+            # overwrite (used by the inline editor's auto-flip path).
+            if origin_type and node.origin_type != origin_type:
+                node.origin_type = origin_type
             if metadata:
                 existing_meta = _parse_metadata(node.metadata_json)
                 existing_meta.update(metadata)
@@ -1239,6 +1253,15 @@ class WorkspaceService:
             node.updated_at = utc_now()
             if mime_type:
                 node.mime_type = mime_type
+            # Allow callers to flip provenance on overwrite — used by the
+            # inline `.md` / `.json` editor route to mark agent-managed
+            # files as ``"user"`` so subsequent agent runs bounce off
+            # ``_check_provenance``. Pre-2026-05-03 the origin_type
+            # parameter was wired into the CREATE path only; overwrite
+            # silently ignored it, which made the editor's auto-flip
+            # symbolic.
+            if origin_type and node.origin_type != origin_type:
+                node.origin_type = origin_type
             if metadata:
                 existing_meta = _parse_metadata(node.metadata_json)
                 existing_meta.update(metadata)
