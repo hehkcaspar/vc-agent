@@ -125,36 +125,22 @@ Strict reading of the TOS says "must be displayed". Pragmatic reading: as long a
 
 ---
 
-## Inline markdown editor for IS / Risk Analysis memos
+## ~~Inline markdown editor for IS / Risk Analysis memos~~ — ✅ resolved 2026-05-03
 
-**Status:** not started · **Priority:** medium · **Filed:** 2026-05-01
+User chose option (a) auto-flip-origin. Shipped:
+- Backend: `PUT /entities/{eid}/workspace/file/{nid}/content` (`routers/workspace.py`) using `Actor(type="user", ref="inline-editor")` + `origin_type="user"`. Editable extensions: `.md` / `.markdown` / `.json` / `.txt` / `.csv` (415 on others). JSON parseability validated server-side with line/column on error. `_check_provenance` extended to add `"user"` to protected origins so subsequent agent runs raise `ProtectedFileError` instead of clobbering. `write_file` / `write_file_sync` overwrite paths now honor the `origin_type` kwarg (was previously CREATE-only — the protection was symbolic until this fix).
+- Frontend Surface 1: `FilePreview` Edit button on text-shaped current versions only.
+- Frontend Surface 2: `EntityInitialScreeningTab` per-section Edit/Save/Cancel with lossless prologue-preserving parser + reassembly.
+- Versioning: every save creates a `.versions/{nid}/v{N}_*` snapshot via existing `write_file` path — visible immediately in the version-picker.
+- Stale-after-save fix: `cache: 'no-store'` on download fetches + immediate `setContent` / `setMdContent` on save (don't wait for refetch).
+- Tests: `backend/tests/test_workspace_inline_editor.py` (12 tests covering provenance matrix + editable-extensions allow-list).
 
-### Problem
-Users want to hand-edit generated `.md` deliverables (`Deliverables/Memos/initial_screening.md`, `..._v2.md`, `Deliverables/Reports/risk_analyze.md`) directly in the UI — typically to fix LLM mistakes that aren't structural (a wrong number the model fabricated, a sentence that reads awkwardly) and that the upstream "fix the facts and recompose" flow can't address cheaply.
+Commits: `83ed01a` (backend route + provenance + Surface 1 + Surface 2), `f501573` (cache-bust + immediate-update fix for "Jie test Zhao" stale-render bug).
 
-The CS3 work shipped 2026-05-01 deliberately did NOT build this:
-- We extended `EntityEditModal` with all canonical metadata fields (Identity & deal, Founders, Key team, team_size).
-- We added a **Recompose** button that re-runs only the composer phase against the existing section JSONs (~10 s, one Gemini call).
-- Together those serve "memo is wrong because facts are wrong" — fix facts, recompose, done.
-
-But "memo is wrong because the LLM phrased something poorly / fabricated a number not in the JSONs" is a real residual case. The user still wants a markdown editor for those.
-
-### Open design question
-Need to decide how this composes with the agent-rerun lifecycle. Three options:
-- (a) Auto-flip `origin_type` to `user` on first manual edit (silent) — protects the edit but hides the divergence from the section JSONs forever.
-- (b) "Fork" semantics — manual edit creates a `*_user_edited.md` sibling and the original stays agent-managed; UI shows both with a toggle.
-- (c) Section-JSON editor instead — let users edit the structured JSONs, then Recompose. More aligned with Facts-vs-Opinions but more clicks.
-
-User's explicit request (2026-05-01) is option (a) or (b) — i.e., a real `.md` editor — so plan for that. Option (c) is a non-substitute for the residual case.
-
-### Fix sketch
-- Backend: new `PUT /entities/{entity_id}/workspace/file/{node_id}/content` accepting `{ content: str, expected_version_id: str | null }`. Reuses existing `WorkspaceService.write_file` with `origin_type="user"`. Rejects 415 for binary MIME types.
-- Frontend `FilePreview` (in `EntityDetail.tsx`): Edit button (lucide `Pencil`) for markdown / json / txt. Swaps `MarkdownView` → `<textarea>`. Save → PUT → refetch.
-- Frontend `EntityInitialScreeningTab`: same Edit button next to Recompose / Review notes / Source.
-- Decide (a)/(b) before implementation. Surface the implication in the Save toast: "Auto-promoted to user-managed (next agent run will not overwrite)" or "Saved as fork: <path>".
-
-### Effort
-~1 day for the editor itself. The hard part is the (a)/(b) UX call — make sure the user has signed off before implementing, since reverting either choice means breaking saved edits.
+Out-of-scope for v1 (not filed unless user pain surfaces):
+- "Restore from agent" affordance (path today: delete the .md, rerun the preset).
+- Version-picker actor / `origin_type` badge (manifest schema would need extending).
+- Diff view of textarea vs disk before save.
 
 ---
 
