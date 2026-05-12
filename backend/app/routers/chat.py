@@ -75,7 +75,12 @@ from app.services.metadata_extraction import (
     merge_entity_metadata,
     validate_entity_metadata,
 )
-from app.services.job_tasks import cancel_tracked_task, launch_tracked_task
+from app.services.job_tasks import (
+    TERMINAL_JOB_STATUSES,
+    cancel_tracked_task,
+    launch_tracked_task,
+    mark_job_cancelled,
+)
 from app.services.model_profiles import normalize_profile_id
 from app.services.preset_registry import (
     get_preset,
@@ -310,7 +315,7 @@ async def _job_step_update(job_id: str, step_detail: str) -> None:
             select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
         )
         job = res.scalar_one_or_none()
-        if not job or job.status in ("succeeded", "failed", "cancelled"):
+        if not job or job.status in TERMINAL_JOB_STATUSES:
             return
         job.step_detail = (step_detail or "")[:4000]
         job.updated_at = utc_now()
@@ -447,16 +452,7 @@ async def run_chat_agent_job(job_id: str) -> None:
             }
 
     except asyncio.CancelledError:
-        async with AsyncSessionLocal() as db:
-            res = await db.execute(
-                select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
-            )
-            job = res.scalar_one_or_none()
-            if job and job.status not in ("succeeded", "failed", "cancelled"):
-                job.status = "cancelled"
-                job.step_detail = "Cancelled by user"
-                job.updated_at = utc_now()
-                await db.commit()
+        await mark_job_cancelled(AsyncSessionLocal, ChatCompletionJob, job_id)
         raise
     except (ValueError, Exception) as e:
         fail_trace = {
@@ -470,7 +466,7 @@ async def run_chat_agent_job(job_id: str) -> None:
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
             )
             job = res.scalar_one_or_none()
-            if job and job.status not in ("succeeded", "failed", "cancelled"):
+            if job and job.status not in TERMINAL_JOB_STATUSES:
                 job.status = "failed"
                 job.error_message = str(e)
                 job.tool_trace_json = json.dumps(fail_trace)
@@ -483,7 +479,7 @@ async def run_chat_agent_job(job_id: str) -> None:
             select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
         )
         job = res.scalar_one_or_none()
-        if not job or job.status in ("failed", "succeeded", "cancelled"):
+        if not job or job.status in TERMINAL_JOB_STATUSES:
             return
         sess = await _get_session(db, job.entity_id, job.session_id)
         assistant_msg = ConversationMessage(
@@ -833,7 +829,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
+                if job2 and job2.status not in TERMINAL_JOB_STATUSES:
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -1299,7 +1295,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
+                if job2 and job2.status not in TERMINAL_JOB_STATUSES:
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -1787,7 +1783,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
+                if job2 and job2.status not in TERMINAL_JOB_STATUSES:
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -1895,7 +1891,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
+                if job2 and job2.status not in TERMINAL_JOB_STATUSES:
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -2043,7 +2039,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
             )
             job2 = res2.scalar_one_or_none()
-            if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
+            if job2 and job2.status not in TERMINAL_JOB_STATUSES:
                 job2.assistant_message_id = assistant_msg.id
                 job2.status = "succeeded"
                 job2.step_detail = "Done"
@@ -2060,16 +2056,7 @@ async def run_preset_agent_job(job_id: str) -> None:
             await db.commit()
 
     except asyncio.CancelledError:
-        async with AsyncSessionLocal() as db:
-            res = await db.execute(
-                select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
-            )
-            job = res.scalar_one_or_none()
-            if job and job.status not in ("succeeded", "failed", "cancelled"):
-                job.status = "cancelled"
-                job.step_detail = "Cancelled by user"
-                job.updated_at = utc_now()
-                await db.commit()
+        await mark_job_cancelled(AsyncSessionLocal, ChatCompletionJob, job_id)
         raise
     except Exception as e:
         fail_trace = {
@@ -2083,7 +2070,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
             )
             job = res.scalar_one_or_none()
-            if job and job.status not in ("succeeded", "failed", "cancelled"):
+            if job and job.status not in TERMINAL_JOB_STATUSES:
                 job.status = "failed"
                 job.error_message = str(e)
                 job.tool_trace_json = json.dumps(fail_trace)
@@ -2364,7 +2351,7 @@ async def cancel_chat_message_job(
     job = res.scalar_one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status in ("succeeded", "failed", "cancelled"):
+    if job.status in TERMINAL_JOB_STATUSES:
         return {"ok": True, "cancelled": False}
     job.status = "cancelled"
     job.step_detail = "Cancelled by user"
