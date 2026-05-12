@@ -11,15 +11,30 @@ import asyncio
 import logging
 import uuid as _uuid
 
+from sqlalchemy import update
+
 from app.academic_database import AcademicAsyncSessionLocal
 from app.academic_models import AcademicChatJob, AcademicChatMessage, AcademicChatSession
+from app.services.job_tasks import TERMINAL_JOB_STATUSES, mark_job_cancelled
 
 from .scholar_chat import send_chat_turn
 
 logger = logging.getLogger(__name__)
 
 
-_TERMINAL = ("succeeded", "failed", "cancelled")
+async def _set_job_status_if_not_terminal(db, job_id: str, **values) -> None:
+    """SQL-level guard: only write if status is still non-terminal.
+
+    Race-proof against the cancel endpoint flipping status to ``cancelled``
+    on a separate session: a stale in-memory ``job`` won't clobber it.
+    """
+    await db.execute(
+        update(AcademicChatJob)
+        .where(AcademicChatJob.id == job_id)
+        .where(AcademicChatJob.status.notin_(TERMINAL_JOB_STATUSES))
+        .values(**values)
+    )
+    await db.commit()
 
 
 async def run_chat_job(job_id: str) -> None:
@@ -35,22 +50,19 @@ async def run_chat_job(job_id: str) -> None:
 
             session = await db.get(AcademicChatSession, job.session_id)
             if not session:
-                await db.refresh(job)
-                if job.status not in _TERMINAL:
-                    job.status = "failed"
-                    job.error_message = "session not found"
-                    await db.commit()
+                await _set_job_status_if_not_terminal(
+                    db, job_id, status="failed", error_message="session not found"
+                )
                 return
 
-            user_msg = None
-            if job.user_message_id:
-                user_msg = await db.get(AcademicChatMessage, job.user_message_id)
+            user_msg = (
+                await db.get(AcademicChatMessage, job.user_message_id)
+                if job.user_message_id else None
+            )
             if user_msg is None:
-                await db.refresh(job)
-                if job.status not in _TERMINAL:
-                    job.status = "failed"
-                    job.error_message = "user message not found"
-                    await db.commit()
+                await _set_job_status_if_not_terminal(
+                    db, job_id, status="failed", error_message="user message not found"
+                )
                 return
 
             try:
@@ -61,11 +73,9 @@ async def run_chat_job(job_id: str) -> None:
                 )
             except Exception as e:
                 logger.exception("chat_service: chat turn failed for job %s", job_id)
-                await db.refresh(job)
-                if job.status not in _TERMINAL:
-                    job.status = "failed"
-                    job.error_message = str(e)
-                    await db.commit()
+                await _set_job_status_if_not_terminal(
+                    db, job_id, status="failed", error_message=str(e)
+                )
                 return
 
             assistant_msg = AcademicChatMessage(
@@ -75,24 +85,17 @@ async def run_chat_job(job_id: str) -> None:
                 content=reply or "(no reply)",
             )
             db.add(assistant_msg)
-
             if new_interaction_id:
                 session.last_interaction_id = new_interaction_id
-
             await db.flush()
 
-            await db.refresh(job)
-            if job.status not in _TERMINAL:
-                job.status = "succeeded"
-                job.assistant_message_id = assistant_msg.id
-                job.agent_run_id = new_interaction_id or None
-                job.step_detail = None
-                await db.commit()
+            await _set_job_status_if_not_terminal(
+                db, job_id,
+                status="succeeded",
+                assistant_message_id=assistant_msg.id,
+                agent_run_id=new_interaction_id or None,
+                step_detail=None,
+            )
     except asyncio.CancelledError:
-        async with AcademicAsyncSessionLocal() as db:
-            job = await db.get(AcademicChatJob, job_id)
-            if job and job.status not in _TERMINAL:
-                job.status = "cancelled"
-                job.step_detail = "Cancelled by user"
-                await db.commit()
+        await mark_job_cancelled(AcademicAsyncSessionLocal, AcademicChatJob, job_id)
         raise
