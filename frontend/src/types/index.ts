@@ -390,7 +390,7 @@ export interface ChatMessageResult {
 
 export interface ChatMessageJobStatus {
   job_id: string;
-  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   step_detail?: string | null;
   user_message_id: string;
   assistant_message?: ChatMessage | null;

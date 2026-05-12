@@ -324,6 +324,11 @@ export function EntityConversation({
           if (sessionIdRef.current === agentJob.sessionId) {
             setError(st.error_message || 'Agent run failed');
           }
+        } else if (st.status === 'cancelled') {
+          setAgentJob((curr) =>
+            curr && curr.jobId === agentJob.jobId ? null : curr
+          );
+          setAgentStatus('');
         }
       } catch (e) {
         if (cancelled) return;

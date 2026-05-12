@@ -175,6 +175,9 @@ export function ScholarConversation({ scholarId }: ScholarConversationProps) {
           if (sessionIdRef.current === agentJob.sessionId) {
             setError(st.error_message || 'Agent run failed');
           }
+        } else if (st.status === 'cancelled') {
+          setAgentJob((c) => (c?.jobId === agentJob.jobId ? null : c));
+          setAgentStatus('');
         }
       } catch (e) {
         if (!cancelled) {
