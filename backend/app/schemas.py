@@ -380,7 +380,7 @@ class ChatMessageJobAccepted(BaseModel):
 
 class ChatMessageJobStatus(BaseModel):
     job_id: str
-    status: Literal["pending", "running", "succeeded", "failed"]
+    status: Literal["pending", "running", "succeeded", "failed", "cancelled"]
     step_detail: Optional[str] = None
     user_message_id: str
     assistant_message: Optional[ChatMessageResponse] = None

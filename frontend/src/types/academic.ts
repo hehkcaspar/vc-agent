@@ -224,7 +224,7 @@ export interface AcademicChatJobAccepted {
 
 export interface AcademicChatJobStatus {
   job_id: string;
-  status: 'pending' | 'running' | 'succeeded' | 'failed';
+  status: 'pending' | 'running' | 'succeeded' | 'failed' | 'cancelled';
   step_detail?: string | null;
   user_message_id?: string | null;
   assistant_message?: AcademicChatMessage | null;
