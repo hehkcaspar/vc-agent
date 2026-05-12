@@ -369,6 +369,21 @@ export const api = {
       fetchJson<ChatMessageJobStatus>(
         `/entities/${entityId}/chat/sessions/${sessionId}/jobs/${jobId}`,
       ),
+    cancelMessageJob: async (entityId: string, sessionId: string, jobId: string) => {
+      const response = await fetch(
+        apiUrl(
+          `/entities/${entityId}/chat/sessions/${sessionId}/jobs/${jobId}/cancel`,
+        ),
+        { method: 'POST', headers: { Accept: 'application/json' } },
+      );
+      if (!response.ok) {
+        throw new Error(response.statusText || `HTTP ${response.status}`);
+      }
+      return (await response.json().catch(() => ({}))) as {
+        ok: boolean;
+        cancelled: boolean;
+      };
+    },
     runPreset: async (
       entityId: string,
       presetId: string,

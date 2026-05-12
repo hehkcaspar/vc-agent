@@ -4,7 +4,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { academicApi } from '../../services/academicApi';
@@ -220,6 +220,23 @@ export function ScholarConversation({ scholarId }: ScholarConversationProps) {
     }
   }, [input, sessionId, scholarId, busy, agentActiveHere]);
 
+  /* ── Stop in-flight job ────────────────────────────── */
+  const handleStop = useCallback(async () => {
+    const job = agentJob;
+    setAgentJob(null);
+    setAgentStatus('');
+    setBusy(false);
+    if (!job) return;
+    try {
+      await academicApi.scholars.chat.cancelJob(scholarId, job.sessionId, job.jobId);
+    } catch (e) {
+      setError(
+        `Could not confirm stop with server (${e instanceof Error ? e.message : String(e)}). ` +
+          'Local state has been reset; the run may finish in the background.'
+      );
+    }
+  }, [agentJob, scholarId]);
+
   /* ── Session management ────────────────────────────── */
   const handleNewSession = useCallback(async () => {
     try {
@@ -369,13 +386,24 @@ export function ScholarConversation({ scholarId }: ScholarConversationProps) {
           }}
           disabled={busy || agentActiveHere}
         />
-        <button
-          className="entity-conversation-send"
-          onClick={() => void send()}
-          disabled={busy || agentActiveHere || !input.trim()}
-        >
-          Send
-        </button>
+        {busy || agentActiveHere ? (
+          <button
+            className="entity-conversation-send entity-conversation-send--stop"
+            onClick={() => void handleStop()}
+            aria-label="Stop run"
+            title="Stop"
+          >
+            <Square size={16} strokeWidth={2} fill="currentColor" aria-hidden />
+          </button>
+        ) : (
+          <button
+            className="entity-conversation-send"
+            onClick={() => void send()}
+            disabled={!input.trim()}
+          >
+            Send
+          </button>
+        )}
       </div>
     </div>
   );

@@ -170,7 +170,7 @@ async def lifespan(app: FastAPI):
     try:
         from sqlalchemy import update
         from app.academic_database import AcademicAsyncSessionLocal
-        from app.academic_models import Scholar
+        from app.academic_models import AcademicChatJob, Scholar
         async with AcademicAsyncSessionLocal() as db:
             result = await db.execute(
                 update(Scholar)
@@ -180,8 +180,33 @@ async def lifespan(app: FastAPI):
             if result.rowcount:
                 await db.commit()
                 logger.info("Reset %d stuck 'evaluating' scholars to 'active'", result.rowcount)
+            chat_reset = await db.execute(
+                update(AcademicChatJob)
+                .where(AcademicChatJob.status.in_(["pending", "running"]))
+                .values(status="cancelled", step_detail="Cancelled at startup (server restart)")
+            )
+            if chat_reset.rowcount:
+                await db.commit()
+                logger.info("Reset %d stuck academic chat jobs to 'cancelled'", chat_reset.rowcount)
     except Exception:
         logger.warning("Could not reset stuck scholar statuses", exc_info=True)
+
+    # Reset stuck portfolio chat/agent/preset jobs — same rationale as above
+    try:
+        from sqlalchemy import update
+        from app.database import AsyncSessionLocal
+        from app.models import ChatCompletionJob
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                update(ChatCompletionJob)
+                .where(ChatCompletionJob.status.in_(["pending", "running"]))
+                .values(status="cancelled", step_detail="Cancelled at startup (server restart)")
+            )
+            if result.rowcount:
+                await db.commit()
+                logger.info("Reset %d stuck portfolio chat jobs to 'cancelled'", result.rowcount)
+    except Exception:
+        logger.warning("Could not reset stuck portfolio chat jobs", exc_info=True)
 
     # Trim the evaluation log if it has grown past its bounds — cheap
     # startup check, no effect during steady-state operation.

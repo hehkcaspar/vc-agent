@@ -2877,6 +2877,15 @@
   line-height: 1;
 }
 
+.entity-conversation-send--stop {
+  background: var(--color-error);
+  color: #fff;
+}
+
+.entity-conversation-send--stop:hover {
+  filter: brightness(1.08);
+}
+
 .entity-conversation-send:disabled {
   opacity: 0.45;
   cursor: not-allowed;

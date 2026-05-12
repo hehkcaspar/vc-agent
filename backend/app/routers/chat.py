@@ -75,6 +75,7 @@ from app.services.metadata_extraction import (
     merge_entity_metadata,
     validate_entity_metadata,
 )
+from app.services.job_tasks import cancel_tracked_task, launch_tracked_task
 from app.services.model_profiles import normalize_profile_id
 from app.services.preset_registry import (
     get_preset,
@@ -309,7 +310,7 @@ async def _job_step_update(job_id: str, step_detail: str) -> None:
             select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
         )
         job = res.scalar_one_or_none()
-        if not job or job.status in ("succeeded", "failed"):
+        if not job or job.status in ("succeeded", "failed", "cancelled"):
             return
         job.step_detail = (step_detail or "")[:4000]
         job.updated_at = utc_now()
@@ -445,6 +446,18 @@ async def run_chat_agent_job(job_id: str) -> None:
                 "recursion_limit": settings.CHAT_AGENT_RECURSION_LIMIT,
             }
 
+    except asyncio.CancelledError:
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
+            )
+            job = res.scalar_one_or_none()
+            if job and job.status not in ("succeeded", "failed", "cancelled"):
+                job.status = "cancelled"
+                job.step_detail = "Cancelled by user"
+                job.updated_at = utc_now()
+                await db.commit()
+        raise
     except (ValueError, Exception) as e:
         fail_trace = {
             "error_type": type(e).__name__,
@@ -457,7 +470,7 @@ async def run_chat_agent_job(job_id: str) -> None:
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
             )
             job = res.scalar_one_or_none()
-            if job and job.status not in ("succeeded", "failed"):
+            if job and job.status not in ("succeeded", "failed", "cancelled"):
                 job.status = "failed"
                 job.error_message = str(e)
                 job.tool_trace_json = json.dumps(fail_trace)
@@ -470,7 +483,7 @@ async def run_chat_agent_job(job_id: str) -> None:
             select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
         )
         job = res.scalar_one_or_none()
-        if not job or job.status in ("failed", "succeeded"):
+        if not job or job.status in ("failed", "succeeded", "cancelled"):
             return
         sess = await _get_session(db, job.entity_id, job.session_id)
         assistant_msg = ConversationMessage(
@@ -814,7 +827,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed"):
+                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -1280,7 +1293,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed"):
+                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -1768,7 +1781,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed"):
+                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -1876,7 +1889,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                     )
                 )
                 job2 = res2.scalar_one_or_none()
-                if job2 and job2.status not in ("succeeded", "failed"):
+                if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
                     job2.assistant_message_id = assistant_msg.id
                     job2.status = "succeeded"
                     job2.step_detail = "Done"
@@ -2024,7 +2037,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
             )
             job2 = res2.scalar_one_or_none()
-            if job2 and job2.status not in ("succeeded", "failed"):
+            if job2 and job2.status not in ("succeeded", "failed", "cancelled"):
                 job2.assistant_message_id = assistant_msg.id
                 job2.status = "succeeded"
                 job2.step_detail = "Done"
@@ -2040,6 +2053,18 @@ async def run_preset_agent_job(job_id: str) -> None:
             sess.updated_at = utc_now()
             await db.commit()
 
+    except asyncio.CancelledError:
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
+            )
+            job = res.scalar_one_or_none()
+            if job and job.status not in ("succeeded", "failed", "cancelled"):
+                job.status = "cancelled"
+                job.step_detail = "Cancelled by user"
+                job.updated_at = utc_now()
+                await db.commit()
+        raise
     except Exception as e:
         fail_trace = {
             "error_type": type(e).__name__,
@@ -2052,7 +2077,7 @@ async def run_preset_agent_job(job_id: str) -> None:
                 select(ChatCompletionJob).where(ChatCompletionJob.id == job_id)
             )
             job = res.scalar_one_or_none()
-            if job and job.status not in ("succeeded", "failed"):
+            if job and job.status not in ("succeeded", "failed", "cancelled"):
                 job.status = "failed"
                 job.error_message = str(e)
                 job.tool_trace_json = json.dumps(fail_trace)
@@ -2306,6 +2331,44 @@ async def get_chat_message_job(
 
 
 @router.post(
+    "/entities/{entity_id}/chat/sessions/{session_id}/jobs/{job_id}/cancel",
+)
+async def cancel_chat_message_job(
+    entity_id: str,
+    session_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancel an in-flight chat/agent/preset run.
+
+    Flips the DB row to ``cancelled`` first (so any racing terminal write
+    from the runner loses to us), then best-effort cancels the asyncio
+    task. Idempotent: calling on an already-terminal job returns
+    ``cancelled: False`` without error.
+    """
+    await _get_entity(db, entity_id)
+    await _get_session(db, entity_id, session_id)
+    res = await db.execute(
+        select(ChatCompletionJob).where(
+            ChatCompletionJob.id == job_id,
+            ChatCompletionJob.session_id == session_id,
+            ChatCompletionJob.entity_id == entity_id,
+        )
+    )
+    job = res.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status in ("succeeded", "failed", "cancelled"):
+        return {"ok": True, "cancelled": False}
+    job.status = "cancelled"
+    job.step_detail = "Cancelled by user"
+    job.updated_at = utc_now()
+    await db.commit()
+    await cancel_tracked_task(f"chat:{job_id}")
+    return {"ok": True, "cancelled": True}
+
+
+@router.post(
     "/entities/{entity_id}/chat/sessions/{session_id}/messages",
     response_model=None,
     responses={
@@ -2414,7 +2477,7 @@ async def post_chat_message(
         session.updated_at = utc_now()
         await db.commit()
         await db.refresh(user_msg)
-        background_tasks.add_task(run_chat_agent_job, job.id)
+        launch_tracked_task(f"chat:{job.id}", lambda: run_chat_agent_job(job.id))
         return JSONResponse(
             status_code=202,
             content=ChatMessageJobAccepted(
@@ -2679,7 +2742,7 @@ async def run_chat_preset(
         await db.commit()
         await db.refresh(user_msg)
 
-        background_tasks.add_task(run_preset_agent_job, job.id)
+        launch_tracked_task(f"chat:{job.id}", lambda: run_preset_agent_job(job.id))
         return JSONResponse(
             status_code=202,
             content=PresetRunJobAccepted(

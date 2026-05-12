@@ -204,6 +204,19 @@ export const academicApi = {
         fetchJson<AcademicChatJobStatus>(
           `/academic/scholars/${scholarId}/chat/sessions/${sessionId}/jobs/${jobId}`,
         ),
+
+      cancelJob: async (scholarId: string, sessionId: string, jobId: string) => {
+        const res = await fetch(
+          url(
+            `/academic/scholars/${scholarId}/chat/sessions/${sessionId}/jobs/${jobId}/cancel`,
+          ),
+          { method: 'POST', headers: { Accept: 'application/json' } },
+        );
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+        return (await res.json()) as { ok: boolean; cancelled: boolean };
+      },
     },
   },
 

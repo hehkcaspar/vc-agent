@@ -64,6 +64,7 @@ from app.services.academic.evaluation_service import (
 )
 from app.services.academic.chat_service import run_chat_job
 from app.services.academic.digest_service import DIGESTS_DIR, run_digest_generation
+from app.services.job_tasks import cancel_tracked_task, launch_tracked_task
 
 
 logger = logging.getLogger(__name__)
@@ -893,7 +894,7 @@ async def post_chat_message(
     await db.commit()
     await db.refresh(user_msg)
 
-    background_tasks.add_task(run_chat_job, job.id)
+    launch_tracked_task(f"academic_chat:{job.id}", lambda: run_chat_job(job.id))
     return JSONResponse(
         status_code=202,
         content=AcademicChatJobAccepted(
@@ -943,6 +944,40 @@ async def get_chat_job(
         assistant_message=assistant,
         error_message=job.error_message,
     )
+
+
+@router.post(
+    "/scholars/{scholar_id}/chat/sessions/{session_id}/jobs/{job_id}/cancel",
+)
+async def cancel_chat_job(
+    scholar_id: str,
+    session_id: str,
+    job_id: str,
+    db: AsyncSession = Depends(get_academic_db),
+):
+    """Cancel an in-flight scholar-chat run.
+
+    Flips the DB row to ``cancelled`` first, then best-effort cancels
+    the asyncio task. Idempotent.
+    """
+    await _get_scholar_or_404(db, scholar_id)
+    await _get_chat_session_or_404(db, scholar_id, session_id)
+    result = await db.execute(
+        select(AcademicChatJob).where(
+            AcademicChatJob.id == job_id,
+            AcademicChatJob.session_id == session_id,
+        )
+    )
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(404, "Job not found")
+    if job.status in ("succeeded", "failed", "cancelled"):
+        return {"ok": True, "cancelled": False}
+    job.status = "cancelled"
+    job.step_detail = "Cancelled by user"
+    await db.commit()
+    await cancel_tracked_task(f"academic_chat:{job_id}")
+    return {"ok": True, "cancelled": True}
 
 
 # ═══════════════════════════════════════════════════════════════

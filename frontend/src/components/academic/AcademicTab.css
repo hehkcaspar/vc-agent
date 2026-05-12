@@ -1687,6 +1687,19 @@ a.event-link:hover {
   opacity: 0.9;
 }
 
+.chat-content .entity-conversation-send--stop {
+  background: var(--color-error);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-content .entity-conversation-send--stop:hover {
+  filter: brightness(1.08);
+  opacity: 1;
+}
+
 /* ── View toggle ──────────────────────────────────── */
 
 .view-toggle {
