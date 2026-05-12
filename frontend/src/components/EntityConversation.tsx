@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Plus, Trash2, ArrowUp, ChevronDown, FileText, ArrowUpRight } from 'lucide-react';
+import { Plus, Trash2, ArrowUp, ChevronDown, FileText, ArrowUpRight, Square } from 'lucide-react';
 import { Modal } from './ui/Modal';
 import { useChatModelProfile } from '../context/ChatModelProfileContext';
 import { parseDeliverableCardMessage } from '../lib/chatArtifactCard';
@@ -519,6 +519,25 @@ export function EntityConversation({
     await doSend();
   };
 
+  const handleStop = async () => {
+    const job = agentJob;
+    // Flip local state first so the input unlocks immediately, even if
+    // the network call is slow or fails. The user-msg stays in the
+    // conversation list (no rollback) — they can edit/resend.
+    setAgentJob(null);
+    setAgentStatus('');
+    setBusy(false);
+    if (!job) return;
+    try {
+      await api.chat.cancelMessageJob(entityId, job.sessionId, job.jobId);
+    } catch (e) {
+      setError(
+        `Could not confirm stop with server (${e instanceof Error ? e.message : String(e)}). ` +
+          'Local state has been reset; the run may finish in the background.'
+      );
+    }
+  };
+
   /** Gate model changes: warn when switching away from Gemini with an active chain. */
   const handleModelChange = (next: ChatModelProfileId) => {
     if (next === profileId) return;
@@ -817,17 +836,27 @@ export function EntityConversation({
                 </label>
               </div>
               <div className="entity-conversation-compose-toolbar-right">
-                <button
-                  type="button"
-                  className="entity-conversation-send entity-conversation-send--round"
-                  onClick={() => void handleSend()}
-                  disabled={
-                    busy || !sessionId || !input.trim() || agentActiveHere
-                  }
-                  aria-label="Send message"
-                >
-                  <ArrowUp size={20} strokeWidth={2} aria-hidden />
-                </button>
+                {busy || agentActiveHere ? (
+                  <button
+                    type="button"
+                    className="entity-conversation-send entity-conversation-send--round entity-conversation-send--stop"
+                    onClick={() => void handleStop()}
+                    aria-label="Stop run"
+                    title="Stop"
+                  >
+                    <Square size={16} strokeWidth={2} fill="currentColor" aria-hidden />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="entity-conversation-send entity-conversation-send--round"
+                    onClick={() => void handleSend()}
+                    disabled={!sessionId || !input.trim()}
+                    aria-label="Send message"
+                  >
+                    <ArrowUp size={20} strokeWidth={2} aria-hidden />
+                  </button>
+                )}
               </div>
             </div>
           </div>
