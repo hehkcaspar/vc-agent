@@ -4,6 +4,29 @@ Future-development items that are known but not yet scheduled. Newest first.
 
 ---
 
+## Audit other `Literal[...]` status fields for cancellation-grade extensibility
+
+**Status:** not started · **Priority:** LOW · **Filed:** 2026-05-11
+
+### Problem
+The stop-button rollout (2026-05-11) hit prod with the chat poll endpoint 500'ing because `ChatMessageJobStatus.status` was `Literal["pending","running","succeeded","failed"]` and the runner now writes `"cancelled"`. Pydantic raised on every poll, the frontend's 25-error tolerance kept the UI wedged for ~12 s, then toasted "connection lost." Patched in [HEAD], but two sibling literals carry the same shape and would break the same way the moment we cancel any of those jobs:
+
+- `MetadataPreprocessJobStatus` (`schemas.py:208`)
+- `InboxProcessJobStatus` (`schemas.py:246`)
+
+### Fix sketch
+Either:
+- Mirror the `"cancelled"` extension into both literals proactively (small, cheap), or
+- Convert all four status fields to plain `str` with the values documented in a comment — pyenum-style validation isn't paying for itself here.
+
+### Effort
+~10 min. Not urgent because neither job has a cancel endpoint today.
+
+### Lesson
+When adding a new value to a state machine, grep ALL `Literal[...]` types referencing that state column. Pydantic literals are response-time-validating — even pure additions can break read endpoints on existing rows. Test by manually flipping a row to the new value and hitting the read endpoint, not just by exercising the write path.
+
+---
+
 ## `deploy_cloudrun.sh` should fail-closed on empty `APP_PASSWORD`
 
 **Status:** not started · **Priority:** **HIGH** (security regression risk) · **Filed:** 2026-05-02
