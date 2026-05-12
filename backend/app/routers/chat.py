@@ -494,6 +494,12 @@ async def run_chat_agent_job(job_id: str) -> None:
             model_profile_id=job.model_profile_id,
         )
         db.add(assistant_msg)
+        # Force the INSERT before we set the FK on the job row — Postgres
+        # rejects an UPDATE that references an uncommitted row, and the
+        # default unit-of-work order doesn't reliably interleave INSERT
+        # before UPDATE in this session (works on SQLite which skips FK
+        # enforcement; fails on prod Postgres).
+        await db.flush()
         job.assistant_message_id = assistant_msg.id
         job.status = "succeeded"
         job.step_detail = "Done"
